@@ -35,6 +35,9 @@ public:
         [[nodiscard]] virtual bool client_wants_piece(tr_piece_index_t piece) const = 0;
         [[nodiscard]] virtual bool is_sequential_download() const = 0;
         [[nodiscard]] virtual tr_piece_index_t sequential_download_from_piece() const = 0;
+        [[nodiscard]] virtual tr_sequential_mode_t sequential_download_mode() const = 0;
+        [[nodiscard]] virtual tr_piece_index_t file_index_for_piece(tr_piece_index_t piece) const = 0;
+        [[nodiscard]] virtual tr_piece_index_t file_start_piece(tr_piece_index_t alphabetical_file_index) const = 0;
         [[nodiscard]] virtual size_t count_piece_replication(tr_piece_index_t piece) const = 0;
         [[nodiscard]] virtual tr_block_span_t block_span(tr_piece_index_t piece) const = 0;
         [[nodiscard]] virtual tr_piece_index_t piece_count() const = 0;

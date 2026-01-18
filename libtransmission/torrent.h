@@ -795,6 +795,27 @@ struct tr_torrent
         return sequential_download_from_piece_;
     }
 
+    void set_sequential_download_mode(tr_sequential_mode_t mode) noexcept
+    {
+        if (mode != sequential_download_mode_)
+        {
+            sequential_download_mode_ = mode;
+            recalculate_file_order();
+            set_dirty();
+        }
+    }
+
+    [[nodiscard]] constexpr auto sequential_download_mode() const noexcept
+    {
+        return sequential_download_mode_;
+    }
+
+    void recalculate_file_order();
+
+    [[nodiscard]] tr_piece_index_t file_index_for_piece(tr_piece_index_t piece) const noexcept;
+
+    [[nodiscard]] tr_piece_index_t file_start_piece(tr_piece_index_t alphabetical_file_index) const noexcept;
+
     [[nodiscard]] constexpr bool is_running() const noexcept
     {
         return is_running_;
@@ -1250,6 +1271,9 @@ private:
         completion_.invalidate_size_when_done();
         files_wanted_changed_.emit(this, files, n_files, wanted);
 
+        // Always recalculate file order for alphabetical download ordering
+        recalculate_file_order();
+
         if (!is_bootstrapping)
         {
             set_dirty();
@@ -1441,6 +1465,12 @@ private:
     bool sequential_download_ = false;
 
     tr_piece_index_t sequential_download_from_piece_ = 0;
+
+    tr_sequential_mode_t sequential_download_mode_ = TR_SEQUENTIAL_BY_FILE;
+
+    std::vector<tr_piece_index_t> file_index_by_piece_;
+
+    std::vector<tr_piece_index_t> file_start_piece_for_file_index_;
 
     // start the torrent after all the startup scaffolding is done,
     // e.g. fetching metadata from peers and/or verifying the torrent

@@ -322,42 +322,23 @@ private:
             [block](auto const& c) { return c.block_belongs(block); });
     }
 
-    static constexpr tr_piece_index_t get_salt(
+    static tr_piece_index_t get_salt(
         tr_piece_index_t const piece,
         tr_piece_index_t const n_pieces,
-        tr_piece_index_t const random_salt,
-        bool const is_sequential,
-        tr_piece_index_t const sequential_download_from_piece)
+        tr_piece_index_t const /*random_salt*/,
+        bool const /*is_sequential*/,
+        tr_sequential_mode_t const /*sequential_mode*/,
+        tr_piece_index_t const /*sequential_download_from_piece*/,
+        Mediator const& mediator)
     {
-        if (!is_sequential)
-        {
-            return random_salt;
-        }
-
-        // Download first and last piece first
-        if (piece == 0U)
-        {
-            return 0U;
-        }
-
-        if (piece == n_pieces - 1U)
-        {
-            return 1U;
-        }
-
-        if (sequential_download_from_piece <= 1)
-        {
-            return piece + 1U;
-        }
-
-        // Rotate remaining pieces
-        // 1 2 3 4 5 -> 3 4 5 1 2 if sequential_download_from_piece is 3
-        if (piece < sequential_download_from_piece)
-        {
-            return n_pieces - (sequential_download_from_piece - piece);
-        }
-
-        return piece - sequential_download_from_piece + 2U;
+        // Always download files in alphabetical order, pieces within each file sequentially
+        auto const file_index = mediator.file_index_for_piece(piece);
+        // Get the start piece for this file to calculate piece offset within the file
+        auto const file_start = mediator.file_start_piece(file_index);
+        auto const piece_in_file = piece >= file_start ? piece - file_start : 0;
+        // Use file_index * large_number + piece_in_file to ensure files are ordered first,
+        // then pieces within each file sequentially from 0
+        return file_index * n_pieces + piece_in_file;
     }
 
     // ---
@@ -367,6 +348,7 @@ private:
         auto n_old_c = std::size(candidates_);
         auto salter = tr_salt_shaker<tr_piece_index_t>{};
         auto const is_sequential = mediator_.is_sequential_download();
+        auto const sequential_mode = mediator_.sequential_download_mode();
         auto const sequential_download_from_piece = mediator_.sequential_download_from_piece();
         auto const n_pieces = mediator_.piece_count();
         candidates_.reserve(n_pieces);
@@ -405,7 +387,7 @@ private:
                 }
                 else
                 {
-                    auto const salt = get_salt(piece, n_pieces, salter(), is_sequential, sequential_download_from_piece);
+                    auto const salt = get_salt(piece, n_pieces, salter(), is_sequential, sequential_mode, sequential_download_from_piece, mediator_);
                     auto& candidate = candidates_.emplace_back(piece, salt, &mediator_);
 
                     if (auto& begin = candidate.block_span.begin; prev != nullptr)
@@ -484,11 +466,12 @@ private:
     {
         auto salter = tr_salt_shaker<tr_piece_index_t>{};
         auto const is_sequential = mediator_.is_sequential_download();
+        auto const sequential_mode = mediator_.sequential_download_mode();
         auto const sequential_download_from_piece = mediator_.sequential_download_from_piece();
         auto const n_pieces = mediator_.piece_count();
         for (auto& candidate : candidates_)
         {
-            candidate.salt = get_salt(candidate.piece, n_pieces, salter(), is_sequential, sequential_download_from_piece);
+            candidate.salt = get_salt(candidate.piece, n_pieces, salter(), is_sequential, sequential_mode, sequential_download_from_piece, mediator_);
         }
 
         std::sort(std::begin(candidates_), std::end(candidates_));
@@ -616,25 +599,26 @@ std::vector<tr_block_span_t> Wishlist::Impl::next(
 
 int Wishlist::Impl::Candidate::compare(Candidate const& that) const noexcept
 {
-    // prefer pieces closer to completion
-    if (auto const val = tr_compare_3way(std::size(unrequested), std::size(that.unrequested)); val != 0)
-    {
-        return val;
-    }
-
-    // prefer higher priority
+    // Primary: prefer higher priority
     if (auto const val = tr_compare_3way(priority, that.priority); val != 0)
     {
         return -val;
     }
 
-    // prefer rarer pieces
-    if (auto const val = tr_compare_3way(replication, that.replication); val != 0)
+    // Secondary: sort by salt (alphabetical file order, then piece order within file)
+    if (auto const val = tr_compare_3way(salt, that.salt); val != 0)
     {
         return val;
     }
 
-    return tr_compare_3way(salt, that.salt);
+    // Tertiary: prefer pieces closer to completion
+    if (auto const val = tr_compare_3way(std::size(unrequested), std::size(that.unrequested)); val != 0)
+    {
+        return val;
+    }
+
+    // Last: prefer rarer pieces
+    return tr_compare_3way(replication, that.replication);
 }
 
 // ---

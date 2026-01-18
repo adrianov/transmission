@@ -94,6 +94,13 @@ enum : int8_t
     TR_RATIO_INF = -2
 };
 
+enum tr_sequential_mode_t : uint8_t
+{
+    TR_SEQUENTIAL_OFF = 0,
+    TR_SEQUENTIAL_BY_PIECE = 1,
+    TR_SEQUENTIAL_BY_FILE = 2
+};
+
 // --- Startup & Shutdown
 
 /**

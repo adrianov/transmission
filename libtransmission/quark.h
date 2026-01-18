@@ -568,6 +568,7 @@ enum // NOLINT(performance-enum-size)
     TR_KEY_seeding_time_seconds,
     TR_KEY_sequential_download,
     TR_KEY_sequential_download_from_piece,
+    TR_KEY_sequential_download_mode,
     TR_KEY_session_close_kebab_APICOMPAT,
     TR_KEY_session_count_kebab_APICOMPAT,
     TR_KEY_session_get_kebab_APICOMPAT,

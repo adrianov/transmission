@@ -436,7 +436,8 @@ public:
         bool script_torrent_done_enabled = false;
         bool script_torrent_done_seeding_enabled = false;
         bool seed_queue_enabled = false;
-        bool sequential_download = false;
+        bool sequential_download = true;
+        tr_sequential_mode_t sequential_download_mode = TR_SEQUENTIAL_BY_FILE;
         bool should_delete_source_torrents = false;
         bool should_scrape_paused_torrents = true;
         bool should_start_added_torrents = true;
@@ -537,6 +538,7 @@ public:
             Field<&Settings::seed_queue_enabled>{ TR_KEY_seed_queue_enabled },
             Field<&Settings::seed_queue_size>{ TR_KEY_seed_queue_size },
             Field<&Settings::sequential_download>{ TR_KEY_sequential_download },
+            Field<&Settings::sequential_download_mode>{ TR_KEY_sequential_download_mode },
             Field<&Settings::sleep_per_seconds_during_verify>{ TR_KEY_sleep_per_seconds_during_verify },
             Field<&Settings::speed_limit_down>{ TR_KEY_speed_limit_down },
             Field<&Settings::speed_limit_down_enabled>{ TR_KEY_speed_limit_down_enabled },
@@ -784,6 +786,16 @@ public:
     void set_sequential_download(bool seq) noexcept
     {
         settings_.sequential_download = seq;
+    }
+
+    [[nodiscard]] constexpr auto sequential_download_mode() const noexcept
+    {
+        return settings().sequential_download_mode;
+    }
+
+    void set_sequential_download_mode(tr_sequential_mode_t mode) noexcept
+    {
+        settings_.sequential_download_mode = mode;
     }
 
     // bandwidth

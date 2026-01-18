@@ -555,6 +555,7 @@ auto constexpr MyStatic = std::array<std::string_view, TR_N_KEYS>{
     "seeding_time_seconds"sv, // .resume
     "sequential_download"sv, // .resume, daemon, rpc, tr_session::Settings
     "sequential_download_from_piece"sv, // .resume, rpc
+    "sequential_download_mode"sv, // .resume, rpc, tr_session::Settings
     "session-close"sv, // rpc
     "session-count"sv, // stats.json
     "session-get"sv, // rpc

@@ -750,6 +750,7 @@ namespace make_torrent_field_helpers
     case TR_KEY_seed_ratio_limit:
     case TR_KEY_seed_ratio_mode:
     case TR_KEY_sequential_download:
+    case TR_KEY_sequential_download_mode:
     case TR_KEY_sequential_download_from_piece:
     case TR_KEY_size_when_done:
     case TR_KEY_source:
@@ -910,6 +911,8 @@ namespace make_torrent_field_helpers
         return tor.is_sequential_download();
     case TR_KEY_sequential_download_from_piece:
         return tor.sequential_download_from_piece();
+    case TR_KEY_sequential_download_mode:
+        return static_cast<int64_t>(tor.sequential_download_mode());
     case TR_KEY_size_when_done:
         return st.sizeWhenDone;
     case TR_KEY_source:
@@ -1324,6 +1327,11 @@ namespace make_torrent_field_helpers
         if (auto const val = args_in.value_if<int64_t>(TR_KEY_sequential_download_from_piece); val && err == Error::SUCCESS)
         {
             std::tie(err, errmsg) = set_sequential_download_from_piece(*tor, *val);
+        }
+
+        if (auto const val = args_in.value_if<int64_t>(TR_KEY_sequential_download_mode); val)
+        {
+            tor->set_sequential_download_mode(static_cast<tr_sequential_mode_t>(*val));
         }
 
         if (auto const val = args_in.value_if<bool>(TR_KEY_download_limited); val)

@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cctype>
 #include <cerrno> // EINVAL
 #include <chrono>
 #include <cstddef> // size_t
@@ -930,6 +931,7 @@ void tr_torrent::init(tr_ctor const& ctor)
     // these are defaults that will be overwritten by the resume file
     date_added_ = now_sec;
     set_sequential_download(session->sequential_download());
+    set_sequential_download_mode(session->sequential_download_mode());
 
     tr_resume::fields_t loaded = {};
 
@@ -949,6 +951,9 @@ void tr_torrent::init(tr_ctor const& ctor)
 
     ctor.init_torrent_priorities(*this);
     ctor.init_torrent_wanted(*this);
+    
+    // Always recalculate file order for alphabetical download ordering
+    recalculate_file_order();
 
     refresh_current_dir();
 
@@ -2722,4 +2727,97 @@ bool tr_torrent::ResumeHelper::start_when_stable() const noexcept
 std::vector<time_t> const& tr_torrent::ResumeHelper::file_mtimes() const noexcept
 {
     return tor_.file_mtimes_;
+}
+
+// ---
+
+void tr_torrent::recalculate_file_order()
+{
+    // Get list of wanted files
+    std::vector<tr_file_index_t> wanted_files;
+    wanted_files.reserve(file_count());
+    for (tr_file_index_t i = 0; i < file_count(); ++i)
+    {
+        if (files_wanted_.file_wanted(i))
+        {
+            wanted_files.push_back(i);
+        }
+    }
+
+    // Sort wanted files alphabetically by path
+    // Use the full path for sorting so files in subdirectories are grouped together
+    // and sorted naturally (e.g., "dir/a.txt" before "dir/b.txt")
+    std::sort(wanted_files.begin(), wanted_files.end(), [this](tr_file_index_t a, tr_file_index_t b) {
+        auto const& path_a = files().path(a);
+        auto const& path_b = files().path(b);
+        // Case-insensitive comparison for more natural sorting
+        return std::lexicographical_compare(
+            path_a.begin(),
+            path_a.end(),
+            path_b.begin(),
+            path_b.end(),
+            [](char c1, char c2) { return std::tolower(static_cast<unsigned char>(c1)) < std::tolower(static_cast<unsigned char>(c2)); });
+    });
+
+    // Build mappings - initialize with a large value to indicate "not assigned"
+    file_index_by_piece_.assign(piece_count(), piece_count());
+    file_start_piece_for_file_index_.resize(wanted_files.size());
+
+    // Create a map from actual file index to alphabetical file index
+    std::vector<tr_piece_index_t> file_idx_map(file_count(), piece_count());
+    for (size_t file_idx = 0; file_idx < wanted_files.size(); ++file_idx)
+    {
+        auto const actual_file_index = wanted_files[file_idx];
+        file_idx_map[actual_file_index] = static_cast<tr_piece_index_t>(file_idx);
+        auto const [piece_begin, piece_end] = fpm_.piece_span_for_file(actual_file_index);
+        file_start_piece_for_file_index_[file_idx] = piece_begin;
+    }
+
+    // For each piece, find which files it belongs to and assign it to the first (alphabetically)
+    for (tr_piece_index_t piece = 0; piece < piece_count(); ++piece)
+    {
+        if (!piece_is_wanted(piece))
+        {
+            continue;
+        }
+
+        auto const [file_begin, file_end] = fpm_.file_span_for_piece(piece);
+        tr_piece_index_t best_file_idx = piece_count();
+
+        // Find the first (alphabetically) wanted file that contains this piece
+        for (tr_file_index_t file = file_begin; file < file_end; ++file)
+        {
+            if (files_wanted_.file_wanted(file))
+            {
+                auto const alphabetical_idx = file_idx_map[file];
+                if (alphabetical_idx < best_file_idx)
+                {
+                    best_file_idx = alphabetical_idx;
+                }
+            }
+        }
+
+        if (best_file_idx < piece_count())
+        {
+            file_index_by_piece_[piece] = best_file_idx;
+        }
+    }
+}
+
+tr_piece_index_t tr_torrent::file_index_for_piece(tr_piece_index_t piece) const noexcept
+{
+    if (piece < file_index_by_piece_.size())
+    {
+        return file_index_by_piece_[piece];
+    }
+    return 0;
+}
+
+tr_piece_index_t tr_torrent::file_start_piece(tr_piece_index_t alphabetical_file_index) const noexcept
+{
+    if (alphabetical_file_index < file_start_piece_for_file_index_.size())
+    {
+        return file_start_piece_for_file_index_[alphabetical_file_index];
+    }
+    return 0;
 }

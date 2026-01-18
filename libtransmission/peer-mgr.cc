@@ -384,6 +384,9 @@ public:
         [[nodiscard]] bool client_wants_piece(tr_piece_index_t piece) const override;
         [[nodiscard]] bool is_sequential_download() const override;
         [[nodiscard]] tr_piece_index_t sequential_download_from_piece() const override;
+        [[nodiscard]] tr_sequential_mode_t sequential_download_mode() const override;
+        [[nodiscard]] tr_piece_index_t file_index_for_piece(tr_piece_index_t piece) const override;
+        [[nodiscard]] tr_piece_index_t file_start_piece(tr_piece_index_t alphabetical_file_index) const override;
         [[nodiscard]] size_t count_piece_replication(tr_piece_index_t piece) const override;
         [[nodiscard]] tr_block_span_t block_span(tr_piece_index_t piece) const override;
         [[nodiscard]] tr_piece_index_t piece_count() const override;
@@ -1026,6 +1029,21 @@ bool tr_swarm::WishlistMediator::is_sequential_download() const
 tr_piece_index_t tr_swarm::WishlistMediator::sequential_download_from_piece() const
 {
     return tor_.sequential_download_from_piece();
+}
+
+tr_sequential_mode_t tr_swarm::WishlistMediator::sequential_download_mode() const
+{
+    return tor_.sequential_download_mode();
+}
+
+tr_piece_index_t tr_swarm::WishlistMediator::file_index_for_piece(tr_piece_index_t piece) const
+{
+    return tor_.file_index_for_piece(piece);
+}
+
+tr_piece_index_t tr_swarm::WishlistMediator::file_start_piece(tr_piece_index_t alphabetical_file_index) const
+{
+    return tor_.file_start_piece(alphabetical_file_index);
 }
 
 size_t tr_swarm::WishlistMediator::count_piece_replication(tr_piece_index_t piece) const
