@@ -2414,16 +2414,17 @@ void close_slow_peers(tr_swarm* s, uint64_t const now_msec, time_t const now_sec
 // Update speed statistics and determine dynamic peer limit
 void update_dynamic_peer_limit(tr_swarm* s, uint64_t const now_msec, time_t const now_sec)
 {
-    // Rate limit: update no more than every 30 seconds
-    if (now_sec - s->last_dynamic_limit_update < 30)
+    // Rate limit: update no more than every 10 seconds
+    if (now_sec - s->last_dynamic_limit_update < 10)
     {
         return;
     }
     s->last_dynamic_limit_update = now_sec;
 
     auto const peer_count = std::size(s->peers);
-    if (peer_count < 2 || s->tor->is_done())
+    if (s->tor->is_done())
     {
+        s->dynamic_peer_limit = 0;
         return;
     }
 
@@ -2457,9 +2458,13 @@ void update_dynamic_peer_limit(tr_swarm* s, uint64_t const now_msec, time_t cons
     }
 
     // Allow one more connection to be tried than best peer limit
-    if (best_count > 0 && best_count == peer_count && peer_count < s->tor->peer_limit())
+    if (best_count > 0 && best_count == peer_count)
     {
         s->dynamic_peer_limit = peer_count + 1;
+    }
+    else if (best_count > 0)
+    {
+        s->dynamic_peer_limit = best_count;
     }
 }
 
