@@ -2205,18 +2205,10 @@ auto constexpr MaxUploadIdleSecs = time_t{ 60 * 5 };
         return !tor->allows_pex() || info->idle_secs(now).value_or(0U) >= 30U;
     }
 
-    /* disconnect if it's been too long since piece data has been transferred.
-     * this is on a sliding scale based on number of available peers... */
+    /* disconnect if it's been too long since piece data has been transferred */
     {
-        auto const relax_strictness_if_fewer_than_n = static_cast<size_t>(std::lround(tor->peer_limit() * 0.9));
-        /* if we have >= relaxIfFewerThan, strictness is 100%.
-         * if we have zero connections, strictness is 0% */
-        float const strictness = peer_count >= relax_strictness_if_fewer_than_n ?
-            1.0 :
-            peer_count / (float)relax_strictness_if_fewer_than_n;
-        auto const lo = MinUploadIdleSecs;
-        auto const hi = MaxUploadIdleSecs;
-        time_t const limit = hi - ((hi - lo) * strictness);
+        // Use strict (1 min) timeout if we have 3+ peers, relaxed (5 min) otherwise
+        auto const limit = peer_count >= 3 ? MinUploadIdleSecs : MaxUploadIdleSecs;
 
         if (auto const idle_secs = info->idle_secs(now); idle_secs && *idle_secs > limit)
         {
@@ -2297,6 +2289,129 @@ void close_bad_peers(tr_swarm* s, time_t const now_sec, bad_peers_t& bad_peers_b
     }
 }
 
+// Check if peer has any piece that no other connected peer has
+[[nodiscard]] bool has_unique_pieces(tr_swarm const* swarm, tr_peerMsgs const* target_peer)
+{
+    auto const& peers = swarm->peers;
+
+    // If any other peer has all pieces, no piece can be unique
+    for (auto const& peer : peers)
+    {
+        if (peer.get() != target_peer && peer->is_seed())
+        {
+            return false;
+        }
+    }
+
+    auto const& target_has = target_peer->has();
+    auto const piece_count = swarm->tor->piece_count();
+
+    for (tr_piece_index_t piece = 0; piece < piece_count; ++piece)
+    {
+        if (!target_has.test(piece))
+        {
+            continue;
+        }
+
+        // Check if any other peer has this piece
+        bool other_has_it = false;
+        for (auto const& peer : peers)
+        {
+            if (peer.get() != target_peer && peer->has().test(piece))
+            {
+                other_has_it = true;
+                break;
+            }
+        }
+
+        if (!other_has_it)
+        {
+            return true; // This piece is unique to target_peer
+        }
+    }
+    return false;
+}
+
+// Disconnect peers that are much slower than median when we have enough peers
+void close_slow_peers(tr_swarm* s, uint64_t const now_msec)
+{
+    auto const& peers = s->peers;
+    auto const peer_count = std::size(peers);
+
+    // Need at least 3 peers to compare speeds
+    if (peer_count < 3)
+    {
+        return;
+    }
+
+    // Only disconnect slow peers when downloading (not seeding)
+    if (s->tor->is_done())
+    {
+        return;
+    }
+
+    // Collect download speeds from all peers
+    auto speeds = std::vector<Speed>{};
+    speeds.reserve(peer_count);
+    for (auto const& peer : peers)
+    {
+        speeds.push_back(peer->get_piece_speed(now_msec, TR_PEER_TO_CLIENT));
+    }
+
+    // Calculate median speed
+    std::sort(speeds.begin(), speeds.end());
+    auto const median_speed = speeds[peer_count / 2];
+
+    // Don't disconnect if median is very low (could be starting up)
+    if (median_speed.base_quantity() < 1024) // Less than 1 KB/s median
+    {
+        return;
+    }
+
+    // Threshold is median / 3
+    auto const threshold = Speed{ median_speed.base_quantity() / 3, Speed::Units::Byps };
+
+    // Find the slowest peer without unique pieces
+    tr_peerMsgs* slowest_peer = nullptr;
+    auto slowest_speed = threshold; // Must be below threshold to qualify
+
+    for (auto const& peer : peers)
+    {
+        if (peer->is_disconnecting())
+        {
+            continue;
+        }
+
+        auto const peer_speed = peer->get_piece_speed(now_msec, TR_PEER_TO_CLIENT);
+        if (peer_speed >= slowest_speed)
+        {
+            continue;
+        }
+
+        // Don't disconnect if peer has unique pieces
+        if (has_unique_pieces(s, peer.get()))
+        {
+            continue;
+        }
+
+        slowest_peer = peer.get();
+        slowest_speed = peer_speed;
+    }
+
+    // Disconnect only the slowest one
+    if (slowest_peer != nullptr)
+    {
+        tr_logAddTraceSwarm(
+            s,
+            fmt::format(
+                "disconnecting slow peer {} (speed {} < threshold {})",
+                slowest_peer->display_name(),
+                slowest_speed.count(Speed::Units::KByps),
+                threshold.count(Speed::Units::KByps)));
+        slowest_peer->disconnect_soon();
+    }
+}
+
 void enforceSwarmPeerLimit(tr_swarm* swarm, size_t max)
 {
     // do we have too many peers?
@@ -2350,6 +2465,7 @@ void tr_peerMgr::reconnect_pulse()
 
     auto const lock = unique_lock();
     auto const now_sec = tr_time();
+    auto const now_msec = tr_time_msec();
 
     // remove crappy peers
     auto bad_peers_buf = bad_peers_t{};
@@ -2364,6 +2480,7 @@ void tr_peerMgr::reconnect_pulse()
         else
         {
             close_bad_peers(swarm, now_sec, bad_peers_buf);
+            close_slow_peers(swarm, now_msec);
         }
     }
 
