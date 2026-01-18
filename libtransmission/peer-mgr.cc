@@ -2295,43 +2295,33 @@ void close_bad_peers(tr_swarm* s, time_t const now_sec, bad_peers_t& bad_peers_b
 }
 
 // Check if peer has any piece that no other connected peer has
+// Optimized to O(pieces + peers) instead of O(pieces * peers)
 [[nodiscard]] bool has_unique_pieces(tr_swarm const* swarm, tr_peerMsgs const* target_peer)
 {
     auto const& peers = swarm->peers;
+    auto const piece_count = swarm->tor->piece_count();
 
-    // If any other peer has all pieces, no piece can be unique
+    // Build combined bitfield of all pieces available from other peers
+    auto others_have = tr_bitfield{ piece_count };
     for (auto const& peer : peers)
     {
-        if (peer.get() != target_peer && peer->is_seed())
+        if (peer.get() != target_peer)
         {
-            return false;
+            if (peer->is_seed())
+            {
+                return false; // Another peer has all pieces, so no unique pieces
+            }
+            others_have |= peer->has();
         }
     }
 
+    // Check if target has any piece that others don't
     auto const& target_has = target_peer->has();
-    auto const piece_count = swarm->tor->piece_count();
-
     for (tr_piece_index_t piece = 0; piece < piece_count; ++piece)
     {
-        if (!target_has.test(piece))
+        if (target_has.test(piece) && !others_have.test(piece))
         {
-            continue;
-        }
-
-        // Check if any other peer has this piece
-        bool other_has_it = false;
-        for (auto const& peer : peers)
-        {
-            if (peer.get() != target_peer && peer->has().test(piece))
-            {
-                other_has_it = true;
-                break;
-            }
-        }
-
-        if (!other_has_it)
-        {
-            return true; // This piece is unique to target_peer
+            return true;
         }
     }
     return false;
