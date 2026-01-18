@@ -274,6 +274,11 @@ public:
         return is_connected_;
     }
 
+    [[nodiscard]] constexpr time_t connection_secs(time_t now) const noexcept
+    {
+        return is_connected_ && connection_changed_at_ > 0 ? now - connection_changed_at_ : 0;
+    }
+
     [[nodiscard]] auto has_handshake() const noexcept
     {
         return static_cast<bool>(outgoing_handshake_);
@@ -376,6 +381,16 @@ public:
     constexpr void on_fruitless_connection() noexcept
     {
         if (num_consecutive_fruitless_ != std::numeric_limits<decltype(num_consecutive_fruitless_)>::max())
+        {
+            ++num_consecutive_fruitless_;
+        }
+    }
+
+    // Penalize slow peers to delay reconnection (adds 2 fruitless counts = ~15-30 min delay)
+    constexpr void on_slow_connection() noexcept
+    {
+        for (int i = 0; i < 2 && num_consecutive_fruitless_ < std::numeric_limits<decltype(num_consecutive_fruitless_)>::max();
+             ++i)
         {
             ++num_consecutive_fruitless_;
         }

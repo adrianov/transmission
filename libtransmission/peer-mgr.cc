@@ -688,6 +688,11 @@ public:
 
     tr_peerMsgs* optimistic = nullptr; /* the optimistic peer, or nullptr if none */
 
+    // Dynamic peer limit based on speed statistics
+    std::map<size_t, uint32_t> speed_at_peer_count; // peer_count -> speed (bytes/s)
+    size_t dynamic_peer_limit = {}; // 0 = no limit discovered
+    time_t last_dynamic_limit_update = {}; // rate limit updates
+
     std::function<tr_port()> const get_client_advertised_port = [this]
     {
         return tor->session->advertisedPeerPort();
@@ -2333,19 +2338,13 @@ void close_bad_peers(tr_swarm* s, time_t const now_sec, bad_peers_t& bad_peers_b
 }
 
 // Disconnect peers that are much slower than median when we have enough peers
-void close_slow_peers(tr_swarm* s, uint64_t const now_msec)
+void close_slow_peers(tr_swarm* s, uint64_t const now_msec, time_t const now_sec)
 {
     auto const& peers = s->peers;
     auto const peer_count = std::size(peers);
 
     // Need at least 3 peers to compare speeds
-    if (peer_count < 3)
-    {
-        return;
-    }
-
-    // Only disconnect slow peers when downloading (not seeding)
-    if (s->tor->is_done())
+    if (peer_count < 3 || s->tor->is_done())
     {
         return;
     }
@@ -2371,10 +2370,10 @@ void close_slow_peers(tr_swarm* s, uint64_t const now_msec)
     // Threshold is median / 3
     auto const threshold = Speed{ median_speed.base_quantity() / 3, Speed::Units::Byps };
 
-    // Find the slowest peer without unique pieces
-    tr_peerMsgs* slowest_peer = nullptr;
-    auto slowest_speed = threshold; // Must be below threshold to qualify
+    // Minimum connection time before judging speed
+    static auto constexpr MinConnectionSecs = time_t{ 30 };
 
+    // Disconnect all slow peers that have been connected long enough
     for (auto const& peer : peers)
     {
         if (peer->is_disconnecting())
@@ -2382,8 +2381,14 @@ void close_slow_peers(tr_swarm* s, uint64_t const now_msec)
             continue;
         }
 
+        // Only judge peers connected for at least 30 seconds
+        if (peer->peer_info->connection_secs(now_sec) < MinConnectionSecs)
+        {
+            continue;
+        }
+
         auto const peer_speed = peer->get_piece_speed(now_msec, TR_PEER_TO_CLIENT);
-        if (peer_speed >= slowest_speed)
+        if (peer_speed >= threshold)
         {
             continue;
         }
@@ -2394,22 +2399,103 @@ void close_slow_peers(tr_swarm* s, uint64_t const now_msec)
             continue;
         }
 
-        slowest_peer = peer.get();
-        slowest_speed = peer_speed;
-    }
-
-    // Disconnect only the slowest one
-    if (slowest_peer != nullptr)
-    {
         tr_logAddTraceSwarm(
             s,
             fmt::format(
                 "disconnecting slow peer {} (speed {} < threshold {})",
-                slowest_peer->display_name(),
-                slowest_speed.count(Speed::Units::KByps),
+                peer->display_name(),
+                peer_speed.count(Speed::Units::KByps),
                 threshold.count(Speed::Units::KByps)));
-        slowest_peer->disconnect_soon();
+        peer->peer_info->on_slow_connection();
+        peer->disconnect_soon();
     }
+}
+
+// Update speed statistics and determine dynamic peer limit
+void update_dynamic_peer_limit(tr_swarm* s, uint64_t const now_msec, time_t const now_sec)
+{
+    // Rate limit: update no more than every 30 seconds
+    if (now_sec - s->last_dynamic_limit_update < 30)
+    {
+        return;
+    }
+    s->last_dynamic_limit_update = now_sec;
+
+    auto const peer_count = std::size(s->peers);
+    if (peer_count < 2 || s->tor->is_done())
+    {
+        return;
+    }
+
+    // Calculate total download speed
+    uint32_t total_speed = 0;
+    for (auto const& peer : s->peers)
+    {
+        total_speed += static_cast<uint32_t>(peer->get_piece_speed(now_msec, TR_PEER_TO_CLIENT).base_quantity());
+    }
+
+    // Need meaningful speed to record
+    if (total_speed < 1024) // Less than 1 KB/s
+    {
+        return;
+    }
+
+    // Update speed for current peer count (exponential moving average)
+    auto& stored = s->speed_at_peer_count[peer_count];
+    stored = stored == 0 ? total_speed : (stored * 7 + total_speed) / 8; // Slower averaging (87.5% old)
+
+    // Find peer count with best speed
+    size_t best_count = 0;
+    uint32_t best_speed = 0;
+    for (auto const& [count, speed] : s->speed_at_peer_count)
+    {
+        if (speed > best_speed)
+        {
+            best_speed = speed;
+            best_count = count;
+        }
+    }
+
+    // If we have a limit set but current peer count has better speed, raise the limit
+    if (s->dynamic_peer_limit > 0 && peer_count >= s->dynamic_peer_limit && stored > best_speed * 95 / 100)
+    {
+        s->dynamic_peer_limit = 0; // Reset limit to explore more
+        tr_logAddDebugSwarm(
+            s,
+            fmt::format("dynamic peer limit reset (speed {} KB/s with {} peers)", stored / 1024, peer_count));
+        return;
+    }
+
+    // If best count is the highest we've seen, occasionally try adding one more
+    if (best_count > 0 && best_count == peer_count &&
+        s->speed_at_peer_count.find(peer_count + 1) == s->speed_at_peer_count.end())
+    {
+        s->dynamic_peer_limit = 0; // Allow one more connection to be tried
+        return;
+    }
+
+    // Only set limit if current speed is significantly lower than best (< 90%)
+    if (best_count > 0 && peer_count > best_count + 2 && stored < best_speed * 90 / 100)
+    {
+        if (s->dynamic_peer_limit != best_count)
+        {
+            s->dynamic_peer_limit = best_count;
+            tr_logAddDebugSwarm(
+                s,
+                fmt::format(
+                    "dynamic peer limit set to {} (best {} KB/s, current {} KB/s with {} peers)",
+                    best_count,
+                    best_speed / 1024,
+                    stored / 1024,
+                    peer_count));
+        }
+    }
+}
+
+[[nodiscard]] size_t get_effective_peer_limit(tr_swarm const* swarm)
+{
+    auto const configured = swarm->tor->peer_limit();
+    return (swarm->dynamic_peer_limit > 0 && swarm->dynamic_peer_limit < configured) ? swarm->dynamic_peer_limit : configured;
 }
 
 void enforceSwarmPeerLimit(tr_swarm* swarm, size_t max)
@@ -2480,16 +2566,17 @@ void tr_peerMgr::reconnect_pulse()
         else
         {
             close_bad_peers(swarm, now_sec, bad_peers_buf);
-            close_slow_peers(swarm, now_msec);
+            close_slow_peers(swarm, now_msec, now_sec);
+            update_dynamic_peer_limit(swarm, now_msec, now_sec);
         }
     }
 
-    // if we're over the per-torrent peer limits, cull some peers
+    // if we're over the per-torrent peer limits (including dynamic), cull some peers
     for (auto* const tor : torrents_)
     {
         if (tor->is_running())
         {
-            enforceSwarmPeerLimit(tor->swarm, tor->peer_limit());
+            enforceSwarmPeerLimit(tor->swarm, get_effective_peer_limit(tor->swarm));
         }
     }
 
@@ -2789,8 +2876,8 @@ void get_peer_candidates(size_t global_peer_limit, tr_torrents& torrents, tr_pee
             continue;
         }
 
-        /* if we've already got enough peers in this torrent... */
-        if (tor->peer_limit() <= swarm->peerCount())
+        /* if we've already got enough peers in this torrent (including dynamic limit)... */
+        if (disconnect_helpers::get_effective_peer_limit(swarm) <= swarm->peerCount())
         {
             continue;
         }
