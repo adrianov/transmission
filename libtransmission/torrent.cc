@@ -951,7 +951,7 @@ void tr_torrent::init(tr_ctor const& ctor)
 
     ctor.init_torrent_priorities(*this);
     ctor.init_torrent_wanted(*this);
-    
+
     // Always recalculate file order for alphabetical download ordering
     recalculate_file_order();
 
@@ -2747,17 +2747,22 @@ void tr_torrent::recalculate_file_order()
     // Sort wanted files alphabetically by path
     // Use the full path for sorting so files in subdirectories are grouped together
     // and sorted naturally (e.g., "dir/a.txt" before "dir/b.txt")
-    std::sort(wanted_files.begin(), wanted_files.end(), [this](tr_file_index_t a, tr_file_index_t b) {
-        auto const& path_a = files().path(a);
-        auto const& path_b = files().path(b);
-        // Case-insensitive comparison for more natural sorting
-        return std::lexicographical_compare(
-            path_a.begin(),
-            path_a.end(),
-            path_b.begin(),
-            path_b.end(),
-            [](char c1, char c2) { return std::tolower(static_cast<unsigned char>(c1)) < std::tolower(static_cast<unsigned char>(c2)); });
-    });
+    std::sort(
+        wanted_files.begin(),
+        wanted_files.end(),
+        [this](tr_file_index_t a, tr_file_index_t b)
+        {
+            auto const& path_a = files().path(a);
+            auto const& path_b = files().path(b);
+            // Case-insensitive comparison for more natural sorting
+            return std::lexicographical_compare(
+                path_a.begin(),
+                path_a.end(),
+                path_b.begin(),
+                path_b.end(),
+                [](char c1, char c2)
+                { return std::tolower(static_cast<unsigned char>(c1)) < std::tolower(static_cast<unsigned char>(c2)); });
+        });
 
     // Build mappings - initialize with a large value to indicate "not assigned"
     file_index_by_piece_.assign(piece_count(), piece_count());
