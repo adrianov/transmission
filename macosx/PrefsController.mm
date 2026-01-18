@@ -98,6 +98,8 @@ static NSString* const kWebUIURLFormat = @"http://localhost:%ld/";
 @property(nonatomic) NSTimer* fPortStatusTimer;
 @property(nonatomic) int fPeerPort, fNatStatus;
 
+@property(nonatomic) IBOutlet NSTextField* fProxyURLField;
+
 @property(nonatomic) IBOutlet NSTextField* fRPCPortField;
 @property(nonatomic) IBOutlet NSTextField* fRPCPasswordField;
 @property(nonatomic) IBOutlet NSTableView* fRPCWhitelistTable;
@@ -295,6 +297,127 @@ static NSString* const kWebUIURLFormat = @"http://localhost:%ld/";
 
     //set fRPCWhitelistTable column width to table width
     [self.fRPCWhitelistTable sizeToFit];
+
+    //set proxy URL - create UI dynamically if not connected via XIB
+    if (!self.fProxyURLField)
+    {
+        [self setupProxyURLField];
+    }
+    // Load proxy URL from settings.json
+    NSString* configDir = [NSString stringWithUTF8String:tr_getDefaultConfigDir("Transmission").c_str()];
+    NSString* settingsPath = [configDir stringByAppendingPathComponent:@"settings.json"];
+    NSData* data = [NSData dataWithContentsOfFile:settingsPath];
+    if (data)
+    {
+        NSError* error = nil;
+        NSDictionary* settings = [NSJSONSerialization JSONObjectWithData:data options:0 error:&error];
+        if (settings && !error)
+        {
+            NSString* proxyURL = settings[@"proxy_url"];
+            if (proxyURL)
+            {
+                self.fProxyURLField.stringValue = proxyURL;
+            }
+        }
+    }
+}
+
+- (void)setupProxyURLField
+{
+    // Find the inner content view, help button, and "System sleep:" label
+    NSView* innerContentView = nil;
+    NSButton* helpButton = nil;
+    NSTextField* systemSleepLabel = nil;
+    
+    for (NSView* subview in self.fNetworkView.subviews)
+    {
+        if ([subview isKindOfClass:[NSButton class]])
+        {
+            NSButton* btn = (NSButton*)subview;
+            if (btn.bezelStyle == NSBezelStyleHelpButton)
+            {
+                helpButton = btn;
+            }
+        }
+        else if (subview.subviews.count > 5)
+        {
+            innerContentView = subview;
+            // Find "System sleep:" label inside inner content view
+            for (NSView* innerSubview in subview.subviews)
+            {
+                if ([innerSubview isKindOfClass:[NSTextField class]])
+                {
+                    NSTextField* tf = (NSTextField*)innerSubview;
+                    if ([tf.stringValue isEqualToString:@"System sleep:"])
+                    {
+                        systemSleepLabel = tf;
+                    }
+                }
+            }
+        }
+    }
+    
+    if (!innerContentView || !systemSleepLabel)
+    {
+        return;
+    }
+
+    // Create proxy URL label
+    NSTextField* proxyLabel = [NSTextField labelWithString:NSLocalizedString(@"Proxy URL:", "Preferences -> Network -> proxy label")];
+    proxyLabel.alignment = NSTextAlignmentRight;
+    proxyLabel.font = [NSFont systemFontOfSize:[NSFont systemFontSize]];
+    proxyLabel.translatesAutoresizingMaskIntoConstraints = NO;
+    [self.fNetworkView addSubview:proxyLabel];
+
+    // Create proxy URL text field
+    self.fProxyURLField = [[NSTextField alloc] initWithFrame:NSMakeRect(0, 0, 250, 21)];
+    NSTextFieldCell* cell = self.fProxyURLField.cell;
+    cell.scrollable = YES;
+    cell.lineBreakMode = NSLineBreakByClipping;
+    cell.selectable = YES;
+    cell.editable = YES;
+    cell.sendsActionOnEndEditing = YES;
+    cell.bordered = YES;
+    cell.bezeled = YES;
+    cell.bezelStyle = NSTextFieldSquareBezel;
+    cell.drawsBackground = YES;
+    cell.backgroundColor = NSColor.textBackgroundColor;
+    cell.textColor = NSColor.controlTextColor;
+    cell.font = [NSFont systemFontOfSize:[NSFont systemFontSize]];
+    cell.placeholderString = @"socks5://127.0.0.1:1080";
+    
+    self.fProxyURLField.translatesAutoresizingMaskIntoConstraints = NO;
+    self.fProxyURLField.target = self;
+    self.fProxyURLField.action = @selector(setProxyURL:);
+    [self.fNetworkView addSubview:self.fProxyURLField];
+
+    // Position below the inner content view, aligned with "System sleep:" label
+    // systemSleepLabel.trailing is relative to innerContentView, so we need to match that
+    CGFloat labelRightEdgeInNetworkView = innerContentView.frame.origin.x + systemSleepLabel.frame.origin.x + systemSleepLabel.frame.size.width;
+    
+    [NSLayoutConstraint activateConstraints:@[
+        // Label aligned with "System sleep:" label's right edge
+        [proxyLabel.trailingAnchor constraintEqualToAnchor:self.fNetworkView.leadingAnchor constant:labelRightEdgeInNetworkView],
+        [proxyLabel.topAnchor constraintEqualToAnchor:innerContentView.bottomAnchor constant:12],
+
+        // Text field next to label (same spacing as other fields)
+        [self.fProxyURLField.leadingAnchor constraintEqualToAnchor:proxyLabel.trailingAnchor constant:6],
+        [self.fProxyURLField.centerYAnchor constraintEqualToAnchor:proxyLabel.centerYAnchor],
+        [self.fProxyURLField.widthAnchor constraintEqualToConstant:300],
+        [self.fProxyURLField.heightAnchor constraintEqualToConstant:21],
+    ]];
+
+    // Move help button down and increase Network view height
+    if (helpButton)
+    {
+        NSRect helpFrame = helpButton.frame;
+        helpFrame.origin.y -= 35;
+        helpButton.frame = helpFrame;
+    }
+    
+    NSRect frame = self.fNetworkView.frame;
+    frame.size.height += 35;
+    self.fNetworkView.frame = frame;
 }
 
 - (NSToolbarItem*)toolbar:(NSToolbar*)toolbar itemForItemIdentifier:(NSString*)ident willBeInsertedIntoToolbar:(BOOL)flag
@@ -534,6 +657,47 @@ static NSString* const kWebUIURLFormat = @"http://localhost:%ld/";
 - (void)setUTP:(id)sender
 {
     tr_sessionSetUTPEnabled(self.fHandle, [self.fDefaults boolForKey:@"UTPGlobal"]);
+}
+
+- (IBAction)setProxyURL:(id)sender
+{
+    NSString* proxyURL = [sender stringValue];
+    [self.fDefaults setObject:proxyURL forKey:@"ProxyURL"];
+
+    // The proxy URL setting is read directly from settings.json by libtransmission.
+    // Save it to the config directory for the session to use.
+    // Note: Changes take effect after restart, since the session settings are cached.
+    NSString* configDir = [NSString stringWithUTF8String:tr_getDefaultConfigDir("Transmission").c_str()];
+    NSString* settingsPath = [configDir stringByAppendingPathComponent:@"settings.json"];
+
+    // Read existing settings
+    NSData* data = [NSData dataWithContentsOfFile:settingsPath];
+    if (data)
+    {
+        NSError* error = nil;
+        NSMutableDictionary* settings = [NSJSONSerialization JSONObjectWithData:data
+                                                                        options:NSJSONReadingMutableContainers
+                                                                          error:&error];
+        if (settings && !error)
+        {
+            if (proxyURL.length > 0)
+            {
+                settings[@"proxy_url"] = proxyURL;
+            }
+            else
+            {
+                [settings removeObjectForKey:@"proxy_url"];
+            }
+
+            NSData* newData = [NSJSONSerialization dataWithJSONObject:settings
+                                                              options:NSJSONWritingPrettyPrinted
+                                                                error:&error];
+            if (newData && !error)
+            {
+                [newData writeToFile:settingsPath atomically:YES];
+            }
+        }
+    }
 }
 
 - (void)setPeersGlobal:(id)sender
