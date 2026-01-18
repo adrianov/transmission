@@ -121,7 +121,6 @@ void set_file_for_single_pass(tr_sys_file_t handle)
 #ifdef __APPLE__
 
     (void)fcntl(handle, F_RDAHEAD, 1);
-    (void)fcntl(handle, F_NOCACHE, 1);
 
 #endif
 
