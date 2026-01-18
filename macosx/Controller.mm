@@ -62,6 +62,7 @@ static ToolbarItemIdentifier const ToolbarItemIdentifierCreate = @"Toolbar Creat
 static ToolbarItemIdentifier const ToolbarItemIdentifierOpenFile = @"Toolbar Open";
 static ToolbarItemIdentifier const ToolbarItemIdentifierOpenWeb = @"Toolbar Open Web";
 static ToolbarItemIdentifier const ToolbarItemIdentifierRemove = @"Toolbar Remove";
+static ToolbarItemIdentifier const ToolbarItemIdentifierRemoveTrash = @"Toolbar Remove Trash";
 static ToolbarItemIdentifier const ToolbarItemIdentifierInfo = @"Toolbar Info";
 static ToolbarItemIdentifier const ToolbarItemIdentifierPauseAll = @"Toolbar Pause All";
 static ToolbarItemIdentifier const ToolbarItemIdentifierResumeAll = @"Toolbar Resume All";
@@ -4262,6 +4263,20 @@ void onTorrentCompletenessChanged(tr_torrent* tor, tr_completeness status, bool 
 
         return item;
     }
+    else if ([ident isEqualToString:ToolbarItemIdentifierRemoveTrash])
+    {
+        ButtonToolbarItem* item = [self standardToolbarButtonWithIdentifier:ident];
+
+        item.label = NSLocalizedString(@"Trash", "Remove and trash toolbar item -> label");
+        item.paletteLabel = NSLocalizedString(@"Remove and Trash Selected", "Remove and trash toolbar item -> palette label");
+        item.toolTip = NSLocalizedString(@"Remove selected transfers and trash data", "Remove and trash toolbar item -> tooltip");
+        item.image = [NSImage imageWithSystemSymbolName:@"trash" accessibilityDescription:nil];
+        item.target = self;
+        item.action = @selector(removeDeleteData:);
+        item.visibilityPriority = NSToolbarItemVisibilityPriorityHigh;
+
+        return item;
+    }
     else if ([ident isEqualToString:ToolbarItemIdentifierInfo])
     {
         ButtonToolbarItem* item = [self standardToolbarButtonWithIdentifier:ident];
@@ -4455,6 +4470,7 @@ void onTorrentCompletenessChanged(tr_torrent* tor, tr_completeness status, bool 
         ToolbarItemIdentifierOpenFile,
         ToolbarItemIdentifierOpenWeb,
         ToolbarItemIdentifierRemove,
+        ToolbarItemIdentifierRemoveTrash,
         ToolbarItemIdentifierPauseResumeSelected,
         ToolbarItemIdentifierPauseResumeAll,
         ToolbarItemIdentifierShare,
@@ -4472,6 +4488,7 @@ void onTorrentCompletenessChanged(tr_torrent* tor, tr_completeness status, bool 
         ToolbarItemIdentifierCreate,
         ToolbarItemIdentifierOpenFile,
         ToolbarItemIdentifierRemove,
+        ToolbarItemIdentifierRemoveTrash,
         NSToolbarSpaceItemIdentifier,
         ToolbarItemIdentifierPauseResumeAll,
         NSToolbarFlexibleSpaceItemIdentifier,
@@ -4487,7 +4504,7 @@ void onTorrentCompletenessChanged(tr_torrent* tor, tr_completeness status, bool 
     NSString* ident = toolbarItem.itemIdentifier;
 
     //enable remove item
-    if ([ident isEqualToString:ToolbarItemIdentifierRemove])
+    if ([ident isEqualToString:ToolbarItemIdentifierRemove] || [ident isEqualToString:ToolbarItemIdentifierRemoveTrash])
     {
         return self.fTableView.numberOfSelectedRows > 0;
     }

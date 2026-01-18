@@ -22,6 +22,7 @@
 - (void)setPriority:(id)sender;
 
 - (IBAction)revealFile:(id)sender;
+- (IBAction)openFile:(id)sender;
 
 - (void)renameSelected:(id)sender;
 
