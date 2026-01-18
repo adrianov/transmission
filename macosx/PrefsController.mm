@@ -328,7 +328,7 @@ static NSString* const kWebUIURLFormat = @"http://localhost:%ld/";
     NSView* innerContentView = nil;
     NSButton* helpButton = nil;
     NSTextField* systemSleepLabel = nil;
-    
+
     for (NSView* subview in self.fNetworkView.subviews)
     {
         if ([subview isKindOfClass:[NSButton class]])
@@ -356,7 +356,7 @@ static NSString* const kWebUIURLFormat = @"http://localhost:%ld/";
             }
         }
     }
-    
+
     if (!innerContentView || !systemSleepLabel)
     {
         return;
@@ -385,7 +385,7 @@ static NSString* const kWebUIURLFormat = @"http://localhost:%ld/";
     cell.textColor = NSColor.controlTextColor;
     cell.font = [NSFont systemFontOfSize:[NSFont systemFontSize]];
     cell.placeholderString = @"socks5://127.0.0.1:1080";
-    
+
     self.fProxyURLField.translatesAutoresizingMaskIntoConstraints = NO;
     self.fProxyURLField.target = self;
     self.fProxyURLField.action = @selector(setProxyURL:);
@@ -393,8 +393,9 @@ static NSString* const kWebUIURLFormat = @"http://localhost:%ld/";
 
     // Position below the inner content view, aligned with "System sleep:" label
     // systemSleepLabel.trailing is relative to innerContentView, so we need to match that
-    CGFloat labelRightEdgeInNetworkView = innerContentView.frame.origin.x + systemSleepLabel.frame.origin.x + systemSleepLabel.frame.size.width;
-    
+    CGFloat labelRightEdgeInNetworkView = innerContentView.frame.origin.x + systemSleepLabel.frame.origin.x +
+        systemSleepLabel.frame.size.width;
+
     [NSLayoutConstraint activateConstraints:@[
         // Label aligned with "System sleep:" label's right edge
         [proxyLabel.trailingAnchor constraintEqualToAnchor:self.fNetworkView.leadingAnchor constant:labelRightEdgeInNetworkView],
@@ -414,7 +415,7 @@ static NSString* const kWebUIURLFormat = @"http://localhost:%ld/";
         helpFrame.origin.y -= 35;
         helpButton.frame = helpFrame;
     }
-    
+
     NSRect frame = self.fNetworkView.frame;
     frame.size.height += 35;
     self.fNetworkView.frame = frame;
@@ -675,8 +676,7 @@ static NSString* const kWebUIURLFormat = @"http://localhost:%ld/";
     if (data)
     {
         NSError* error = nil;
-        NSMutableDictionary* settings = [NSJSONSerialization JSONObjectWithData:data
-                                                                        options:NSJSONReadingMutableContainers
+        NSMutableDictionary* settings = [NSJSONSerialization JSONObjectWithData:data options:NSJSONReadingMutableContainers
                                                                           error:&error];
         if (settings && !error)
         {
@@ -689,9 +689,7 @@ static NSString* const kWebUIURLFormat = @"http://localhost:%ld/";
                 [settings removeObjectForKey:@"proxy_url"];
             }
 
-            NSData* newData = [NSJSONSerialization dataWithJSONObject:settings
-                                                              options:NSJSONWritingPrettyPrinted
-                                                                error:&error];
+            NSData* newData = [NSJSONSerialization dataWithJSONObject:settings options:NSJSONWritingPrettyPrinted error:&error];
             if (newData && !error)
             {
                 [newData writeToFile:settingsPath atomically:YES];
