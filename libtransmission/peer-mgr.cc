@@ -2411,28 +2411,33 @@ void update_dynamic_peer_limit(tr_swarm* s, uint64_t const now_msec, time_t cons
     }
     s->last_dynamic_limit_update = now_sec;
 
-    auto const peer_count = std::size(s->peers);
     if (s->tor->is_done())
     {
         s->dynamic_peer_limit = 0;
         return;
     }
 
-    // Calculate total download speed
+    // Count peers actually downloading and calculate total speed
     uint32_t total_speed = 0;
+    size_t active_peer_count = 0;
     for (auto const& peer : s->peers)
     {
-        total_speed += static_cast<uint32_t>(peer->get_piece_speed(now_msec, TR_PEER_TO_CLIENT).base_quantity());
+        auto const speed = static_cast<uint32_t>(peer->get_piece_speed(now_msec, TR_PEER_TO_CLIENT).base_quantity());
+        if (speed > 0)
+        {
+            total_speed += speed;
+            ++active_peer_count;
+        }
     }
 
-    // Need meaningful speed to record
-    if (total_speed < 10240) // Less than 10 KB/s
+    // Need meaningful speed and active peers to record
+    if (total_speed < 10240 || active_peer_count == 0) // Less than 10 KB/s
     {
         return;
     }
 
-    // Update speed for current peer count (exponential moving average)
-    auto& stored = s->speed_at_peer_count[peer_count];
+    // Update speed for active peer count (exponential moving average)
+    auto& stored = s->speed_at_peer_count[active_peer_count];
     stored = stored == 0 ? total_speed : (stored * 7 + total_speed) / 8; // Slower averaging (87.5% old)
 
     // Find peer count with best speed
@@ -2448,9 +2453,9 @@ void update_dynamic_peer_limit(tr_swarm* s, uint64_t const now_msec, time_t cons
     }
 
     // Allow one more connection to be tried than best peer limit
-    if (best_count > 0 && best_count == peer_count)
+    if (best_count > 0 && best_count == active_peer_count)
     {
-        s->dynamic_peer_limit = peer_count + 1;
+        s->dynamic_peer_limit = active_peer_count + 1;
     }
     else if (best_count > 0)
     {
