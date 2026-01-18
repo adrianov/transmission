@@ -332,50 +332,70 @@ std::vector<tr_block_span_t> Wishlist::Impl::next(
 
     auto const is_sequential = mediator_.is_sequential_download();
 
-    // In sequential mode, find the "current" file - the first one with unrequested blocks
-    auto current_priority = tr_priority_t{};
-    auto current_file_index = tr_piece_index_t{};
-    if (is_sequential)
-    {
-        for (auto const& c : candidates_)
-        {
-            if (!c.unrequested.empty())
-            {
-                current_priority = c.priority;
-                current_file_index = c.file_index;
-                break;
-            }
-        }
-    }
-
     auto blocks = small::vector<tr_block_index_t>{};
     blocks.reserve(n_wanted_blocks);
-    for (auto const& candidate : candidates_)
+
+    // In sequential mode, process file by file in order
+    if (is_sequential)
     {
-        auto const n_added = std::size(blocks);
-        TR_ASSERT(n_added <= n_wanted_blocks);
+        auto current_priority = tr_priority_t{};
+        auto current_file_index = tr_piece_index_t{};
+        bool have_current_file = false;
 
-        // do we have enough?
-        if (n_added >= n_wanted_blocks)
+        for (auto const& candidate : candidates_)
         {
-            break;
-        }
+            if (std::size(blocks) >= n_wanted_blocks)
+            {
+                break;
+            }
 
-        // in sequential mode, only download from current file (same priority and file)
-        if (is_sequential && (candidate.priority != current_priority || candidate.file_index != current_file_index))
+            // Set current file to first one we encounter
+            if (!have_current_file)
+            {
+                current_priority = candidate.priority;
+                current_file_index = candidate.file_index;
+                have_current_file = true;
+            }
+
+            // If we moved to a different file, check if current file still has unrequested blocks
+            if (candidate.priority != current_priority || candidate.file_index != current_file_index)
+            {
+                // If we got blocks from current file, stay with it
+                if (!blocks.empty())
+                {
+                    break;
+                }
+                // Otherwise, move to next file
+                current_priority = candidate.priority;
+                current_file_index = candidate.file_index;
+            }
+
+            if (!peer_has_piece(candidate.piece) || candidate.unrequested.empty())
+            {
+                continue;
+            }
+
+            auto const n_to_add = std::min(std::size(candidate.unrequested), n_wanted_blocks - std::size(blocks));
+            std::copy_n(std::rbegin(candidate.unrequested), n_to_add, std::back_inserter(blocks));
+        }
+    }
+    else
+    {
+        for (auto const& candidate : candidates_)
         {
-            continue;
-        }
+            if (std::size(blocks) >= n_wanted_blocks)
+            {
+                break;
+            }
 
-        // if the peer doesn't have this piece that we want...
-        if (!peer_has_piece(candidate.piece))
-        {
-            continue;
-        }
+            if (!peer_has_piece(candidate.piece) || candidate.unrequested.empty())
+            {
+                continue;
+            }
 
-        // walk the blocks in this piece that we don't have or not requested
-        auto const n_to_add = std::min(std::size(candidate.unrequested), n_wanted_blocks - n_added);
-        std::copy_n(std::rbegin(candidate.unrequested), n_to_add, std::back_inserter(blocks));
+            auto const n_to_add = std::min(std::size(candidate.unrequested), n_wanted_blocks - std::size(blocks));
+            std::copy_n(std::rbegin(candidate.unrequested), n_to_add, std::back_inserter(blocks));
+        }
     }
 
     // Ensure the list of blocks are sorted
