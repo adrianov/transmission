@@ -2761,7 +2761,6 @@ void tr_torrent::recalculate_file_order()
 
     // Build mappings - initialize with a large value to indicate "not assigned"
     file_index_by_piece_.assign(piece_count(), piece_count());
-    file_start_piece_for_file_index_.resize(wanted_files.size());
 
     // Create a map from actual file index to alphabetical file index
     std::vector<tr_piece_index_t> file_idx_map(file_count(), piece_count());
@@ -2769,8 +2768,6 @@ void tr_torrent::recalculate_file_order()
     {
         auto const actual_file_index = wanted_files[file_idx];
         file_idx_map[actual_file_index] = static_cast<tr_piece_index_t>(file_idx);
-        auto const [piece_begin, piece_end] = fpm_.piece_span_for_file(actual_file_index);
-        file_start_piece_for_file_index_[file_idx] = piece_begin;
     }
 
     // For each piece, find which files it belongs to and assign it to the first (alphabetically)
@@ -2809,15 +2806,6 @@ tr_piece_index_t tr_torrent::file_index_for_piece(tr_piece_index_t piece) const 
     if (piece < file_index_by_piece_.size())
     {
         return file_index_by_piece_[piece];
-    }
-    return 0;
-}
-
-tr_piece_index_t tr_torrent::file_start_piece(tr_piece_index_t alphabetical_file_index) const noexcept
-{
-    if (alphabetical_file_index < file_start_piece_for_file_index_.size())
-    {
-        return file_start_piece_for_file_index_[alphabetical_file_index];
     }
     return 0;
 }

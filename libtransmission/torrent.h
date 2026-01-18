@@ -814,8 +814,6 @@ struct tr_torrent
 
     [[nodiscard]] tr_piece_index_t file_index_for_piece(tr_piece_index_t piece) const noexcept;
 
-    [[nodiscard]] tr_piece_index_t file_start_piece(tr_piece_index_t alphabetical_file_index) const noexcept;
-
     [[nodiscard]] constexpr bool is_running() const noexcept
     {
         return is_running_;
@@ -1462,15 +1460,13 @@ private:
 
     bool needs_completeness_check_ = true;
 
-    bool sequential_download_ = false;
+    bool sequential_download_ = true;
 
     tr_piece_index_t sequential_download_from_piece_ = 0;
 
     tr_sequential_mode_t sequential_download_mode_ = TR_SEQUENTIAL_BY_FILE;
 
     std::vector<tr_piece_index_t> file_index_by_piece_;
-
-    std::vector<tr_piece_index_t> file_start_piece_for_file_index_;
 
     // start the torrent after all the startup scaffolding is done,
     // e.g. fetching metadata from peers and/or verifying the torrent

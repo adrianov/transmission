@@ -12,7 +12,10 @@
 
 int main(int argc, char** argv)
 {
-    // Set background I/O priority (equivalent to taskpolicy -b)
+    // Set background priority (equivalent to taskpolicy -b)
+    // CPU: use PRIO_DARWIN_BG to prefer efficiency cores on Apple Silicon
+    setpriority(PRIO_DARWIN_PROCESS, 0, PRIO_DARWIN_BG);
+    // I/O: throttle disk operations
     setiopolicy_np(IOPOL_TYPE_DISK, IOPOL_SCOPE_PROCESS, IOPOL_THROTTLE);
 
     tr_lib_init();
