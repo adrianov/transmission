@@ -2435,7 +2435,7 @@ void update_dynamic_peer_limit(tr_swarm* s, uint64_t const now_msec, time_t cons
     }
 
     // Need meaningful speed to record
-    if (total_speed < 1024) // Less than 1 KB/s
+    if (total_speed < 10240) // Less than 10 KB/s
     {
         return;
     }
@@ -2456,39 +2456,10 @@ void update_dynamic_peer_limit(tr_swarm* s, uint64_t const now_msec, time_t cons
         }
     }
 
-    // If we have a limit set but current peer count has better speed, raise the limit
-    if (s->dynamic_peer_limit > 0 && peer_count >= s->dynamic_peer_limit && stored > best_speed * 95 / 100)
+    // Allow one more connection to be tried than best peer limit
+    if (best_count > 0 && best_count == peer_count && peer_count < s->tor->peer_limit())
     {
-        s->dynamic_peer_limit = 0; // Reset limit to explore more
-        tr_logAddDebugSwarm(
-            s,
-            fmt::format("dynamic peer limit reset (speed {} KB/s with {} peers)", stored / 1024, peer_count));
-        return;
-    }
-
-    // If best count is the highest we've seen, occasionally try adding one more
-    if (best_count > 0 && best_count == peer_count &&
-        s->speed_at_peer_count.find(peer_count + 1) == s->speed_at_peer_count.end())
-    {
-        s->dynamic_peer_limit = 0; // Allow one more connection to be tried
-        return;
-    }
-
-    // Only set limit if current speed is significantly lower than best (< 90%)
-    if (best_count > 0 && peer_count > best_count + 2 && stored < best_speed * 90 / 100)
-    {
-        if (s->dynamic_peer_limit != best_count)
-        {
-            s->dynamic_peer_limit = best_count;
-            tr_logAddDebugSwarm(
-                s,
-                fmt::format(
-                    "dynamic peer limit set to {} (best {} KB/s, current {} KB/s with {} peers)",
-                    best_count,
-                    best_speed / 1024,
-                    stored / 1024,
-                    peer_count));
-        }
+        s->dynamic_peer_limit = peer_count + 1;
     }
 }
 
