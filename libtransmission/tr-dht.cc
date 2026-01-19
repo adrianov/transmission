@@ -179,6 +179,11 @@ public:
         }
 
         mediator_.api().uninit();
+
+        // Note: pending_bootstrap_dns_ destructor may block briefly if DNS
+        // lookup is still in progress, but this is unavoidable with std::async.
+        // The DNS lookup is typically fast, and this is better than blocking startup.
+
         tr_logAddTrace("Done uninitializing DHT");
     }
 
