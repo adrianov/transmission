@@ -164,7 +164,7 @@ void setup_item_view_button_event_handling(
     std::function<bool(double, double)> const& release_callback);
 #endif
 
-/* move a file to the trashcan if GIO is available; otherwise, delete it */
+/* permanently delete a file */
 bool gtr_file_trash_or_remove(std::string const& filename, tr_error* error = nullptr);
 
 void gtr_paste_clipboard_url_into_entry(Gtk::Entry& entry);

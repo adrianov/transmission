@@ -530,47 +530,24 @@ bool gtr_file_trash_or_remove(std::string const& filename, tr_error* error)
     }
 
     auto const file = Gio::File::create_for_path(filename);
-    bool trashed = false;
 
-    if (gtr_pref_flag_get(TR_KEY_trash_can_enabled))
+    try
     {
-        try
-        {
-            trashed = file->trash();
-        }
-        catch (Glib::Error const& e)
-        {
-            error->set(e.code(), TR_GLIB_EXCEPTION_WHAT(e));
-            gtr_message(
-                fmt::format(
-                    fmt::runtime(_("Couldn't move '{path}' to trash: {error} ({error_code})")),
-                    fmt::arg("path", filename),
-                    fmt::arg("error", error->message()),
-                    fmt::arg("error_code", error->code())));
-        }
+        file->remove();
+    }
+    catch (Glib::Error const& e)
+    {
+        error->set(e.code(), TR_GLIB_EXCEPTION_WHAT(e));
+        gtr_message(
+            fmt::format(
+                fmt::runtime(_("Couldn't remove '{path}': {error} ({error_code})")),
+                fmt::arg("path", filename),
+                fmt::arg("error", error->message()),
+                fmt::arg("error_code", error->code())));
+        return false;
     }
 
-    bool result = true;
-    if (!trashed)
-    {
-        try
-        {
-            file->remove();
-        }
-        catch (Glib::Error const& e)
-        {
-            error->set(e.code(), TR_GLIB_EXCEPTION_WHAT(e));
-            gtr_message(
-                fmt::format(
-                    fmt::runtime(_("Couldn't remove '{path}': {error} ({error_code})")),
-                    fmt::arg("path", filename),
-                    fmt::arg("error", error->message()),
-                    fmt::arg("error_code", error->code())));
-            result = false;
-        }
-    }
-
-    return result;
+    return true;
 }
 
 namespace
