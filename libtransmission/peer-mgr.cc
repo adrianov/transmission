@@ -2339,6 +2339,44 @@ void close_slow_peers(tr_swarm* s, uint64_t const now_msec, time_t const now_sec
         return;
     }
 
+    // Minimum connection time before judging speed
+    static auto constexpr MinConnectionSecs = time_t{ 30 };
+    // Longer timeout for zero-speed peers
+    static auto constexpr ZeroSpeedTimeoutSecs = time_t{ 60 };
+
+    // First, disconnect peers with 0 speed that have been connected long enough
+    for (auto const& peer : peers)
+    {
+        if (peer->is_disconnecting())
+        {
+            continue;
+        }
+
+        auto const conn_secs = peer->peer_info->connection_secs(now_sec);
+        if (conn_secs < ZeroSpeedTimeoutSecs)
+        {
+            continue;
+        }
+
+        auto const peer_speed = peer->get_piece_speed(now_msec, TR_PEER_TO_CLIENT);
+        if (peer_speed.base_quantity() > 0)
+        {
+            continue;
+        }
+
+        // Don't disconnect if peer has unique pieces
+        if (has_unique_pieces(s, peer.get()))
+        {
+            continue;
+        }
+
+        tr_logAddTraceSwarm(
+            s,
+            fmt::format("disconnecting zero-speed peer {} (connected {} sec)", peer->display_name(), conn_secs));
+        peer->peer_info->on_slow_connection();
+        peer->disconnect_soon();
+    }
+
     // Collect download speeds from all peers
     auto speeds = std::vector<Speed>{};
     speeds.reserve(peer_count);
@@ -2351,7 +2389,7 @@ void close_slow_peers(tr_swarm* s, uint64_t const now_msec, time_t const now_sec
     std::sort(speeds.begin(), speeds.end());
     auto const median_speed = speeds[peer_count / 2];
 
-    // Don't disconnect if median is very low (could be starting up)
+    // Don't disconnect based on median if it's very low
     if (median_speed.base_quantity() < 1024) // Less than 1 KB/s median
     {
         return;
@@ -2360,10 +2398,7 @@ void close_slow_peers(tr_swarm* s, uint64_t const now_msec, time_t const now_sec
     // Threshold is median / 3
     auto const threshold = Speed{ median_speed.base_quantity() / 3, Speed::Units::Byps };
 
-    // Minimum connection time before judging speed
-    static auto constexpr MinConnectionSecs = time_t{ 30 };
-
-    // Disconnect all slow peers that have been connected long enough
+    // Disconnect slow peers (but not zero - handled above)
     for (auto const& peer : peers)
     {
         if (peer->is_disconnecting())
@@ -2371,7 +2406,6 @@ void close_slow_peers(tr_swarm* s, uint64_t const now_msec, time_t const now_sec
             continue;
         }
 
-        // Only judge peers connected for at least 30 seconds
         if (peer->peer_info->connection_secs(now_sec) < MinConnectionSecs)
         {
             continue;
@@ -2383,7 +2417,6 @@ void close_slow_peers(tr_swarm* s, uint64_t const now_msec, time_t const now_sec
             continue;
         }
 
-        // Don't disconnect if peer has unique pieces
         if (has_unique_pieces(s, peer.get()))
         {
             continue;
