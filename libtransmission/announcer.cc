@@ -1218,7 +1218,13 @@ void tr_announcer_impl::removeTorrent(tr_torrent* tor)
 
     for (auto const& tier : ta->tiers)
     {
-        if (tier.isRunning && tier.lastAnnounceSucceeded)
+        // Only send stop announce to trackers that successfully responded
+        // during this session (had valid seeder/leecher counts)
+        auto const* tracker = tier.currentTracker();
+        bool const has_valid_response = tracker != nullptr &&
+            (tracker->seeder_count().has_value() || tracker->leecher_count().has_value());
+
+        if (tier.isRunning && tier.lastAnnounceSucceeded && has_valid_response)
         {
             stops_.emplace(create_announce_request(this, tor, &tier, TR_ANNOUNCE_EVENT_STOPPED));
         }
