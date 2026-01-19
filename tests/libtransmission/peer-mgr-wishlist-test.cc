@@ -25,10 +25,12 @@ protected:
     {
         mutable std::map<tr_piece_index_t, tr_block_span_t> block_span_;
         mutable std::map<tr_piece_index_t, tr_priority_t> piece_priority_;
+        mutable std::map<tr_piece_index_t, size_t> piece_replication_;
         mutable std::set<tr_block_index_t> client_has_block_;
         mutable std::set<tr_piece_index_t> client_has_piece_;
         mutable std::set<tr_piece_index_t> client_wants_piece_;
         bool is_sequential_download_ = false;
+        tr_piece_index_t sequential_download_from_piece_ = 0;
 
         PeerMgrWishlistTest& parent_;
 
@@ -143,13 +145,18 @@ protected:
     libtransmission::SimpleObservable<tr_torrent*, tr_file_index_t const*, tr_file_index_t, bool> files_wanted_changed_;
     libtransmission::SimpleObservable<tr_torrent*, tr_bitfield const&, tr_bitfield const&> peer_disconnect_;
     libtransmission::SimpleObservable<tr_torrent*, tr_piece_index_t> got_bad_piece_;
+    libtransmission::SimpleObservable<tr_torrent*, tr_bitfield const&> got_bitfield_;
     libtransmission::SimpleObservable<tr_torrent*, tr_block_index_t> got_block_;
     libtransmission::SimpleObservable<tr_torrent*, tr_bitfield const&> got_choke_;
+    libtransmission::SimpleObservable<tr_torrent*, tr_piece_index_t> got_have_;
+    libtransmission::SimpleObservable<tr_torrent*> got_have_all_;
     libtransmission::SimpleObservable<tr_torrent*, tr_peer*, tr_block_index_t> got_reject_;
     libtransmission::SimpleObservable<tr_torrent*, tr_peer*, tr_block_index_t> sent_cancel_;
     libtransmission::SimpleObservable<tr_torrent*, tr_peer*, tr_block_span_t> sent_request_;
     libtransmission::SimpleObservable<tr_torrent*, tr_piece_index_t> piece_completed_;
     libtransmission::SimpleObservable<tr_torrent*, tr_file_index_t const*, tr_file_index_t, tr_priority_t> priority_changed_;
+    libtransmission::SimpleObservable<tr_torrent*, bool> sequential_download_changed_;
+    libtransmission::SimpleObservable<tr_torrent*, tr_piece_index_t> sequential_download_from_piece_changed_;
 
     static auto constexpr PeerHasAllPieces = [](tr_piece_index_t)
     {
