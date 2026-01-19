@@ -211,13 +211,13 @@
 "Are you sure you want to remove %lu trackers?" = "Are you sure you want to remove %lu trackers?";
 
 /* Removal confirm panel -> title */
-"Are you sure you want to remove %lu transfers from the transfer list and trash the data files?" = "Are you sure you want to remove %lu transfers from the transfer list and trash the data files?";
+"Are you sure you want to remove %lu transfers from the transfer list and permanently delete the data files?" = "Are you sure you want to remove %lu transfers from the transfer list and permanently delete the data files?";
 
 /* Removal confirm panel -> title */
 "Are you sure you want to remove %lu transfers from the transfer list?" = "Are you sure you want to remove %lu transfers from the transfer list?";
 
 /* Removal confirm panel -> title */
-"Are you sure you want to remove \"%@\" from the transfer list and trash the data file?" = "Are you sure you want to remove \"%@\" from the transfer list and trash the data file?";
+"Are you sure you want to remove \"%@\" from the transfer list and permanently delete the data?" = "Are you sure you want to remove \"%@\" from the transfer list and permanently delete the data?";
 
 /* Removal confirm panel -> title
    Remove completed confirm panel -> title */

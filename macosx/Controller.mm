@@ -1920,7 +1920,7 @@ void onTorrentCompletenessChanged(tr_torrent* tor, tr_completeness status, bool 
                 {
                     title = [NSString stringWithFormat:NSLocalizedString(
                                                            @"Are you sure you want to remove \"%@\" from the transfer list"
-                                                            " and trash the data file?",
+                                                            " and permanently delete the data?",
                                                            "Removal confirm panel -> title"),
                                                        torrentName];
                 }
@@ -1942,7 +1942,7 @@ void onTorrentCompletenessChanged(tr_torrent* tor, tr_completeness status, bool 
                 {
                     title = [NSString localizedStringWithFormat:NSLocalizedString(
                                                                     @"Are you sure you want to remove %lu transfers from the transfer list"
-                                                                     " and trash the data files?",
+                                                                     " and permanently delete the data files?",
                                                                     "Removal confirm panel -> title"),
                                                                 selected];
                 }
@@ -4321,9 +4321,9 @@ void onTorrentCompletenessChanged(tr_torrent* tor, tr_completeness status, bool 
     {
         ButtonToolbarItem* item = [self standardToolbarButtonWithIdentifier:ident];
 
-        item.label = NSLocalizedString(@"Trash", "Remove and trash toolbar item -> label");
-        item.paletteLabel = NSLocalizedString(@"Remove and Trash Selected", "Remove and trash toolbar item -> palette label");
-        item.toolTip = NSLocalizedString(@"Remove selected transfers and trash data", "Remove and trash toolbar item -> tooltip");
+        item.label = NSLocalizedString(@"Delete", "Remove and delete toolbar item -> label");
+        item.paletteLabel = NSLocalizedString(@"Remove and Delete Selected", "Remove and delete toolbar item -> palette label");
+        item.toolTip = NSLocalizedString(@"Remove selected transfers and permanently delete data", "Remove and delete toolbar item -> tooltip");
         item.image = [NSImage imageWithSystemSymbolName:@"trash" accessibilityDescription:nil];
         item.target = self;
         item.action = @selector(removeDeleteData:);
