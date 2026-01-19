@@ -330,77 +330,57 @@ std::vector<tr_block_span_t> Wishlist::Impl::next(
         return {};
     }
 
-    auto const is_sequential = mediator_.is_sequential_download();
-
     auto blocks = small::vector<tr_block_index_t>{};
     blocks.reserve(n_wanted_blocks);
 
-    // In sequential mode, process file by file in order
-    if (is_sequential)
+    // Candidates are already sorted by {-priority, file_index, piece}.
+    // Just iterate in order - sequential behavior comes from the sort order.
+    for (auto const& candidate : candidates_)
     {
-        auto current_priority = tr_priority_t{};
-        auto current_file_index = tr_piece_index_t{};
-        bool have_current_file = false;
+        if (std::size(blocks) >= n_wanted_blocks)
+        {
+            break;
+        }
+        if (!peer_has_piece(candidate.piece) || candidate.unrequested.empty())
+        {
+            continue;
+        }
+        auto const n_to_add = std::min(std::size(candidate.unrequested), n_wanted_blocks - std::size(blocks));
+        std::copy_n(std::rbegin(candidate.unrequested), n_to_add, std::back_inserter(blocks));
+    }
 
+    // Endgame mode: if we didn't get enough blocks, allow requesting already-requested blocks
+    // This helps complete the last pieces faster by requesting from multiple peers
+    if (std::size(blocks) < n_wanted_blocks)
+    {
         for (auto const& candidate : candidates_)
         {
             if (std::size(blocks) >= n_wanted_blocks)
             {
                 break;
             }
-
-            // Set current file to first one we encounter
-            if (!have_current_file)
+            if (!peer_has_piece(candidate.piece))
             {
-                current_priority = candidate.priority;
-                current_file_index = candidate.file_index;
-                have_current_file = true;
+                continue;
             }
-
-            // If we moved to a different file, check if current file still has unrequested blocks
-            if (candidate.priority != current_priority || candidate.file_index != current_file_index)
+            // Request any blocks we don't have yet (even if already requested from another peer)
+            for (auto block = candidate.block_span.begin; block < candidate.block_span.end; ++block)
             {
-                // If we got blocks from current file, stay with it
-                if (!blocks.empty())
+                if (std::size(blocks) >= n_wanted_blocks)
                 {
                     break;
                 }
-                // Otherwise, move to next file
-                current_priority = candidate.priority;
-                current_file_index = candidate.file_index;
+                if (!mediator_.client_has_block(block))
+                {
+                    blocks.push_back(block);
+                }
             }
-
-            if (!peer_has_piece(candidate.piece) || candidate.unrequested.empty())
-            {
-                continue;
-            }
-
-            auto const n_to_add = std::min(std::size(candidate.unrequested), n_wanted_blocks - std::size(blocks));
-            std::copy_n(std::rbegin(candidate.unrequested), n_to_add, std::back_inserter(blocks));
-        }
-    }
-    else
-    {
-        for (auto const& candidate : candidates_)
-        {
-            if (std::size(blocks) >= n_wanted_blocks)
-            {
-                break;
-            }
-
-            if (!peer_has_piece(candidate.piece) || candidate.unrequested.empty())
-            {
-                continue;
-            }
-
-            auto const n_to_add = std::min(std::size(candidate.unrequested), n_wanted_blocks - std::size(blocks));
-            std::copy_n(std::rbegin(candidate.unrequested), n_to_add, std::back_inserter(blocks));
         }
     }
 
-    // Ensure the list of blocks are sorted
-    // The list needs to be unique as well, but that should come naturally
+    // Ensure the list of blocks are sorted and unique
     std::sort(std::begin(blocks), std::end(blocks));
+    blocks.erase(std::unique(std::begin(blocks), std::end(blocks)), std::end(blocks));
     return make_spans(blocks);
 }
 
