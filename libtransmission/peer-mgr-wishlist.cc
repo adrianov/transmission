@@ -3,7 +3,7 @@
 // or any future license endorsed by Mnemosyne LLC.
 // License text can be found in the licenses/ folder.
 
-#include <algorithm> // std::adjacent_find, std::sort
+#include <algorithm>
 #include <cstddef>
 #include <functional>
 #include <utility>
@@ -22,6 +22,7 @@
 
 namespace
 {
+// Converts sorted block indices into contiguous spans
 [[nodiscard]] std::vector<tr_block_span_t> make_spans(small::vector<tr_block_index_t> const& blocks)
 {
     if (std::empty(blocks))
@@ -30,19 +31,17 @@ namespace
     }
 
     auto spans = std::vector<tr_block_span_t>{};
-    spans.reserve(std::size(blocks));
-    for (auto span_begin = std::begin(blocks), end = std::end(blocks); span_begin != end;)
+    auto span_begin = blocks.front();
+
+    for (size_t i = 1; i < blocks.size(); ++i)
     {
-        static auto constexpr NotAdjacent = [](tr_block_index_t const lhs, tr_block_index_t const rhs)
+        if (blocks[i] != blocks[i - 1] + 1)
         {
-            return lhs + 1U != rhs;
-        };
-
-        auto const span_end = std::min(std::adjacent_find(span_begin, end, NotAdjacent), std::prev(end));
-        spans.push_back({ *span_begin, *span_end + 1U });
-
-        span_begin = std::next(span_end);
+            spans.push_back({ span_begin, blocks[i - 1] + 1 });
+            span_begin = blocks[i];
+        }
     }
+    spans.push_back({ span_begin, blocks.back() + 1 });
 
     return spans;
 }
@@ -70,7 +69,6 @@ class Wishlist::Impl
         }
 
         // Sort key: priority (high first), file (alphabetically), piece number.
-        // This order is static - only changes when priority changes.
         [[nodiscard]] constexpr auto sort_key() const noexcept
         {
             return std::tuple{ -priority, file_index, piece };
@@ -87,11 +85,11 @@ class Wishlist::Impl
         }
 
         tr_piece_index_t piece;
-        tr_piece_index_t file_index; // alphabetical file index, cached for sorting
+        tr_piece_index_t file_index;
         tr_block_span_t block_span;
         tr_block_span_t raw_block_span;
 
-        // Sorted descending so smaller block indices can be taken from end (no move needed)
+        // Sorted descending so smaller block indices can be taken from end
         small::set<tr_block_index_t, small::default_inline_storage_v<tr_block_index_t>, std::greater<>> unrequested;
 
         tr_priority_t priority;
@@ -107,44 +105,44 @@ public:
         std::function<bool(tr_piece_index_t)> const& peer_has_piece);
 
 private:
-    void sort_candidates()
+    // Adds blocks for endgame mode (re-request blocks that are still missing)
+    void add_endgame_blocks(Candidate const& candidate, size_t n_wanted, small::vector<tr_block_index_t>& blocks) const
     {
-        std::sort(std::begin(candidates_), std::end(candidates_));
+        for (auto block = candidate.block_span.begin; block < candidate.block_span.end && blocks.size() < n_wanted; ++block)
+        {
+            if (!mediator_.client_has_block(block))
+            {
+                blocks.push_back(block);
+            }
+        }
     }
 
-    // ---
-
-    void requested_block_span(tr_block_span_t const block_span)
+    void requested_block_span(tr_block_span_t const span)
     {
-        for (auto block = block_span.begin; block < block_span.end;)
+        for (auto block = span.begin; block < span.end;)
         {
-            auto it_p = find_by_block(block);
-            if (it_p == std::end(candidates_))
+            auto const it = find_by_block(block);
+            if (it == std::end(candidates_))
             {
                 break;
             }
 
-            auto& unreq = it_p->unrequested;
+            // Erase blocks in [span.begin, span.end) from this candidate's unrequested set
+            auto& unreq = it->unrequested;
+            for (auto b = std::max(span.begin, it->block_span.begin); b < std::min(span.end, it->block_span.end); ++b)
+            {
+                unreq.erase(b);
+            }
 
-            auto it_b_end = std::end(unreq);
-            it_b_end = *std::prev(it_b_end) >= block_span.begin ? it_b_end : unreq.upper_bound(block_span.begin);
-
-            auto it_b_begin = std::begin(unreq);
-            it_b_begin = *it_b_begin < block_span.end ? it_b_begin : unreq.upper_bound(block_span.end);
-
-            unreq.erase(it_b_begin, it_b_end);
-
-            block = it_p->block_span.end;
-            // No resort needed - sort key doesn't include unrequested count
+            block = it->block_span.end;
         }
     }
 
-    void reset_block(tr_block_index_t block)
+    void reset_block(tr_block_index_t const block)
     {
-        if (auto it_p = find_by_block(block); it_p != std::end(candidates_))
+        if (auto const it = find_by_block(block); it != std::end(candidates_))
         {
-            it_p->unrequested.insert(block);
-            // No resort needed - sort key doesn't include unrequested count
+            it->unrequested.insert(block);
         }
     }
 
@@ -158,52 +156,42 @@ private:
                 continue;
             }
 
-            for (auto i = end; i > begin; --i)
+            for (auto block = begin; block < end; ++block)
             {
-                if (auto const block = i - 1U; requests.test(block))
+                if (requests.test(block))
                 {
                     candidate.unrequested.insert(block);
                 }
             }
         }
-        // No sort needed - sort key doesn't include unrequested count
     }
 
-    // ---
-
-    void client_got_block(tr_block_index_t block)
+    void client_got_block(tr_block_index_t const block)
     {
-        if (auto const iter = find_by_block(block); iter != std::end(candidates_))
+        if (auto const it = find_by_block(block); it != std::end(candidates_))
         {
-            iter->unrequested.erase(block);
-            // No resort needed - sort key doesn't include unrequested count
+            it->unrequested.erase(block);
         }
     }
 
-    // ---
-
     void got_bad_piece(tr_piece_index_t const piece)
     {
-        // Bad piece is rare - just rebuild the candidate list
-        auto const iter = find_by_piece(piece);
-        if (iter == std::end(candidates_))
+        auto const it = find_by_piece(piece);
+        if (it == std::end(candidates_))
         {
             return;
         }
 
-        // Reset all blocks as unrequested for this piece
-        iter->block_span = iter->raw_block_span;
-        iter->unrequested.clear();
-        for (auto [begin, i] = iter->block_span; i > begin; --i)
+        it->block_span = it->raw_block_span;
+        it->unrequested.clear();
+        for (auto block = it->block_span.begin; block < it->block_span.end; ++block)
         {
-            if (!mediator_.client_has_block(i - 1U))
+            if (!mediator_.client_has_block(block))
             {
-                iter->unrequested.insert(i - 1U);
+                it->unrequested.insert(block);
             }
         }
     }
-
-    // ---
 
     [[nodiscard]] TR_CONSTEXPR20 CandidateVec::iterator find_by_piece(tr_piece_index_t const piece)
     {
@@ -223,10 +211,8 @@ private:
 
     void candidate_list_upkeep()
     {
-        // Rebuild candidate list from scratch - simpler and the sort key is static
         auto const n_pieces = mediator_.piece_count();
 
-        // Collect wanted pieces
         auto new_candidates = CandidateVec{};
         new_candidates.reserve(n_pieces);
 
@@ -238,7 +224,6 @@ private:
             }
         }
 
-        // Sort once by our static sort key
         std::sort(std::begin(new_candidates), std::end(new_candidates));
 
         // Handle block span overlaps between consecutive pieces
@@ -249,7 +234,6 @@ private:
 
             if (prev.block_span.end > curr.block_span.begin)
             {
-                // Overlapping blocks - assign to earlier piece, remove from later
                 for (auto block = curr.block_span.begin; block < prev.block_span.end; ++block)
                 {
                     curr.unrequested.erase(block);
@@ -261,17 +245,13 @@ private:
         candidates_ = std::move(new_candidates);
     }
 
-    // ---
-
     void remove_piece(tr_piece_index_t const piece)
     {
-        if (auto iter = find_by_piece(piece); iter != std::end(candidates_))
+        if (auto const it = find_by_piece(piece); it != std::end(candidates_))
         {
-            candidates_.erase(iter);
+            candidates_.erase(it);
         }
     }
-
-    // ---
 
     void recalculate_priority()
     {
@@ -281,7 +261,7 @@ private:
             candidate.file_index = mediator_.file_index_for_piece(candidate.piece);
         }
 
-        sort_candidates();
+        std::sort(std::begin(candidates_), std::end(candidates_));
     }
 
     CandidateVec candidates_;
@@ -293,28 +273,18 @@ private:
 
 Wishlist::Impl::Impl(Mediator& mediator_in)
     : tags_{ {
-          // candidates
           mediator_in.observe_files_wanted_changed([this](tr_torrent*, tr_file_index_t const*, tr_file_index_t, bool)
                                                    { candidate_list_upkeep(); }),
-          // unrequested
           mediator_in.observe_peer_disconnect([this](tr_torrent*, tr_bitfield const&, tr_bitfield const& requests)
                                               { reset_blocks_bitfield(requests); }),
-          // unrequested
           mediator_in.observe_got_bad_piece([this](tr_torrent*, tr_piece_index_t p) { got_bad_piece(p); }),
-          // unrequested
           mediator_in.observe_got_block([this](tr_torrent*, tr_block_index_t b) { client_got_block(b); }),
-          // unrequested
           mediator_in.observe_got_choke([this](tr_torrent*, tr_bitfield const& b) { reset_blocks_bitfield(b); }),
-          // unrequested
           mediator_in.observe_got_reject([this](tr_torrent*, tr_peer*, tr_block_index_t b) { reset_block(b); }),
-          // candidates
           mediator_in.observe_piece_completed([this](tr_torrent*, tr_piece_index_t p) { remove_piece(p); }),
-          // priority
           mediator_in.observe_priority_changed([this](tr_torrent*, tr_file_index_t const*, tr_file_index_t, tr_priority_t)
                                                { recalculate_priority(); }),
-          // unrequested
           mediator_in.observe_sent_cancel([this](tr_torrent*, tr_peer*, tr_block_index_t b) { reset_block(b); }),
-          // unrequested
           mediator_in.observe_sent_request([this](tr_torrent*, tr_peer*, tr_block_span_t bs) { requested_block_span(bs); }),
       } }
     , mediator_{ mediator_in }
@@ -332,75 +302,85 @@ std::vector<tr_block_span_t> Wishlist::Impl::next(
     }
 
     auto const is_sequential = mediator_.is_sequential_download();
-
     auto blocks = small::vector<tr_block_index_t>{};
     blocks.reserve(n_wanted_blocks);
 
-    // In sequential mode, process file by file in order
-    if (is_sequential)
+    // Track current file context for sequential mode
+    auto current_priority = tr_priority_t{};
+    auto current_file_index = tr_piece_index_t{};
+    auto have_current_file = false;
+
+    // Returns true if we should stop iterating (file boundary crossed with blocks collected)
+    auto const check_sequential_boundary = [&](Candidate const& candidate) -> bool
     {
-        auto current_priority = tr_priority_t{};
-        auto current_file_index = tr_piece_index_t{};
-        bool have_current_file = false;
+        if (!is_sequential)
+        {
+            return false;
+        }
+
+        if (!have_current_file)
+        {
+            current_priority = candidate.priority;
+            current_file_index = candidate.file_index;
+            have_current_file = true;
+            return false;
+        }
+
+        if (candidate.priority != current_priority || candidate.file_index != current_file_index)
+        {
+            if (!blocks.empty())
+            {
+                return true;
+            }
+            current_priority = candidate.priority;
+            current_file_index = candidate.file_index;
+        }
+        return false;
+    };
+
+    // First pass: collect unrequested blocks
+    for (auto const& candidate : candidates_)
+    {
+        if (blocks.size() >= n_wanted_blocks || check_sequential_boundary(candidate))
+        {
+            break;
+        }
+
+        if (!peer_has_piece(candidate.piece) || candidate.unrequested.empty())
+        {
+            continue;
+        }
+
+        auto const n_to_add = std::min(candidate.unrequested.size(), n_wanted_blocks - blocks.size());
+        std::copy_n(std::rbegin(candidate.unrequested), n_to_add, std::back_inserter(blocks));
+    }
+
+    // Endgame fallback: re-request blocks that haven't arrived yet
+    if (blocks.empty())
+    {
+        have_current_file = false;
 
         for (auto const& candidate : candidates_)
         {
-            if (std::size(blocks) >= n_wanted_blocks)
+            if (blocks.size() >= n_wanted_blocks)
             {
                 break;
             }
 
-            // Set current file to first one we encounter
-            if (!have_current_file)
-            {
-                current_priority = candidate.priority;
-                current_file_index = candidate.file_index;
-                have_current_file = true;
-            }
-
-            // If we moved to a different file, check if current file still has unrequested blocks
-            if (candidate.priority != current_priority || candidate.file_index != current_file_index)
-            {
-                // If we got blocks from current file, stay with it
-                if (!blocks.empty())
-                {
-                    break;
-                }
-                // Otherwise, move to next file
-                current_priority = candidate.priority;
-                current_file_index = candidate.file_index;
-            }
-
-            if (!peer_has_piece(candidate.piece) || candidate.unrequested.empty())
+            if (!peer_has_piece(candidate.piece))
             {
                 continue;
             }
 
-            auto const n_to_add = std::min(std::size(candidate.unrequested), n_wanted_blocks - std::size(blocks));
-            std::copy_n(std::rbegin(candidate.unrequested), n_to_add, std::back_inserter(blocks));
-        }
-    }
-    else
-    {
-        for (auto const& candidate : candidates_)
-        {
-            if (std::size(blocks) >= n_wanted_blocks)
+            if (check_sequential_boundary(candidate))
             {
                 break;
             }
 
-            if (!peer_has_piece(candidate.piece) || candidate.unrequested.empty())
-            {
-                continue;
-            }
-
-            auto const n_to_add = std::min(std::size(candidate.unrequested), n_wanted_blocks - std::size(blocks));
-            std::copy_n(std::rbegin(candidate.unrequested), n_to_add, std::back_inserter(blocks));
+            add_endgame_blocks(candidate, n_wanted_blocks, blocks);
         }
     }
 
-    // Ensure the list of blocks are sorted
-    // The list needs to be unique as well, but that should come naturally
     std::sort(std::begin(blocks), std::end(blocks));
     return make_spans(blocks);
 }
