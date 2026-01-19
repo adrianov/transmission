@@ -387,6 +387,7 @@ public:
         [[nodiscard]] tr_block_span_t block_span(tr_piece_index_t piece) const override;
         [[nodiscard]] tr_piece_index_t piece_count() const override;
         [[nodiscard]] tr_priority_t priority(tr_piece_index_t piece) const override;
+        [[nodiscard]] tr_piece_index_t block_piece(tr_block_index_t block) const override;
 
         [[nodiscard]] libtransmission::ObserverTag observe_files_wanted_changed(
             libtransmission::SimpleObservable<tr_torrent*, tr_file_index_t const*, tr_file_index_t, bool>::Observer observer)
@@ -1037,6 +1038,11 @@ tr_priority_t tr_swarm::WishlistMediator::priority(tr_piece_index_t piece) const
     return tor_.piece_priority(piece);
 }
 
+tr_piece_index_t tr_swarm::WishlistMediator::block_piece(tr_block_index_t block) const
+{
+    return tor_.block_loc(block).piece;
+}
+
 libtransmission::ObserverTag tr_swarm::WishlistMediator::observe_files_wanted_changed(
     libtransmission::SimpleObservable<tr_torrent*, tr_file_index_t const*, tr_file_index_t, bool>::Observer observer)
 {
@@ -1272,6 +1278,10 @@ std::vector<tr_block_span_t> tr_peerMgrGetNextRequests(tr_torrent* torrent, tr_p
     if (!swarm.wishlist)
     {
         return {};
+    }
+    if (peer->is_seed())
+    {
+        return swarm.wishlist->next(numwant);
     }
     return swarm.wishlist->next(numwant, [peer](tr_piece_index_t p) { return peer->has_piece(p); });
 }
