@@ -379,13 +379,14 @@ public:
         {
         }
 
+        [[nodiscard]] bool client_has_block(tr_block_index_t block) const override;
         [[nodiscard]] bool client_has_piece(tr_piece_index_t piece) const override;
         [[nodiscard]] bool client_wants_piece(tr_piece_index_t piece) const override;
+        [[nodiscard]] bool is_sequential_download() const override;
         [[nodiscard]] tr_piece_index_t file_index_for_piece(tr_piece_index_t piece) const override;
         [[nodiscard]] tr_block_span_t block_span(tr_piece_index_t piece) const override;
         [[nodiscard]] tr_piece_index_t piece_count() const override;
         [[nodiscard]] tr_priority_t priority(tr_piece_index_t piece) const override;
-        [[nodiscard]] tr_bitfield const& blocks() const override;
 
         [[nodiscard]] libtransmission::ObserverTag observe_files_wanted_changed(
             libtransmission::SimpleObservable<tr_torrent*, tr_file_index_t const*, tr_file_index_t, bool>::Observer observer)
@@ -996,6 +997,11 @@ EXIT:
     mutable std::optional<bool> pool_is_all_upload_only_;
 };
 
+bool tr_swarm::WishlistMediator::client_has_block(tr_block_index_t block) const
+{
+    return tor_.has_block(block);
+}
+
 bool tr_swarm::WishlistMediator::client_has_piece(tr_piece_index_t piece) const
 {
     return tor_.has_piece(piece);
@@ -1004,6 +1010,11 @@ bool tr_swarm::WishlistMediator::client_has_piece(tr_piece_index_t piece) const
 bool tr_swarm::WishlistMediator::client_wants_piece(tr_piece_index_t piece) const
 {
     return tor_.piece_is_wanted(piece);
+}
+
+bool tr_swarm::WishlistMediator::is_sequential_download() const
+{
+    return tor_.is_sequential_download();
 }
 
 tr_piece_index_t tr_swarm::WishlistMediator::file_index_for_piece(tr_piece_index_t piece) const
@@ -1024,11 +1035,6 @@ tr_piece_index_t tr_swarm::WishlistMediator::piece_count() const
 tr_priority_t tr_swarm::WishlistMediator::priority(tr_piece_index_t piece) const
 {
     return tor_.piece_priority(piece);
-}
-
-tr_bitfield const& tr_swarm::WishlistMediator::blocks() const
-{
-    return tor_.blocks();
 }
 
 libtransmission::ObserverTag tr_swarm::WishlistMediator::observe_files_wanted_changed(
@@ -1266,10 +1272,6 @@ std::vector<tr_block_span_t> tr_peerMgrGetNextRequests(tr_torrent* torrent, tr_p
     if (!swarm.wishlist)
     {
         return {};
-    }
-    if (peer->is_seed())
-    {
-        return swarm.wishlist->next(numwant);
     }
     return swarm.wishlist->next(numwant, [peer](tr_piece_index_t p) { return peer->has_piece(p); });
 }
