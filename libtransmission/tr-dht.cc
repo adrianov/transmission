@@ -11,8 +11,10 @@
 #include <ctime>
 #include <deque>
 #include <fstream>
+#include <future>
 #include <map>
 #include <memory>
+#include <optional>
 #include <sstream>
 #include <string>
 #include <string_view>
@@ -142,8 +144,14 @@ public:
         // init state from scratch, or load from state file if it exists
         init_state(state_filename_);
 
-        get_nodes_from_bootstrap_file(tr_pathbuf{ mediator_.config_dir(), "/dht.bootstrap"sv }, bootstrap_queue_);
-        get_nodes_from_name("dht.transmissionbt.com", tr_port::from_host(6881), bootstrap_queue_);
+        // Parse bootstrap file - IPs are added directly, hostnames need async DNS
+        auto hostnames = get_nodes_from_bootstrap_file(
+            tr_pathbuf{ mediator_.config_dir(), "/dht.bootstrap"sv },
+            bootstrap_queue_);
+        // Add default bootstrap server hostname
+        hostnames.emplace_back("dht.transmissionbt.com", tr_port::from_host(6881));
+        // Start async DNS lookups for all hostnames (non-blocking)
+        start_async_bootstrap_dns(std::move(hostnames));
         bootstrap_timer_->start_single_shot(100ms);
 
         mediator_.api().init(udp4_socket_, udp6_socket_, std::data(id_), nullptr);
@@ -296,12 +304,110 @@ private:
         return 40s;
     }
 
+    using HostPort = std::pair<std::string, tr_port>;
+
+    void start_async_bootstrap_dns(std::vector<HostPort> hostnames)
+    {
+        if (std::empty(hostnames))
+        {
+            return;
+        }
+
+        pending_bootstrap_dns_ = std::async(
+            std::launch::async,
+            [hosts = std::move(hostnames)]() { return dns_lookup_all(hosts); });
+    }
+
+    void check_pending_bootstrap_dns()
+    {
+        if (!pending_bootstrap_dns_)
+        {
+            return;
+        }
+
+        if (pending_bootstrap_dns_->wait_for(0ms) != std::future_status::ready)
+        {
+            return;
+        }
+
+        auto nodes = pending_bootstrap_dns_->get();
+        pending_bootstrap_dns_.reset();
+
+        for (auto& node : nodes)
+        {
+            bootstrap_queue_.emplace_back(std::move(node));
+        }
+    }
+
+    [[nodiscard]] static Nodes dns_lookup_all(std::vector<HostPort> const& hostnames)
+    {
+        auto all_nodes = Nodes{};
+        for (auto const& [name, port] : hostnames)
+        {
+            auto nodes = dns_lookup(name.c_str(), port);
+            for (auto& node : nodes)
+            {
+                all_nodes.emplace_back(std::move(node));
+            }
+        }
+        return all_nodes;
+    }
+
+    [[nodiscard]] static Nodes dns_lookup(char const* name, tr_port port_in)
+    {
+        auto nodes = Nodes{};
+
+        auto hints = addrinfo{};
+        hints.ai_socktype = SOCK_DGRAM;
+        hints.ai_family = AF_UNSPEC;
+        hints.ai_protocol = 0;
+        hints.ai_flags = 0;
+
+        auto const port_str = fmt::format("{:d}", port_in.host());
+        addrinfo* info = nullptr;
+        if (int const rc = getaddrinfo(name, port_str.c_str(), &hints, &info); rc != 0)
+        {
+            tr_logAddWarn(
+                fmt::format(
+                    fmt::runtime(_("Couldn't look up '{address}:{port}': {error} ({error_code})")),
+                    fmt::arg("address", name),
+                    fmt::arg("port", port_in.host()),
+                    fmt::arg("error", gai_strerror(rc)),
+                    fmt::arg("error_code", rc)));
+            return nodes;
+        }
+
+        for (auto* infop = info; infop != nullptr; infop = infop->ai_next)
+        {
+            if (auto addrport = tr_socket_address::from_sockaddr(infop->ai_addr); addrport)
+            {
+                nodes.emplace_back(*addrport);
+            }
+        }
+
+        freeaddrinfo(info);
+        return nodes;
+    }
+
     void on_bootstrap_timer()
     {
+        // Check if async DNS lookup completed
+        check_pending_bootstrap_dns();
+
         // Since we don't want to abuse our bootstrap nodes,
         // we don't ping them if the DHT is in a good state.
-        if (is_ready() || std::empty(bootstrap_queue_))
+        if (is_ready())
         {
+            return;
+        }
+
+        // If queue is empty but DNS is still pending, wait for it
+        if (std::empty(bootstrap_queue_))
+        {
+            if (pending_bootstrap_dns_)
+            {
+                bootstrap_timer_->start_single_shot(500ms);
+            }
             return;
         }
 
@@ -530,12 +636,15 @@ private:
 
     ///
 
-    static void get_nodes_from_bootstrap_file(std::string_view filename, Nodes& nodes)
+    // Parse bootstrap file, adding IP addresses directly to nodes
+    // and returning hostnames that need DNS lookup
+    [[nodiscard]] static std::vector<HostPort> get_nodes_from_bootstrap_file(std::string_view filename, Nodes& nodes)
     {
+        auto hostnames = std::vector<HostPort>{};
         auto in = std::ifstream{ std::string{ filename } };
         if (!in.is_open())
         {
-            return;
+            return hostnames;
         }
 
         // format is each line has host, a space char, and port number
@@ -554,45 +663,22 @@ private:
                         fmt::runtime(_("Couldn't parse '{filename}' line: '{line}'")),
                         fmt::arg("filename", filename),
                         fmt::arg("line", line)));
+                continue;
+            }
+
+            // Try to parse as IP address first (fast, no DNS)
+            if (auto addr = tr_address::from_string(addrstr); addr)
+            {
+                nodes.emplace_back(*addr, tr_port::from_host(hport));
             }
             else
             {
-                get_nodes_from_name(addrstr.c_str(), tr_port::from_host(hport), nodes);
-            }
-        }
-    }
-
-    static void get_nodes_from_name(char const* name, tr_port port_in, Nodes& nodes)
-    {
-        auto hints = addrinfo{};
-        hints.ai_socktype = SOCK_DGRAM;
-        hints.ai_family = AF_UNSPEC;
-        hints.ai_protocol = 0;
-        hints.ai_flags = 0;
-
-        auto const port_str = fmt::format("{:d}", port_in.host());
-        addrinfo* info = nullptr;
-        if (int const rc = getaddrinfo(name, port_str.c_str(), &hints, &info); rc != 0)
-        {
-            tr_logAddWarn(
-                fmt::format(
-                    fmt::runtime(_("Couldn't look up '{address}:{port}': {error} ({error_code})")),
-                    fmt::arg("address", name),
-                    fmt::arg("port", port_in.host()),
-                    fmt::arg("error", gai_strerror(rc)),
-                    fmt::arg("error_code", rc)));
-            return;
-        }
-
-        for (auto* infop = info; infop != nullptr; infop = infop->ai_next)
-        {
-            if (auto addrport = tr_socket_address::from_sockaddr(infop->ai_addr); addrport)
-            {
-                nodes.emplace_back(*addrport);
+                // It's a hostname, will need DNS lookup
+                hostnames.emplace_back(addrstr, tr_port::from_host(hport));
             }
         }
 
-        freeaddrinfo(info);
+        return hostnames;
     }
 
     ///
@@ -611,6 +697,7 @@ private:
     int64_t id_timestamp_ = {};
 
     Nodes bootstrap_queue_;
+    std::optional<std::future<Nodes>> pending_bootstrap_dns_;
     size_t n_bootstrapped_ = 0;
 
     struct AnnounceInfo
