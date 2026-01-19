@@ -107,6 +107,12 @@ public:
     // Deleting the object will cancel all of its tasks.
     ~tr_web();
 
+    // Quick proxy health check with short timeout.
+    // Returns true if proxy responds within timeout, false otherwise.
+    [[nodiscard]] static bool isProxyHealthy(
+        std::string_view proxy_url,
+        std::chrono::seconds timeout = std::chrono::seconds{ 3 });
+
     tr_web(tr_web const&) = delete;
     tr_web(tr_web&&) = delete;
     tr_web& operator=(tr_web const&) = delete;

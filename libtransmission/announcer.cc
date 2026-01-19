@@ -208,6 +208,23 @@ public:
 
     tr_session* const session;
 
+    // Check if a tracker host has permanently failed (connection issues, not found, etc.)
+    [[nodiscard]] bool is_host_failed(std::string_view host) const
+    {
+        return failed_hosts_.find(std::string{ host }) != failed_hosts_.end();
+    }
+
+    // Mark a tracker host as permanently failed for this session
+    void mark_host_failed(std::string_view host)
+    {
+        auto const host_str = std::string{ host };
+        if (failed_hosts_.find(host_str) == failed_hosts_.end())
+        {
+            tr_logAddInfo(fmt::format("Marking tracker host '{}' as unreachable for this session", host));
+            failed_hosts_.insert(host_str);
+        }
+    }
+
 private:
     void flushCloseMessages()
     {
@@ -228,6 +245,9 @@ private:
     std::unique_ptr<libtransmission::Timer> const upkeep_timer_;
 
     std::set<tr_announce_request, StopsCompare> stops_;
+
+    // Hosts that have failed permanently (connection refused, timeout, not found)
+    std::set<std::string> failed_hosts_;
 
     bool is_shutting_down_ = false;
 };
@@ -1043,10 +1063,20 @@ void tr_announcer_impl::onAnnounceDone(
 
     if (!response.did_connect)
     {
+        // Mark host as permanently failed - no point retrying connection failures
+        if (auto const* tracker = tier->currentTracker(); tracker != nullptr)
+        {
+            mark_host_failed(tracker->announce_parsed.host);
+        }
         on_announce_error(tier, _("Could not connect to tracker"), event);
     }
     else if (response.did_timeout)
     {
+        // Mark host as permanently failed - timeouts usually indicate unreachable host
+        if (auto const* tracker = tier->currentTracker(); tracker != nullptr)
+        {
+            mark_host_failed(tracker->announce_parsed.host);
+        }
         on_announce_error(tier, _("Tracker did not respond"), event);
     }
     else if (!std::empty(response.errmsg))
@@ -1219,12 +1249,17 @@ void tr_announcer_impl::removeTorrent(tr_torrent* tor)
     for (auto const& tier : ta->tiers)
     {
         // Only send stop announce to trackers that successfully responded
-        // during this session (had valid seeder/leecher counts)
+        // during this session (had valid seeder/leecher counts) and aren't failed
         auto const* tracker = tier.currentTracker();
-        bool const has_valid_response = tracker != nullptr &&
-            (tracker->seeder_count().has_value() || tracker->leecher_count().has_value());
+        if (tracker == nullptr)
+        {
+            continue;
+        }
 
-        if (tier.isRunning && tier.lastAnnounceSucceeded && has_valid_response)
+        bool const host_failed = is_host_failed(tracker->announce_parsed.host);
+        bool const has_valid_response = tracker->seeder_count().has_value() || tracker->leecher_count().has_value();
+
+        if (tier.isRunning && tier.lastAnnounceSucceeded && has_valid_response && !host_failed)
         {
             stops_.emplace(create_announce_request(this, tor, &tier, TR_ANNOUNCE_EVENT_STOPPED));
         }
@@ -1371,10 +1406,20 @@ void tr_announcer_impl::onScrapeDone(tr_scrape_response const& response)
 
         if (!response.did_connect)
         {
+            // Mark host as permanently failed
+            if (auto const* tracker = tier->currentTracker(); tracker != nullptr)
+            {
+                mark_host_failed(tracker->announce_parsed.host);
+            }
             on_scrape_error(session, tier, _("Could not connect to tracker"));
         }
         else if (response.did_timeout)
         {
+            // Mark host as permanently failed
+            if (auto const* tracker = tier->currentTracker(); tracker != nullptr)
+            {
+                mark_host_failed(tracker->announce_parsed.host);
+            }
             on_scrape_error(session, tier, _("Tracker did not respond"));
         }
         else if (!std::empty(response.errmsg))
@@ -1419,6 +1464,12 @@ void multiscrape(tr_announcer_impl* announcer, std::vector<tr_tier*> const& tier
         auto const* const current_tracker = tier->currentTracker();
         TR_ASSERT(current_tracker != nullptr);
         if (current_tracker == nullptr)
+        {
+            continue;
+        }
+
+        // Skip if current tracker's host has permanently failed
+        if (announcer->is_host_failed(current_tracker->announce_parsed.host))
         {
             continue;
         }
@@ -1535,6 +1586,13 @@ void tierAnnounce(tr_announcer_impl* announcer, tr_tier* tier)
     TR_ASSERT(!std::empty(tier->announce_events));
     TR_ASSERT(tier->currentTracker() != nullptr);
 
+    // Skip if current tracker's host has permanently failed
+    auto const* tracker = tier->currentTracker();
+    if (tracker != nullptr && announcer->is_host_failed(tracker->announce_parsed.host))
+    {
+        return;
+    }
+
     auto const now = tr_time();
 
     tr_torrent* tor = tier->tor;
@@ -1569,6 +1627,25 @@ void scrapeAndAnnounceMore(tr_announcer_impl* announcer)
     {
         for (auto& tier : tor->torrent_announcer->tiers)
         {
+            // If current tracker's host has failed, try to find a working tracker in tier
+            auto const* tracker = tier.currentTracker();
+            if (tracker != nullptr && announcer->is_host_failed(tracker->announce_parsed.host))
+            {
+                // Try each tracker in the tier to find one with a non-failed host
+                auto const n_trackers = std::size(tier.trackers);
+                for (size_t i = 0; i < n_trackers; ++i)
+                {
+                    tracker = tier.useNextTracker();
+                    if (tracker == nullptr || !announcer->is_host_failed(tracker->announce_parsed.host))
+                    {
+                        break;
+                    }
+                }
+                // If we cycled through all and all are failed, tracker will be on a failed host
+                // and needsToAnnounce/needsToScrape checks below will still add it, but the
+                // actual announce will be skipped. This is fine.
+            }
+
             if (tier.needsToAnnounce(now))
             {
                 announce_me.push_back(&tier);
@@ -1632,7 +1709,12 @@ namespace
 {
 namespace tracker_view_helpers
 {
-[[nodiscard]] auto trackerView(tr_torrent const& tor, size_t tier_index, tr_tier const& tier, tr_tracker const& tracker)
+[[nodiscard]] auto trackerView(
+    tr_torrent const& tor,
+    size_t tier_index,
+    tr_tier const& tier,
+    tr_tracker const& tracker,
+    bool host_is_failed)
 {
     auto const& announce = tracker.announce_parsed;
     auto const now = tr_time();
@@ -1656,6 +1738,16 @@ namespace tracker_view_helpers
     view.leecherCount = tracker.leecher_count().value_or(-1);
     view.downloadCount = tracker.download_count().value_or(-1);
     view.downloader_count = tracker.downloader_count().value_or(-1);
+
+    // If host has permanently failed, show as inactive with no next announce
+    if (host_is_failed)
+    {
+        view.scrapeState = TR_TRACKER_INACTIVE;
+        view.announceState = TR_TRACKER_INACTIVE;
+        view.nextScrapeTime = 0;
+        view.nextAnnounceTime = 0;
+        return view;
+    }
 
     if (view.isBackup)
     {
@@ -1751,6 +1843,8 @@ tr_tracker_view tr_announcerTracker(tr_torrent const* tor, size_t nth)
     TR_ASSERT(tr_isTorrent(tor));
     TR_ASSERT(tor->torrent_announcer != nullptr);
 
+    auto* const announcer = dynamic_cast<tr_announcer_impl*>(tor->session->announcer_.get());
+
     auto tier_index = size_t{ 0 };
     auto tracker_index = size_t{ 0 };
     for (auto const& tier : tor->torrent_announcer->tiers)
@@ -1759,7 +1853,8 @@ tr_tracker_view tr_announcerTracker(tr_torrent const* tor, size_t nth)
         {
             if (tracker_index == nth)
             {
-                return trackerView(*tor, tier_index, tier, tracker);
+                bool const host_failed = announcer != nullptr && announcer->is_host_failed(tracker.announce_parsed.host);
+                return trackerView(*tor, tier_index, tier, tracker, host_failed);
             }
 
             ++tracker_index;

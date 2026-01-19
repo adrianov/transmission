@@ -353,6 +353,10 @@ size_t tr_session::WebMediator::clamp(int torrent_id, size_t byte_count) const
 
 std::optional<std::string> tr_session::WebMediator::proxyUrl() const
 {
+    if (session_->is_proxy_disabled_for_session_)
+    {
+        return std::nullopt;
+    }
     return session_->settings().proxy_url;
 }
 
@@ -881,6 +885,25 @@ void tr_session::setSettings(tr_session::Settings&& settings_in, bool force)
         force || val != old_settings.sleep_per_seconds_during_verify)
     {
         verifier_->set_sleep_per_seconds_during_verify(val);
+    }
+
+    // Validate proxy on startup or when proxy URL changes
+    if (auto const& val = new_settings.proxy_url; val && (force || val != old_settings.proxy_url))
+    {
+        if (!tr_web::isProxyHealthy(*val))
+        {
+            tr_logAddWarn(
+                fmt::format(fmt::runtime(_("Disabling unhealthy proxy for this session: {proxy}")), fmt::arg("proxy", *val)));
+            is_proxy_disabled_for_session_ = true;
+        }
+        else
+        {
+            is_proxy_disabled_for_session_ = false;
+        }
+    }
+    else if (!val)
+    {
+        is_proxy_disabled_for_session_ = false;
     }
 
     // We need to update bandwidth if speed settings changed.

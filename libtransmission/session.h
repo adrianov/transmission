@@ -1405,6 +1405,9 @@ private:
 
     bool is_closing_ = false;
 
+    // Proxy disabled for this session only (not persisted) due to health check failure
+    bool is_proxy_disabled_for_session_ = false;
+
     /// fields that aren't trivial,
     /// but are self-contained / don't hold references to others
 

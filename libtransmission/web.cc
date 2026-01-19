@@ -889,3 +889,55 @@ bool tr_web::is_idle() const noexcept
 {
     return impl_->is_idle();
 }
+
+bool tr_web::isProxyHealthy(std::string_view proxy_url, std::chrono::seconds timeout)
+{
+    if (std::empty(proxy_url))
+    {
+        return false;
+    }
+
+    auto* const easy = curl_easy_init();
+    if (easy == nullptr)
+    {
+        return false;
+    }
+
+    auto const proxy_str = std::string{ proxy_url };
+
+    // Test proxy connectivity with a HEAD request to a reliable public endpoint.
+    // We use Cloudflare's DNS resolver which is fast and reliable worldwide.
+    (void)curl_easy_setopt(easy, CURLOPT_PROXY, proxy_str.c_str());
+    (void)curl_easy_setopt(easy, CURLOPT_URL, "http://1.1.1.1/");
+    (void)curl_easy_setopt(easy, CURLOPT_NOBODY, 1L); // HEAD request only
+    (void)curl_easy_setopt(easy, CURLOPT_CONNECTTIMEOUT, static_cast<long>(timeout.count()));
+    (void)curl_easy_setopt(easy, CURLOPT_TIMEOUT, static_cast<long>(timeout.count()));
+    (void)curl_easy_setopt(easy, CURLOPT_NOSIGNAL, 1L);
+
+    auto const result = curl_easy_perform(easy);
+
+    long response_code = 0;
+    curl_easy_getinfo(easy, CURLINFO_RESPONSE_CODE, &response_code);
+
+    curl_easy_cleanup(easy);
+
+    // Proxy is healthy if we got any HTTP response (even errors like 403, 407).
+    // This proves the proxy is reachable and responding.
+    // Only connection failures (timeout, DNS, refused) indicate unhealthy proxy.
+    bool const is_healthy = (response_code > 0) || (result == CURLE_OK) || (result == CURLE_HTTP_RETURNED_ERROR);
+
+    if (!is_healthy)
+    {
+        tr_logAddWarn(
+            fmt::format(
+                fmt::runtime(_("Proxy health check failed for '{proxy}': {error}")),
+                fmt::arg("proxy", proxy_url),
+                fmt::arg("error", curl_easy_strerror(result))));
+    }
+    else
+    {
+        tr_logAddInfo(fmt::format(fmt::runtime(_("Proxy '{proxy}' is healthy")), fmt::arg("proxy", proxy_url)));
+    }
+
+    return is_healthy;
+}
