@@ -25,15 +25,21 @@ protected:
     {
         mutable std::map<tr_piece_index_t, tr_block_span_t> block_span_;
         mutable std::map<tr_piece_index_t, tr_priority_t> piece_priority_;
+        mutable std::set<tr_block_index_t> client_has_block_;
         mutable std::set<tr_piece_index_t> client_has_piece_;
         mutable std::set<tr_piece_index_t> client_wants_piece_;
-        mutable tr_bitfield blocks_bitfield_{ 0 };
+        bool is_sequential_download_ = false;
 
         PeerMgrWishlistTest& parent_;
 
         explicit MockMediator(PeerMgrWishlistTest& parent)
             : parent_{ parent }
         {
+        }
+
+        [[nodiscard]] bool client_has_block(tr_block_index_t block) const override
+        {
+            return client_has_block_.count(block) != 0;
         }
 
         [[nodiscard]] bool client_has_piece(tr_piece_index_t piece) const override
@@ -44,6 +50,11 @@ protected:
         [[nodiscard]] bool client_wants_piece(tr_piece_index_t piece) const override
         {
             return client_wants_piece_.count(piece) != 0;
+        }
+
+        [[nodiscard]] bool is_sequential_download() const override
+        {
+            return is_sequential_download_;
         }
 
         [[nodiscard]] tr_piece_index_t file_index_for_piece(tr_piece_index_t piece) const override
@@ -64,11 +75,6 @@ protected:
         [[nodiscard]] tr_priority_t priority(tr_piece_index_t piece) const override
         {
             return piece_priority_[piece];
-        }
-
-        [[nodiscard]] tr_bitfield const& blocks() const override
-        {
-            return blocks_bitfield_;
         }
 
         [[nodiscard]] libtransmission::ObserverTag observe_files_wanted_changed(
