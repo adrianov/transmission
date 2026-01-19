@@ -2344,6 +2344,12 @@ void close_slow_peers(tr_swarm* s, uint64_t const now_msec, time_t const now_sec
     // Longer timeout for zero-speed peers
     static auto constexpr ZeroSpeedTimeoutSecs = time_t{ 60 };
 
+    // Helper to get combined speed (incoming + outgoing)
+    auto const get_combined_speed = [now_msec](auto const& peer)
+    {
+        return peer->get_piece_speed(now_msec, TR_PEER_TO_CLIENT) + peer->get_piece_speed(now_msec, TR_CLIENT_TO_PEER);
+    };
+
     // First, disconnect peers with 0 speed that have been connected long enough
     for (auto const& peer : peers)
     {
@@ -2358,7 +2364,7 @@ void close_slow_peers(tr_swarm* s, uint64_t const now_msec, time_t const now_sec
             continue;
         }
 
-        auto const peer_speed = peer->get_piece_speed(now_msec, TR_PEER_TO_CLIENT);
+        auto const peer_speed = get_combined_speed(peer);
         if (peer_speed.base_quantity() > 0)
         {
             continue;
@@ -2377,12 +2383,12 @@ void close_slow_peers(tr_swarm* s, uint64_t const now_msec, time_t const now_sec
         peer->disconnect_soon();
     }
 
-    // Collect download speeds from all peers
+    // Collect combined speeds (incoming + outgoing) from all peers
     auto speeds = std::vector<Speed>{};
     speeds.reserve(peer_count);
     for (auto const& peer : peers)
     {
-        speeds.push_back(peer->get_piece_speed(now_msec, TR_PEER_TO_CLIENT));
+        speeds.push_back(get_combined_speed(peer));
     }
 
     // Calculate median speed
@@ -2411,7 +2417,7 @@ void close_slow_peers(tr_swarm* s, uint64_t const now_msec, time_t const now_sec
             continue;
         }
 
-        auto const peer_speed = peer->get_piece_speed(now_msec, TR_PEER_TO_CLIENT);
+        auto const peer_speed = get_combined_speed(peer);
         if (peer_speed >= threshold)
         {
             continue;
@@ -2450,12 +2456,14 @@ void update_dynamic_peer_limit(tr_swarm* s, uint64_t const now_msec, time_t cons
         return;
     }
 
-    // Count peers actually downloading and calculate total speed
+    // Count peers with activity and calculate total speed (incoming + outgoing)
     uint32_t total_speed = 0;
     size_t active_peer_count = 0;
     for (auto const& peer : s->peers)
     {
-        auto const speed = static_cast<uint32_t>(peer->get_piece_speed(now_msec, TR_PEER_TO_CLIENT).base_quantity());
+        auto const speed = static_cast<uint32_t>(
+            peer->get_piece_speed(now_msec, TR_PEER_TO_CLIENT).base_quantity() +
+            peer->get_piece_speed(now_msec, TR_CLIENT_TO_PEER).base_quantity());
         if (speed > 0)
         {
             total_speed += speed;
