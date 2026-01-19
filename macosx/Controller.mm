@@ -8,6 +8,7 @@
 @import Sparkle;
 
 #include <atomic> /* atomic, atomic_fetch_add_explicit, memory_order_relaxed */
+#include <sys/resource.h>
 
 #include <libtransmission/transmission.h>
 
@@ -332,6 +333,7 @@ static void removeKeRangerRansomware()
 @property(nonatomic) BOOL fGlobalPopoverShown;
 @property(nonatomic) NSView* fPositioningView;
 @property(nonatomic) BOOL fSoundPlaying;
+@property(nonatomic) BOOL fWindowMiniaturized;
 
 @end
 
@@ -1026,6 +1028,10 @@ void onTorrentCompletenessChanged(tr_torrent* tor, tr_completeness status, bool 
 {
     self.fQuitting = YES;
 
+    // Switch to normal priority for faster shutdown
+    setpriority(PRIO_DARWIN_PROCESS, 0, 0);
+    setiopolicy_np(IOPOL_TYPE_DISK, IOPOL_SCOPE_PROCESS, IOPOL_DEFAULT);
+
     [PowerManager.shared stop];
 
     //stop the Bonjour service
@@ -1088,7 +1094,55 @@ void onTorrentCompletenessChanged(tr_torrent* tor, tr_completeness status, bool 
     return YES;
 }
 
+- (void)applicationDidBecomeActive:(NSNotification*)notification
+{
+    [self updateProcessPriority];
+}
+
+- (void)applicationDidResignActive:(NSNotification*)notification
+{
+    [self updateProcessPriority];
+}
+
+#pragma mark - NSWindowDelegate
+
+- (void)windowDidMiniaturize:(NSNotification*)notification
+{
+    if (notification.object == self.fWindow)
+    {
+        self.fWindowMiniaturized = YES;
+        [self updateProcessPriority];
+    }
+}
+
+- (void)windowDidDeminiaturize:(NSNotification*)notification
+{
+    if (notification.object == self.fWindow)
+    {
+        self.fWindowMiniaturized = NO;
+        [self updateProcessPriority];
+    }
+}
+
 #pragma mark -
+
+- (void)updateProcessPriority
+{
+    // Use normal priority when app is active and window is visible (not miniaturized)
+    // Use background priority when app is inactive or window is miniaturized
+    BOOL const useBackground = !NSApp.active || self.fWindowMiniaturized;
+
+    if (useBackground)
+    {
+        setpriority(PRIO_DARWIN_PROCESS, 0, PRIO_DARWIN_BG);
+        setiopolicy_np(IOPOL_TYPE_DISK, IOPOL_SCOPE_PROCESS, IOPOL_THROTTLE);
+    }
+    else
+    {
+        setpriority(PRIO_DARWIN_PROCESS, 0, 0);
+        setiopolicy_np(IOPOL_TYPE_DISK, IOPOL_SCOPE_PROCESS, IOPOL_DEFAULT);
+    }
+}
 
 - (tr_session*)sessionHandle
 {

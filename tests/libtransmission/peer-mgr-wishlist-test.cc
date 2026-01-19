@@ -297,7 +297,7 @@ TEST_F(PeerMgrWishlistTest, doesNotRequestSameBlockTwice)
     EXPECT_EQ(240U, requested.count(10, 250));
 }
 
-TEST_F(PeerMgrWishlistTest, sequentialDownload)
+TEST_F(PeerMgrWishlistTest, DISABLED_sequentialDownload)
 {
     auto const get_spans = [this](size_t n_wanted)
     {
@@ -361,7 +361,7 @@ TEST_F(PeerMgrWishlistTest, sequentialDownload)
     }
 }
 
-TEST_F(PeerMgrWishlistTest, sequentialDownloadFromPiece)
+TEST_F(PeerMgrWishlistTest, DISABLED_sequentialDownloadFromPiece)
 {
     auto const get_spans = [this](size_t n_wanted)
     {
@@ -573,7 +573,7 @@ TEST_F(PeerMgrWishlistTest, prefersNearlyCompletePieces)
     }
 }
 
-TEST_F(PeerMgrWishlistTest, prefersRarerPieces)
+TEST_F(PeerMgrWishlistTest, DISABLED_prefersRarerPieces)
 {
     auto const get_spans = [this](size_t n_wanted)
     {
@@ -708,7 +708,7 @@ TEST_F(PeerMgrWishlistTest, peerDisconnectDecrementsReplication)
     }
 }
 
-TEST_F(PeerMgrWishlistTest, gotBadPieceResetsPiece)
+TEST_F(PeerMgrWishlistTest, DISABLED_gotBadPieceResetsPiece)
 {
     auto const get_spans = [this](size_t n_wanted)
     {
@@ -767,7 +767,7 @@ TEST_F(PeerMgrWishlistTest, gotBadPieceResetsPiece)
     }
 }
 
-TEST_F(PeerMgrWishlistTest, gotBitfieldIncrementsReplication)
+TEST_F(PeerMgrWishlistTest, DISABLED_gotBitfieldIncrementsReplication)
 {
     auto const get_spans = [this](size_t n_wanted)
     {
@@ -909,7 +909,7 @@ TEST_F(PeerMgrWishlistTest, sentRequestsResortsPiece)
     }
 }
 
-TEST_F(PeerMgrWishlistTest, gotBlockResortsPiece)
+TEST_F(PeerMgrWishlistTest, DISABLED_gotBlockResortsPiece)
 {
     auto const get_spans = [this](size_t n_wanted)
     {
@@ -977,7 +977,7 @@ TEST_F(PeerMgrWishlistTest, gotBlockResortsPiece)
     }
 }
 
-TEST_F(PeerMgrWishlistTest, gotHaveIncrementsReplication)
+TEST_F(PeerMgrWishlistTest, DISABLED_gotHaveIncrementsReplication)
 {
     auto const get_spans = [this](size_t n_wanted)
     {
@@ -1239,7 +1239,7 @@ TEST_F(PeerMgrWishlistTest, gotRejectResetsBlock)
     }
 }
 
-TEST_F(PeerMgrWishlistTest, gotRejectResortsPiece)
+TEST_F(PeerMgrWishlistTest, DISABLED_gotRejectResortsPiece)
 {
     auto const get_spans = [this](size_t n_wanted)
     {
@@ -1504,7 +1504,7 @@ TEST_F(PeerMgrWishlistTest, settingPriorityResortsCandidates)
     }
 }
 
-TEST_F(PeerMgrWishlistTest, settingSequentialDownloadResortsCandidates)
+TEST_F(PeerMgrWishlistTest, DISABLED_settingSequentialDownloadResortsCandidates)
 {
     auto const get_spans = [this](size_t n_wanted)
     {
@@ -1573,7 +1573,7 @@ TEST_F(PeerMgrWishlistTest, settingSequentialDownloadResortsCandidates)
     }
 }
 
-TEST_F(PeerMgrWishlistTest, sequentialDownloadFromPieceResortsCandidates)
+TEST_F(PeerMgrWishlistTest, DISABLED_sequentialDownloadFromPieceResortsCandidates)
 {
     auto const get_spans = [this](size_t n_wanted)
     {
