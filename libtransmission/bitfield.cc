@@ -505,3 +505,100 @@ bool tr_bitfield::intersects(tr_bitfield const& that) const noexcept
 
     return false;
 }
+
+void tr_bitfield::unset_from(tr_bitfield const& that) noexcept
+{
+    if (has_none() || that.has_none())
+    {
+        return;
+    }
+
+    if (that.has_all())
+    {
+        set_has_none();
+        return;
+    }
+
+    if (has_all())
+    {
+        // Need to materialize the bitfield first
+        ensure_bits_alloced(bit_count_);
+        setAllTrue(std::data(flags_), bit_count_);
+    }
+
+    for (size_t i = 0, n = std::min(std::size(flags_), std::size(that.flags_)); i < n; ++i)
+    {
+        flags_[i] &= ~that.flags_[i];
+    }
+
+    rebuild_true_count();
+}
+
+size_t tr_bitfield::find_first_unset(size_t begin, size_t end) const noexcept
+{
+    if (begin >= end || begin >= bit_count_)
+    {
+        return end;
+    }
+
+    end = std::min(end, bit_count_);
+
+    if (has_none())
+    {
+        return begin;
+    }
+
+    if (has_all())
+    {
+        return end;
+    }
+
+    // Check first partial byte
+    size_t byte_idx = begin >> 3U;
+    size_t bit_in_byte = begin & 7U;
+
+    if (byte_idx < std::size(flags_))
+    {
+        // Mask out bits before 'begin' by setting them to 1
+        uint8_t byte = flags_[byte_idx] | (0xFF << (8 - bit_in_byte));
+        if (byte != 0xFF)
+        {
+            // There's an unset bit in this byte
+            for (size_t i = bit_in_byte; i < 8; ++i)
+            {
+                size_t bit_pos = (byte_idx << 3) + i;
+                if (bit_pos >= end)
+                {
+                    return end;
+                }
+                if ((flags_[byte_idx] & (0x80 >> i)) == 0)
+                {
+                    return bit_pos;
+                }
+            }
+        }
+        ++byte_idx;
+    }
+
+    // Check whole bytes (fast path - skip bytes that are all 1s)
+    size_t const last_byte = (end - 1) >> 3U;
+    while (byte_idx < std::size(flags_) && byte_idx <= last_byte)
+    {
+        if (flags_[byte_idx] != 0xFF)
+        {
+            // Found a byte with at least one unset bit
+            uint8_t byte = flags_[byte_idx];
+            for (size_t i = 0; i < 8; ++i)
+            {
+                if ((byte & (0x80 >> i)) == 0)
+                {
+                    size_t bit_pos = (byte_idx << 3) + i;
+                    return bit_pos < end ? bit_pos : end;
+                }
+            }
+        }
+        ++byte_idx;
+    }
+
+    return end;
+}

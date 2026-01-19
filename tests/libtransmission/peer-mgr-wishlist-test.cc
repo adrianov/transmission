@@ -23,26 +23,17 @@ class PeerMgrWishlistTest : public ::libtransmission::test::TransmissionTest
 protected:
     struct MockMediator final : public Wishlist::Mediator
     {
-        mutable std::map<tr_block_index_t, uint8_t> active_request_count_;
         mutable std::map<tr_piece_index_t, tr_block_span_t> block_span_;
         mutable std::map<tr_piece_index_t, tr_priority_t> piece_priority_;
-        mutable std::map<tr_piece_index_t, size_t> piece_replication_;
-        mutable std::set<tr_block_index_t> client_has_block_;
         mutable std::set<tr_piece_index_t> client_has_piece_;
         mutable std::set<tr_piece_index_t> client_wants_piece_;
-        bool is_sequential_download_ = false;
-        tr_piece_index_t sequential_download_from_piece_ = 0;
+        mutable tr_bitfield blocks_bitfield_{ 0 };
 
         PeerMgrWishlistTest& parent_;
 
         explicit MockMediator(PeerMgrWishlistTest& parent)
             : parent_{ parent }
         {
-        }
-
-        [[nodiscard]] bool client_has_block(tr_block_index_t block) const override
-        {
-            return client_has_block_.count(block) != 0;
         }
 
         [[nodiscard]] bool client_has_piece(tr_piece_index_t piece) const override
@@ -55,19 +46,9 @@ protected:
             return client_wants_piece_.count(piece) != 0;
         }
 
-        [[nodiscard]] bool is_sequential_download() const override
+        [[nodiscard]] tr_piece_index_t file_index_for_piece(tr_piece_index_t piece) const override
         {
-            return is_sequential_download_;
-        }
-
-        [[nodiscard]] tr_piece_index_t sequential_download_from_piece() const override
-        {
-            return sequential_download_from_piece_;
-        }
-
-        [[nodiscard]] size_t count_piece_replication(tr_piece_index_t piece) const override
-        {
-            return piece_replication_[piece];
+            return piece; // Simple 1:1 mapping for tests
         }
 
         [[nodiscard]] tr_block_span_t block_span(tr_piece_index_t piece) const override
@@ -83,6 +64,11 @@ protected:
         [[nodiscard]] tr_priority_t priority(tr_piece_index_t piece) const override
         {
             return piece_priority_[piece];
+        }
+
+        [[nodiscard]] tr_bitfield const& blocks() const override
+        {
+            return blocks_bitfield_;
         }
 
         [[nodiscard]] libtransmission::ObserverTag observe_files_wanted_changed(
@@ -104,12 +90,6 @@ protected:
             return parent_.got_bad_piece_.observe(std::move(observer));
         }
 
-        [[nodiscard]] libtransmission::ObserverTag observe_got_bitfield(
-            libtransmission::SimpleObservable<tr_torrent*, tr_bitfield const&>::Observer observer) override
-        {
-            return parent_.got_bitfield_.observe(std::move(observer));
-        }
-
         [[nodiscard]] libtransmission::ObserverTag observe_got_block(
             libtransmission::SimpleObservable<tr_torrent*, tr_block_index_t>::Observer observer) override
         {
@@ -120,18 +100,6 @@ protected:
             libtransmission::SimpleObservable<tr_torrent*, tr_bitfield const&>::Observer observer) override
         {
             return parent_.got_choke_.observe(std::move(observer));
-        }
-
-        [[nodiscard]] libtransmission::ObserverTag observe_got_have(
-            libtransmission::SimpleObservable<tr_torrent*, tr_piece_index_t>::Observer observer) override
-        {
-            return parent_.got_have_.observe(std::move(observer));
-        }
-
-        [[nodiscard]] libtransmission::ObserverTag observe_got_have_all(
-            libtransmission::SimpleObservable<tr_torrent*>::Observer observer) override
-        {
-            return parent_.got_have_all_.observe(std::move(observer));
         }
 
         [[nodiscard]] libtransmission::ObserverTag observe_got_reject(
@@ -164,35 +132,18 @@ protected:
         {
             return parent_.sent_request_.observe(std::move(observer));
         }
-
-        [[nodiscard]] libtransmission::ObserverTag observe_sequential_download_changed(
-            libtransmission::SimpleObservable<tr_torrent*, bool>::Observer observer) override
-        {
-            return parent_.sequential_download_changed_.observe(std::move(observer));
-        }
-
-        [[nodiscard]] libtransmission::ObserverTag observe_sequential_download_from_piece_changed(
-            libtransmission::SimpleObservable<tr_torrent*, tr_piece_index_t>::Observer observer) override
-        {
-            return parent_.sequential_download_from_piece_changed_.observe(std::move(observer));
-        }
     };
 
     libtransmission::SimpleObservable<tr_torrent*, tr_file_index_t const*, tr_file_index_t, bool> files_wanted_changed_;
     libtransmission::SimpleObservable<tr_torrent*, tr_bitfield const&, tr_bitfield const&> peer_disconnect_;
     libtransmission::SimpleObservable<tr_torrent*, tr_piece_index_t> got_bad_piece_;
-    libtransmission::SimpleObservable<tr_torrent*, tr_bitfield const&> got_bitfield_;
     libtransmission::SimpleObservable<tr_torrent*, tr_block_index_t> got_block_;
     libtransmission::SimpleObservable<tr_torrent*, tr_bitfield const&> got_choke_;
-    libtransmission::SimpleObservable<tr_torrent*, tr_piece_index_t> got_have_;
-    libtransmission::SimpleObservable<tr_torrent*> got_have_all_;
     libtransmission::SimpleObservable<tr_torrent*, tr_peer*, tr_block_index_t> got_reject_;
     libtransmission::SimpleObservable<tr_torrent*, tr_peer*, tr_block_index_t> sent_cancel_;
     libtransmission::SimpleObservable<tr_torrent*, tr_peer*, tr_block_span_t> sent_request_;
     libtransmission::SimpleObservable<tr_torrent*, tr_piece_index_t> piece_completed_;
     libtransmission::SimpleObservable<tr_torrent*, tr_file_index_t const*, tr_file_index_t, tr_priority_t> priority_changed_;
-    libtransmission::SimpleObservable<tr_torrent*, bool> sequential_download_changed_;
-    libtransmission::SimpleObservable<tr_torrent*, tr_piece_index_t> sequential_download_from_piece_changed_;
 
     static auto constexpr PeerHasAllPieces = [](tr_piece_index_t)
     {

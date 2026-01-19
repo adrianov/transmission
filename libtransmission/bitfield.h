@@ -116,6 +116,12 @@ public:
     tr_bitfield& operator&=(tr_bitfield const& that) noexcept;
     [[nodiscard]] bool intersects(tr_bitfield const& that) const noexcept;
 
+    // Clear bits that are set in 'that' (this &= ~that)
+    void unset_from(tr_bitfield const& that) noexcept;
+
+    // Find first unset bit in [begin, end). Returns end if all bits are set.
+    [[nodiscard]] size_t find_first_unset(size_t begin, size_t end) const noexcept;
+
 private:
     [[nodiscard]] size_t count_flags() const noexcept;
     [[nodiscard]] size_t count_flags(size_t begin, size_t end) const noexcept;
