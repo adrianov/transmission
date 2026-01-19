@@ -679,7 +679,9 @@ void tr_torrent::stop_now()
 
     session->close_torrent_files(id());
 
-    if (!is_deleting_)
+    // During session shutdown, resume files are saved in parallel before
+    // torrents are freed, so skip individual saves here to avoid redundant work
+    if (!is_deleting_ && !session->isClosing())
     {
         save_resume_file();
     }

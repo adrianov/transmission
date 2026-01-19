@@ -1419,6 +1419,15 @@ void tr_session::closeImplPart1(std::promise<void>* closed_promise, std::chrono:
             auto const b_cur = b->bytes_downloaded_.ever();
             return a_cur > b_cur; // larger xfers go first
         });
+
+    // Save all resume files before freeing torrents.
+    // This is done here so that stop_now() can skip the save during shutdown
+    // (avoiding duplicate work).
+    for (auto* tor : torrents)
+    {
+        tor->save_resume_file();
+    }
+
     for (auto* tor : torrents)
     {
         tr_torrentFreeInSessionThread(tor);
