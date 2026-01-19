@@ -30,13 +30,14 @@ class Wishlist
 public:
     struct Mediator
     {
+        [[nodiscard]] virtual bool client_has_block(tr_block_index_t block) const = 0;
         [[nodiscard]] virtual bool client_has_piece(tr_piece_index_t piece) const = 0;
         [[nodiscard]] virtual bool client_wants_piece(tr_piece_index_t piece) const = 0;
+        [[nodiscard]] virtual bool is_sequential_download() const = 0;
         [[nodiscard]] virtual tr_piece_index_t file_index_for_piece(tr_piece_index_t piece) const = 0;
         [[nodiscard]] virtual tr_block_span_t block_span(tr_piece_index_t piece) const = 0;
         [[nodiscard]] virtual tr_piece_index_t piece_count() const = 0;
         [[nodiscard]] virtual tr_priority_t priority(tr_piece_index_t piece) const = 0;
-        [[nodiscard]] virtual tr_bitfield const& blocks() const = 0;
 
         [[nodiscard]] virtual libtransmission::ObserverTag observe_files_wanted_changed(
             libtransmission::SimpleObservable<tr_torrent*, tr_file_index_t const*, tr_file_index_t, bool>::Observer) = 0;
@@ -70,9 +71,6 @@ public:
     [[nodiscard]] std::vector<tr_block_span_t> next(
         size_t n_wanted_blocks,
         std::function<bool(tr_piece_index_t)> const& peer_has_piece);
-
-    // faster version for seeds (no per-piece check needed)
-    [[nodiscard]] std::vector<tr_block_span_t> next(size_t n_wanted_blocks);
 
 private:
     class Impl;
