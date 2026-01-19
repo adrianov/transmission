@@ -1085,8 +1085,8 @@ void onTorrentCompletenessChanged(tr_torrent* tor, tr_completeness status, bool 
 
     _fileWatcherQueue = nil;
 
-    //complete cleanup: this can take many seconds
-    tr_sessionClose(self.fLib);
+    //complete cleanup: short timeout for stop announces to responsive trackers
+    tr_sessionClose(self.fLib, 1.0);
 }
 
 - (BOOL)applicationSupportsSecureRestorableState:(NSApplication*)app
