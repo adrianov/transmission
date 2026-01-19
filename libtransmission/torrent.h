@@ -1272,10 +1272,10 @@ private:
 
         files_wanted_.set(files, n_files, wanted);
         completion_.invalidate_size_when_done();
-        files_wanted_changed_.emit(this, files, n_files, wanted);
 
-        // Always recalculate file order for alphabetical download ordering
+        // Recalculate file order BEFORE emitting, so observers get updated order
         recalculate_file_order();
+        files_wanted_changed_.emit(this, files, n_files, wanted);
 
         if (!is_bootstrapping)
         {
