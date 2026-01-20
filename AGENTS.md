@@ -25,8 +25,11 @@ open Transmission.xcodeproj
 **With CMake:**
 ```bash
 cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo
-cmake --build build -t transmission-mac
+cmake --build build -t transmission-mac 2>&1 | tail -5
 open ./build/macosx/Transmission.app
+
+# Reveal built binary in Finder
+open -R ./build/macosx/Transmission.app
 ```
 
 **GTK app on macOS:**
