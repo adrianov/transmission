@@ -771,8 +771,37 @@ private:
 
     void on_torrent_done()
     {
+        auto const lock = unique_lock();
+
+        // Tell all peers we're no longer interested in downloading
         std::for_each(std::begin(peers), std::end(peers), [](auto const& peer) { peer->set_interested(false); });
+
+        // Free the wishlist - not needed when only seeding
         wishlist.reset();
+
+        // Free webseeds - they're only used for downloading, not seeding
+        webseeds.clear();
+        webseeds.shrink_to_fit();
+        stats.active_webseed_count = 0;
+
+        // Disconnect from upload-only peers since we can't exchange data
+        // Keep peers that might want to download from us
+        auto peers_to_remove = std::vector<std::shared_ptr<tr_peerMsgs>>{};
+        for (auto const& peer : peers)
+        {
+            if (peer->is_seed() || peer->peer_info->is_upload_only())
+            {
+                peers_to_remove.push_back(peer);
+            }
+        }
+        for (auto const& peer : peers_to_remove)
+        {
+            remove_peer(peer);
+        }
+
+        // Reset dynamic peer limit tracking - seeding has different needs
+        speed_at_peer_count.clear();
+        dynamic_peer_limit = 0;
     }
 
     void on_swarm_is_all_upload_only()
