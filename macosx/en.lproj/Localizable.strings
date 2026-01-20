@@ -858,6 +858,18 @@
 /* Torrent -> status string */
 "Seeding to %u of 1 peer" = "Seeding to %u of 1 peer";
 
+/* Search toolbar item -> label */
+"Search" = "Search";
+
+/* Search toolbar item -> tooltip */
+"Search for torrents on the internet" = "Search for torrents on the internet";
+
+/* Search toolbar item -> placeholder */
+"Search torrents..." = "Search torrents...";
+
+/* Search toolbar item -> palette label */
+"Search Torrents" = "Search Torrents";
+
 /* Create torrent -> location sheet -> button
    Create torrent -> select file
    Move torrent -> prompt

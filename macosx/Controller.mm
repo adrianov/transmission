@@ -74,6 +74,7 @@ static ToolbarItemIdentifier const ToolbarItemIdentifierPauseResumeSelected = @"
 static ToolbarItemIdentifier const ToolbarItemIdentifierFilter = @"Toolbar Toggle Filter";
 static ToolbarItemIdentifier const ToolbarItemIdentifierQuickLook = @"Toolbar QuickLook";
 static ToolbarItemIdentifier const ToolbarItemIdentifierShare = @"Toolbar Share";
+static ToolbarItemIdentifier const ToolbarItemIdentifierSearch = @"Toolbar Search";
 
 typedef NS_ENUM(NSUInteger, ToolbarGroupTag) { //
     ToolbarGroupTagPause = 0,
@@ -4522,6 +4523,17 @@ static NSTimeInterval const kLowPriorityDelay = 15.0;
 
         return item;
     }
+    else if ([ident isEqualToString:ToolbarItemIdentifierSearch])
+    {
+        NSSearchToolbarItem* item = [[NSSearchToolbarItem alloc] initWithItemIdentifier:ident];
+        item.searchField.placeholderString = NSLocalizedString(@"Search torrents...", "Search toolbar item -> placeholder");
+        item.searchField.delegate = self;
+        item.label = NSLocalizedString(@"Search", "Search toolbar item -> label");
+        item.paletteLabel = NSLocalizedString(@"Search Torrents", "Search toolbar item -> palette label");
+        item.toolTip = NSLocalizedString(@"Search for torrents on the internet", "Search toolbar item -> tooltip");
+
+        return item;
+    }
     else
     {
         return nil;
@@ -4572,6 +4584,7 @@ static NSTimeInterval const kLowPriorityDelay = 15.0;
         ToolbarItemIdentifierQuickLook,
         ToolbarItemIdentifierFilter,
         ToolbarItemIdentifierInfo,
+        ToolbarItemIdentifierSearch,
         NSToolbarSpaceItemIdentifier,
         NSToolbarFlexibleSpaceItemIdentifier
     ];
@@ -4587,6 +4600,7 @@ static NSTimeInterval const kLowPriorityDelay = 15.0;
         NSToolbarSpaceItemIdentifier,
         ToolbarItemIdentifierPauseResumeAll,
         NSToolbarFlexibleSpaceItemIdentifier,
+        ToolbarItemIdentifierSearch,
         ToolbarItemIdentifierShare,
         ToolbarItemIdentifierQuickLook,
         ToolbarItemIdentifierFilter,
@@ -5495,6 +5509,33 @@ static NSTimeInterval const kLowPriorityDelay = 15.0;
 - (void)linkDonate:(id)sender
 {
     [NSWorkspace.sharedWorkspace openURL:[NSURL URLWithString:kDonateURL]];
+}
+
+#pragma mark - Search Field Delegate
+
+- (void)controlTextDidEndEditing:(NSNotification*)notification
+{
+    NSSearchField* searchField = notification.object;
+    if ([searchField isKindOfClass:[NSSearchField class]])
+    {
+        // Check if the user pressed Enter (Return key)
+        NSNumber* textMovement = notification.userInfo[@"NSTextMovement"];
+        if (textMovement.integerValue == NSReturnTextMovement)
+        {
+            NSString* query = searchField.stringValue;
+            if (query.length > 0)
+            {
+                [self searchTorrentsWithQuery:query];
+            }
+        }
+    }
+}
+
+- (void)searchTorrentsWithQuery:(NSString*)query
+{
+    NSString* encodedQuery = [query stringByAddingPercentEncodingWithAllowedCharacters:NSCharacterSet.URLQueryAllowedCharacterSet];
+    NSString* urlString = [NSString stringWithFormat:@"https://kinozal.tv/browse.php?s=%@&t=1", encodedQuery];
+    [NSWorkspace.sharedWorkspace openURL:[NSURL URLWithString:urlString]];
 }
 
 - (void)rpcCallback:(tr_rpc_callback_type)type forTorrentStruct:(struct tr_torrent*)torrentStruct
