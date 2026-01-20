@@ -30,6 +30,7 @@ extern CGFloat const kGroupSeparatorHeight;
 - (void)toggleGroupRowRatio;
 
 - (IBAction)toggleControlForTorrent:(id)sender;
+- (IBAction)openCommentURL:(id)sender;
 
 - (IBAction)displayTorrentActionPopover:(id)sender;
 

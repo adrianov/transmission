@@ -180,6 +180,8 @@ target_sources(${TR_NAME}-mac
         TorrentCellControlButton.mm
         TorrentCellRevealButton.h
         TorrentCellRevealButton.mm
+        TorrentCellURLButton.h
+        TorrentCellURLButton.mm
         TorrentGroup.h
         TorrentGroup.mm
         TorrentTableView.h
@@ -258,6 +260,9 @@ set(IMAGESETS
     RevealOff
     RevealOn
     TortoiseTemplate
+    URLHover
+    URLOff
+    URLOn
     UpArrowGroupTemplate
     UpArrowTemplate
     UploadBadge

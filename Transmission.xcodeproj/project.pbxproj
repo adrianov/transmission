@@ -27,6 +27,7 @@
 		45489C5429AF6FB20098A812 /* TorrentCellActionButton.mm in Sources */ = {isa = PBXBuildFile; fileRef = 45489C5029AF6FB10098A812 /* TorrentCellActionButton.mm */; };
 		45489C5629AF6FB20098A812 /* TorrentCellRevealButton.mm in Sources */ = {isa = PBXBuildFile; fileRef = 45489C5229AF6FB10098A812 /* TorrentCellRevealButton.mm */; };
 		45489C5729AF6FB20098A812 /* TorrentCellControlButton.mm in Sources */ = {isa = PBXBuildFile; fileRef = 45489C5329AF6FB10098A812 /* TorrentCellControlButton.mm */; };
+		45489C5829AF6FB20098A812 /* TorrentCellURLButton.mm in Sources */ = {isa = PBXBuildFile; fileRef = 45489C5429AF6FB10098A812 /* TorrentCellURLButton.mm */; };
 		4559D21629B32623004EFDF0 /* ProgressBarView.mm in Sources */ = {isa = PBXBuildFile; fileRef = 4559D21529B32623004EFDF0 /* ProgressBarView.mm */; };
 		457AF8EB28604AFC00BCF74F /* Toolbar.mm in Sources */ = {isa = PBXBuildFile; fileRef = 457AF8EA28604AFC00BCF74F /* Toolbar.mm */; };
 		45A7D3292843B54D00F0C32A /* GroupPopUpButtonCell.mm in Sources */ = {isa = PBXBuildFile; fileRef = 45A7D3282843B54D00F0C32A /* GroupPopUpButtonCell.mm */; };
@@ -704,6 +705,8 @@
 		45489C5029AF6FB10098A812 /* TorrentCellActionButton.mm */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.objcpp; path = TorrentCellActionButton.mm; sourceTree = "<group>"; };
 		45489C5229AF6FB10098A812 /* TorrentCellRevealButton.mm */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.objcpp; path = TorrentCellRevealButton.mm; sourceTree = "<group>"; };
 		45489C5329AF6FB10098A812 /* TorrentCellControlButton.mm */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.objcpp; path = TorrentCellControlButton.mm; sourceTree = "<group>"; };
+		45489C5429AF6FB10098A812 /* TorrentCellURLButton.mm */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.objcpp; path = TorrentCellURLButton.mm; sourceTree = "<group>"; };
+		45489C5529AF6FB10098A812 /* TorrentCellURLButton.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = TorrentCellURLButton.h; sourceTree = "<group>"; };
 		4559D21429B32622004EFDF0 /* ProgressBarView.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = ProgressBarView.h; sourceTree = "<group>"; };
 		4559D21529B32623004EFDF0 /* ProgressBarView.mm */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.objcpp; path = ProgressBarView.mm; sourceTree = "<group>"; };
 		455C0939287767270003A078 /* nl */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = nl; path = nl.lproj/PrefsWindow.strings; sourceTree = "<group>"; };
@@ -1714,6 +1717,8 @@
 				45489C5329AF6FB10098A812 /* TorrentCellControlButton.mm */,
 				45489C4A29AF10D00098A812 /* TorrentCellRevealButton.h */,
 				45489C5229AF6FB10098A812 /* TorrentCellRevealButton.mm */,
+				45489C5529AF6FB10098A812 /* TorrentCellURLButton.h */,
+				45489C5429AF6FB10098A812 /* TorrentCellURLButton.mm */,
 				A21A9BE0106D86A800F1C3C1 /* TrackerNode.h */,
 				A21A9BE1106D86A800F1C3C1 /* TrackerNode.mm */,
 				A2725B6C0DE5C4F5003445E7 /* FileListNode.h */,
@@ -3533,6 +3538,7 @@
 				A2D77453154CC72B00A62B93 /* WebSeedTableView.mm in Sources */,
 				8D11072D0486CEB800E47090 /* main.mm in Sources */,
 				45489C5629AF6FB20098A812 /* TorrentCellRevealButton.mm in Sources */,
+				45489C5829AF6FB20098A812 /* TorrentCellURLButton.mm in Sources */,
 				4DF0C5AB0899190500DD8943 /* Controller.mm in Sources */,
 				4D118E1A08CB46B20033958F /* PrefsController.mm in Sources */,
 				4521532E29AF9D61009331B0 /* TorrentCell.mm in Sources */,

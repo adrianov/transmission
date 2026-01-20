@@ -230,6 +230,16 @@
                                                                 <outlet property="torrentCell" destination="7Ic-8y-f3v" id="npT-CF-ee4"/>
                                                             </connections>
                                                         </button>
+                                                        <button horizontalHuggingPriority="1000" verticalHuggingPriority="750" horizontalCompressionResistancePriority="1000" translatesAutoresizingMaskIntoConstraints="NO" id="url-bt-001" customClass="TorrentCellURLButton">
+                                                            <rect key="frame" x="453" y="15" width="14" height="14"/>
+                                                            <buttonCell key="cell" type="square" bezelStyle="shadowlessSquare" imagePosition="only" alignment="center" lineBreakMode="truncatingTail" state="on" imageScaling="proportionallyDown" inset="2" id="url-bc-001">
+                                                                <behavior key="behavior" pushIn="YES" lightByBackground="YES" lightByGray="YES"/>
+                                                                <font key="font" metaFont="system"/>
+                                                            </buttonCell>
+                                                            <connections>
+                                                                <outlet property="torrentCell" destination="7Ic-8y-f3v" id="url-cn-001"/>
+                                                            </connections>
+                                                        </button>
                                                         <customView translatesAutoresizingMaskIntoConstraints="NO" id="Ifq-ub-ay4">
                                                             <rect key="frame" x="65" y="15" width="340" height="14"/>
                                                             <constraints>
@@ -246,7 +256,9 @@
                                                         <constraint firstItem="WTV-L6-lc2" firstAttribute="centerY" secondItem="FLl-ue-i20" secondAttribute="centerY" id="FXq-kY-5ny"/>
                                                         <constraint firstItem="FLl-ue-i20" firstAttribute="leading" secondItem="7Ic-8y-f3v" secondAttribute="leading" id="Fu9-kh-dtb"/>
                                                         <constraint firstItem="Ifq-ub-ay4" firstAttribute="trailing" secondItem="7sy-Kk-M9Y" secondAttribute="trailing" id="KFR-7d-Sjr"/>
-                                                        <constraint firstAttribute="trailing" secondItem="k5I-MN-hYk" secondAttribute="trailing" constant="8" id="NRQ-sA-ng6"/>
+                                                        <constraint firstAttribute="trailing" secondItem="url-bt-001" secondAttribute="trailing" constant="8" id="NRQ-sA-ng6"/>
+                                                        <constraint firstItem="url-bt-001" firstAttribute="leading" secondItem="k5I-MN-hYk" secondAttribute="trailing" constant="3" id="url-cs-001"/>
+                                                        <constraint firstItem="url-bt-001" firstAttribute="centerY" secondItem="k5I-MN-hYk" secondAttribute="centerY" id="url-cs-002"/>
                                                         <constraint firstItem="vYS-eL-CGb" firstAttribute="top" secondItem="7Ic-8y-f3v" secondAttribute="top" constant="3" id="QtZ-VZ-lRO"/>
                                                         <constraint firstItem="Rxb-qW-x6p" firstAttribute="centerX" secondItem="WTV-L6-lc2" secondAttribute="centerX" id="Uyo-j3-TSH"/>
                                                         <constraint firstItem="Ifq-ub-ay4" firstAttribute="top" secondItem="7sy-Kk-M9Y" secondAttribute="bottom" constant="1" id="XRq-cM-zeI"/>
@@ -267,6 +279,7 @@
                                                         <outlet property="fGroupIndicatorView" destination="FLl-ue-i20" id="0QU-wF-59e"/>
                                                         <outlet property="fIconView" destination="WTV-L6-lc2" id="gmV-h3-Muk"/>
                                                         <outlet property="fRevealButton" destination="k5I-MN-hYk" id="Qkq-Yq-UAY"/>
+                                                        <outlet property="fURLButton" destination="url-bt-001" id="url-ol-001"/>
                                                         <outlet property="fStackView" destination="vYS-eL-CGb" id="MDM-8N-HVT"/>
                                                         <outlet property="fTorrentPriorityView" destination="FUW-Pk-EJ8" id="0MT-4C-9H7"/>
                                                         <outlet property="fTorrentPriorityViewWidthConstraint" destination="jRb-Kc-aSX" id="tEJ-L9-33e"/>
@@ -382,6 +395,20 @@
                                                                 <outlet property="torrentCell" destination="ouH-H8-Otv" id="zlt-Qk-E34"/>
                                                             </connections>
                                                         </button>
+                                                        <button translatesAutoresizingMaskIntoConstraints="NO" id="url-bt-002" customClass="TorrentCellURLButton">
+                                                            <rect key="frame" x="453" y="4" width="14" height="14"/>
+                                                            <buttonCell key="cell" type="square" bezelStyle="shadowlessSquare" imagePosition="only" alignment="center" imageScaling="proportionallyUpOrDown" inset="2" id="url-bc-002">
+                                                                <behavior key="behavior" pushIn="YES" lightByBackground="YES" lightByGray="YES"/>
+                                                                <font key="font" metaFont="system"/>
+                                                            </buttonCell>
+                                                            <constraints>
+                                                                <constraint firstAttribute="height" constant="14" id="url-h2-001"/>
+                                                                <constraint firstAttribute="width" constant="14" id="url-w2-001"/>
+                                                            </constraints>
+                                                            <connections>
+                                                                <outlet property="torrentCell" destination="ouH-H8-Otv" id="url-cn-002"/>
+                                                            </connections>
+                                                        </button>
                                                     </subviews>
                                                     <constraints>
                                                         <constraint firstItem="Hyt-Uv-vDm" firstAttribute="centerY" secondItem="x9c-7U-Odp" secondAttribute="centerY" id="1WR-Ta-vbl"/>
@@ -395,7 +422,9 @@
                                                         <constraint firstItem="dPU-vz-fnz" firstAttribute="centerY" secondItem="ouH-H8-Otv" secondAttribute="centerY" id="VXm-be-NaO"/>
                                                         <constraint firstItem="x9c-7U-Odp" firstAttribute="centerY" secondItem="9Cg-Nh-Hcr" secondAttribute="centerY" id="VaS-hJ-vAV"/>
                                                         <constraint firstAttribute="trailing" secondItem="x9c-7U-Odp" secondAttribute="trailing" constant="5" id="daS-0F-yKf"/>
-                                                        <constraint firstAttribute="trailing" secondItem="Hyt-Uv-vDm" secondAttribute="trailing" constant="8" id="fKb-o5-n1k"/>
+                                                        <constraint firstAttribute="trailing" secondItem="url-bt-002" secondAttribute="trailing" constant="8" id="fKb-o5-n1k"/>
+                                                        <constraint firstItem="url-bt-002" firstAttribute="leading" secondItem="Hyt-Uv-vDm" secondAttribute="trailing" constant="3" id="url-cs-003"/>
+                                                        <constraint firstItem="url-bt-002" firstAttribute="centerY" secondItem="Hyt-Uv-vDm" secondAttribute="centerY" id="url-cs-004"/>
                                                         <constraint firstItem="dPU-vz-fnz" firstAttribute="leading" secondItem="WWu-yD-Amw" secondAttribute="trailing" constant="15" id="gxk-cy-Mq2"/>
                                                         <constraint firstItem="WWu-yD-Amw" firstAttribute="centerY" secondItem="9Cg-Nh-Hcr" secondAttribute="centerY" id="hYn-MV-EFh"/>
                                                         <constraint firstItem="4yg-IA-aOF" firstAttribute="centerY" secondItem="ouH-H8-Otv" secondAttribute="centerY" id="izm-2a-TOI"/>
@@ -409,6 +438,7 @@
                                                         <outlet property="fGroupIndicatorView" destination="4yg-IA-aOF" id="ROF-Ua-PGS"/>
                                                         <outlet property="fIconView" destination="WWu-yD-Amw" id="vWy-ch-grE"/>
                                                         <outlet property="fRevealButton" destination="Hyt-Uv-vDm" id="PHz-zj-UsH"/>
+                                                        <outlet property="fURLButton" destination="url-bt-002" id="url-ol-002"/>
                                                         <outlet property="fStackView" destination="dPU-vz-fnz" id="hPz-Up-wEK"/>
                                                         <outlet property="fTorrentPriorityView" destination="ocL-c0-B8y" id="OoF-f4-uU5"/>
                                                         <outlet property="fTorrentPriorityViewWidthConstraint" destination="grl-70-hEy" id="sps-C4-rsi"/>

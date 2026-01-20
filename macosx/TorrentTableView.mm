@@ -20,6 +20,7 @@
 #import "TorrentCellActionButton.h"
 #import "TorrentCellControlButton.h"
 #import "TorrentCellRevealButton.h"
+#import "TorrentCellURLButton.h"
 
 CGFloat const kGroupSeparatorHeight = 18.0;
 
@@ -325,10 +326,13 @@ static NSTimeInterval const kToggleProgressSeconds = 0.175;
 
         torrentCell.fControlButton.action = @selector(toggleControlForTorrent:);
         torrentCell.fRevealButton.action = @selector(revealTorrentFile:);
+        torrentCell.fURLButton.action = @selector(openCommentURL:);
+        torrentCell.fURLButton.hidden = (torrent.commentURL == nil);
 
         // redraw buttons
         torrentCell.fControlButton.needsDisplay = YES;
         torrentCell.fRevealButton.needsDisplay = YES;
+        torrentCell.fURLButton.needsDisplay = YES;
 
         return torrentCell;
     }
@@ -713,6 +717,10 @@ static NSTimeInterval const kToggleProgressSeconds = 0.175;
         {
             statusString = NSLocalizedString(@"Change transfer settings", "Torrent Table -> tooltip");
         }
+        else if ([view isKindOfClass:[TorrentCellURLButton class]])
+        {
+            statusString = NSLocalizedString(@"Open the torrent's comment URL", "Torrent cell -> button info");
+        }
 
         if (statusString)
         {
@@ -787,7 +795,26 @@ static NSTimeInterval const kToggleProgressSeconds = 0.175;
     if (location)
     {
         NSURL* file = [NSURL fileURLWithPath:location];
-        [NSWorkspace.sharedWorkspace activateFileViewerSelectingURLs:@[ file ]];
+        if (torrent.folder)
+        {
+            // Folder torrent - open the folder to show its contents
+            [NSWorkspace.sharedWorkspace openURL:file];
+        }
+        else
+        {
+            // Single file torrent - reveal/select it in Finder
+            [NSWorkspace.sharedWorkspace activateFileViewerSelectingURLs:@[ file ]];
+        }
+    }
+}
+
+- (IBAction)openCommentURL:(id)sender
+{
+    Torrent* torrent = [self itemAtRow:[self rowForView:[sender superview]]];
+    NSURL* url = torrent.commentURL;
+    if (url)
+    {
+        [NSWorkspace.sharedWorkspace openURL:url];
     }
 }
 

@@ -914,6 +914,9 @@
 /* Torrent cell -> button info */
 "Show the data file in Finder" = "Show the data file in Finder";
 
+/* Torrent cell -> button info */
+"Open the torrent's comment URL" = "Open the torrent's comment URL";
+
 /* View menu -> Toolbar */
 "Show Toolbar" = "Show Toolbar";
 

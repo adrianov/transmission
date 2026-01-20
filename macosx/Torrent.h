@@ -104,6 +104,7 @@ extern NSString* const kTorrentDidChangeGroupNotification;
 - (void)removeTrackers:(NSSet*)trackers;
 
 @property(nonatomic, readonly) NSString* comment;
+@property(nonatomic, readonly) NSURL* commentURL;
 @property(nonatomic, readonly) NSString* creator;
 @property(nonatomic, readonly) NSDate* dateCreated;
 

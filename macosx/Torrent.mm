@@ -743,6 +743,18 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
     return comment ? @(comment) : @"";
 }
 
+- (NSURL*)commentURL
+{
+    NSString* comment = self.comment;
+    if (comment.length == 0)
+    {
+        return nil;
+    }
+    NSDataDetector* detector = [NSDataDetector dataDetectorWithTypes:NSTextCheckingTypeLink error:nil];
+    NSTextCheckingResult* result = [detector firstMatchInString:comment options:0 range:NSMakeRange(0, comment.length)];
+    return result.URL;
+}
+
 - (NSString*)creator
 {
     auto const* creator = tr_torrentView(self.fHandle).creator;

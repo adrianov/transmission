@@ -10,6 +10,7 @@
 @property(nonatomic) IBOutlet NSButton* fActionButton;
 @property(nonatomic) IBOutlet NSButton* fControlButton;
 @property(nonatomic) IBOutlet NSButton* fRevealButton;
+@property(nonatomic) IBOutlet NSButton* fURLButton;
 
 @property(nonatomic) IBOutlet NSImageView* fIconView;
 @property(nonatomic) IBOutlet NSImageView* fGroupIndicatorView;
