@@ -545,35 +545,44 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
         return;
     }
 
-    int volatile status;
+    __block int volatile status;
     tr_torrentSetLocation(self.fHandle, folder.UTF8String, YES, &status);
 
-    while (status == TR_LOC_MOVING) //block while moving (for now)
-    {
-        [NSThread sleepForTimeInterval:0.05];
-    }
+    NSString* torrentName = self.name;
+    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+        while (status == TR_LOC_MOVING)
+        {
+            [NSThread sleepForTimeInterval:0.05];
+        }
 
-    if (status == TR_LOC_DONE)
-    {
-        [NSNotificationCenter.defaultCenter postNotificationName:@"UpdateStats" object:nil];
-    }
-    else
-    {
-        NSAlert* alert = [[NSAlert alloc] init];
-        alert.messageText = NSLocalizedString(@"There was an error moving the data file.", "Move error alert -> title");
-        alert.informativeText = [NSString
-            stringWithFormat:NSLocalizedString(@"The move operation of \"%@\" cannot be done.", "Move error alert -> message"), self.name];
-        [alert addButtonWithTitle:NSLocalizedString(@"OK", "Move error alert -> button")];
+        dispatch_async(dispatch_get_main_queue(), ^{
+            if (status == TR_LOC_DONE)
+            {
+                [NSNotificationCenter.defaultCenter postNotificationName:@"UpdateStats" object:nil];
+            }
+            else
+            {
+                NSAlert* alert = [[NSAlert alloc] init];
+                alert.messageText = NSLocalizedString(@"There was an error moving the data file.", "Move error alert -> title");
+                alert.informativeText = [NSString
+                    stringWithFormat:NSLocalizedString(@"The move operation of \"%@\" cannot be done.", "Move error alert -> message"),
+                                     torrentName];
+                [alert addButtonWithTitle:NSLocalizedString(@"OK", "Move error alert -> button")];
 
-        [alert runModal];
-    }
+                [alert runModal];
+            }
 
-    [self updateTimeMachineExclude];
+            [self updateTimeMachineExclude];
+        });
+    });
 }
 
 - (void)copyTorrentFileTo:(NSString*)path
 {
-    [NSFileManager.defaultManager copyItemAtPath:self.torrentLocation toPath:path error:NULL];
+    NSString* sourcePath = self.torrentLocation;
+    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+        [NSFileManager.defaultManager copyItemAtPath:sourcePath toPath:path error:NULL];
+    });
 }
 
 - (BOOL)alertForRemainingDiskSpace
