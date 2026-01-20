@@ -707,6 +707,12 @@ void onTorrentCompletenessChanged(tr_torrent* tor, tr_completeness status, bool 
     //this must be called after showStatusBar:
     [self.fStatusBar updateWithDownload:0.0 upload:0.0];
 
+    // Show the window early so user sees the app is loading
+    [self.fWindow makeKeyAndOrderFront:nil];
+
+    // Process pending UI events to ensure window is displayed before heavy loading
+    [NSRunLoop.currentRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.01]];
+
     auto* const session = self.fLib;
 
     //load previous transfers
@@ -823,8 +829,6 @@ void onTorrentCompletenessChanged(tr_torrent* tor, tr_completeness status, bool 
                                                   repeats:YES];
     [NSRunLoop.currentRunLoop addTimer:self.fTimer forMode:NSModalPanelRunLoopMode];
     [NSRunLoop.currentRunLoop addTimer:self.fTimer forMode:NSEventTrackingRunLoopMode];
-
-    [self.fWindow makeKeyAndOrderFront:nil];
 
     if ([self.fDefaults boolForKey:@"InfoVisible"])
     {
@@ -2787,7 +2791,9 @@ static NSTimeInterval const kLowPriorityDelay = 15.0;
     }
 
     NSString* historyFile = [self.fConfigDirectory stringByAppendingPathComponent:kTransferPlist];
-    [history writeToFile:historyFile atomically:YES];
+    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+        [history writeToFile:historyFile atomically:YES];
+    });
 }
 
 - (void)setSort:(id)sender
@@ -5534,8 +5540,12 @@ static NSTimeInterval const kLowPriorityDelay = 15.0;
 - (void)searchTorrentsWithQuery:(NSString*)query
 {
     NSString* encodedQuery = [query stringByAddingPercentEncodingWithAllowedCharacters:NSCharacterSet.URLQueryAllowedCharacterSet];
-    NSString* urlString = [NSString stringWithFormat:@"https://kinozal.tv/browse.php?s=%@&t=1", encodedQuery];
-    [NSWorkspace.sharedWorkspace openURL:[NSURL URLWithString:urlString]];
+
+    NSString* kinozalUrl = [NSString stringWithFormat:@"https://kinozal.tv/browse.php?s=%@&t=1", encodedQuery];
+    [NSWorkspace.sharedWorkspace openURL:[NSURL URLWithString:kinozalUrl]];
+
+    NSString* rutrackerUrl = [NSString stringWithFormat:@"https://rutracker.org/forum/tracker.php?nm=%@&o=10", encodedQuery];
+    [NSWorkspace.sharedWorkspace openURL:[NSURL URLWithString:rutrackerUrl]];
 }
 
 - (void)rpcCallback:(tr_rpc_callback_type)type forTorrentStruct:(struct tr_torrent*)torrentStruct
