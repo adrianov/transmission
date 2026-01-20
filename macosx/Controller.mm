@@ -334,6 +334,7 @@ static void removeKeRangerRansomware()
 @property(nonatomic) NSView* fPositioningView;
 @property(nonatomic) BOOL fSoundPlaying;
 @property(nonatomic) BOOL fWindowMiniaturized;
+@property(nonatomic) NSTimer* fLowPriorityTimer;
 
 @end
 
@@ -1096,12 +1097,12 @@ void onTorrentCompletenessChanged(tr_torrent* tor, tr_completeness status, bool 
 
 - (void)applicationDidBecomeActive:(NSNotification*)notification
 {
-    [self updateProcessPriority];
+    [self scheduleProcessPriorityUpdate];
 }
 
 - (void)applicationDidResignActive:(NSNotification*)notification
 {
-    [self updateProcessPriority];
+    [self scheduleProcessPriorityUpdate];
 }
 
 #pragma mark - NSWindowDelegate
@@ -1132,7 +1133,7 @@ void onTorrentCompletenessChanged(tr_torrent* tor, tr_completeness status, bool 
     if (notification.object == self.fWindow)
     {
         self.fWindowMiniaturized = YES;
-        [self updateProcessPriority];
+        [self scheduleProcessPriorityUpdate];
     }
 }
 
@@ -1141,28 +1142,47 @@ void onTorrentCompletenessChanged(tr_torrent* tor, tr_completeness status, bool 
     if (notification.object == self.fWindow)
     {
         self.fWindowMiniaturized = NO;
-        [self updateProcessPriority];
+        [self scheduleProcessPriorityUpdate];
     }
 }
 
 #pragma mark -
 
-- (void)updateProcessPriority
-{
-    // Use normal priority when app is active and window is visible (not miniaturized)
-    // Use background priority when app is inactive or window is miniaturized
-    BOOL const useBackground = !NSApp.active || self.fWindowMiniaturized;
+static NSTimeInterval const kLowPriorityDelay = 15.0;
 
-    if (useBackground)
+- (void)scheduleProcessPriorityUpdate
+{
+    [self.fLowPriorityTimer invalidate];
+    self.fLowPriorityTimer = nil;
+
+    BOOL const shouldUseBackground = !NSApp.active || self.fWindowMiniaturized;
+
+    if (shouldUseBackground)
     {
-        setpriority(PRIO_DARWIN_PROCESS, 0, PRIO_DARWIN_BG);
-        setiopolicy_np(IOPOL_TYPE_DISK, IOPOL_SCOPE_PROCESS, IOPOL_THROTTLE);
+        // Delay going to low priority by 15 seconds
+        self.fLowPriorityTimer = [NSTimer scheduledTimerWithTimeInterval:kLowPriorityDelay target:self
+                                                                selector:@selector(applyLowPriority)
+                                                                userInfo:nil
+                                                                 repeats:NO];
     }
     else
     {
-        setpriority(PRIO_DARWIN_PROCESS, 0, 0);
-        setiopolicy_np(IOPOL_TYPE_DISK, IOPOL_SCOPE_PROCESS, IOPOL_DEFAULT);
+        // Restore normal priority immediately
+        [self applyNormalPriority];
     }
+}
+
+- (void)applyLowPriority
+{
+    self.fLowPriorityTimer = nil;
+    setpriority(PRIO_DARWIN_PROCESS, 0, PRIO_DARWIN_BG);
+    setiopolicy_np(IOPOL_TYPE_DISK, IOPOL_SCOPE_PROCESS, IOPOL_THROTTLE);
+}
+
+- (void)applyNormalPriority
+{
+    setpriority(PRIO_DARWIN_PROCESS, 0, 0);
+    setiopolicy_np(IOPOL_TYPE_DISK, IOPOL_SCOPE_PROCESS, IOPOL_DEFAULT);
 }
 
 - (tr_session*)sessionHandle
