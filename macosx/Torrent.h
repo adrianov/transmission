@@ -135,6 +135,8 @@ extern NSString* const kTorrentDidChangeGroupNotification;
 /// True if downloading or uploading.
 @property(nonatomic, getter=isTransmitting, readonly) BOOL transmitting;
 @property(nonatomic, getter=isSeeding, readonly) BOOL seeding;
+/// True if actively downloading (not paused, not seeding, not just checking).
+@property(nonatomic, getter=isDownloading, readonly) BOOL downloading;
 @property(nonatomic, getter=isChecking, readonly) BOOL checking;
 @property(nonatomic, getter=isCheckingWaiting, readonly) BOOL checkingWaiting;
 @property(nonatomic, readonly) BOOL allDownloaded;

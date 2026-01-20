@@ -887,19 +887,28 @@ void tr_session::setSettings(tr_session::Settings&& settings_in, bool force)
         verifier_->set_sleep_per_seconds_during_verify(val);
     }
 
-    // Validate proxy on startup or when proxy URL changes
+    // Validate proxy on startup or when proxy URL changes (async to avoid blocking startup)
     if (auto const& val = new_settings.proxy_url; val && (force || val != old_settings.proxy_url))
     {
-        if (!tr_web::isProxyHealthy(*val))
-        {
-            tr_logAddWarn(
-                fmt::format(fmt::runtime(_("Disabling unhealthy proxy for this session: {proxy}")), fmt::arg("proxy", *val)));
-            is_proxy_disabled_for_session_ = true;
-        }
-        else
-        {
-            is_proxy_disabled_for_session_ = false;
-        }
+        is_proxy_disabled_for_session_ = false; // Assume healthy, disable async if check fails
+        auto const proxy_url = *val;
+        std::thread(
+            [this, proxy_url]()
+            {
+                if (!tr_web::isProxyHealthy(proxy_url))
+                {
+                    run_in_session_thread(
+                        [this, proxy_url]()
+                        {
+                            tr_logAddWarn(
+                                fmt::format(
+                                    fmt::runtime(_("Disabling unhealthy proxy for this session: {proxy}")),
+                                    fmt::arg("proxy", proxy_url)));
+                            is_proxy_disabled_for_session_ = true;
+                        });
+                }
+            })
+            .detach();
     }
     else if (!val)
     {

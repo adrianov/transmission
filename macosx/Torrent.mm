@@ -937,6 +937,11 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
     return self.fStat->activity == TR_STATUS_SEED;
 }
 
+- (BOOL)isDownloading
+{
+    return self.fStat->activity == TR_STATUS_DOWNLOAD;
+}
+
 - (BOOL)isChecking
 {
     return self.fStat->activity == TR_STATUS_CHECK || self.fStat->activity == TR_STATUS_CHECK_WAIT;

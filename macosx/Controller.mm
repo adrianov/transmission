@@ -1106,6 +1106,27 @@ void onTorrentCompletenessChanged(tr_torrent* tor, tr_completeness status, bool 
 
 #pragma mark - NSWindowDelegate
 
+- (BOOL)windowShouldClose:(NSWindow*)window
+{
+    if (window != self.fWindow)
+    {
+        return YES;
+    }
+
+    // Check if any torrent is actively downloading
+    for (Torrent* torrent in self.fTorrents)
+    {
+        if (torrent.downloading)
+        {
+            return YES; // Allow normal close (window hides)
+        }
+    }
+
+    // No torrents downloading - quit the app instead
+    [NSApp terminate:self];
+    return NO;
+}
+
 - (void)windowDidMiniaturize:(NSNotification*)notification
 {
     if (notification.object == self.fWindow)

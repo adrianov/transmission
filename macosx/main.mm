@@ -4,18 +4,12 @@
 
 @import AppKit;
 
-#include <sys/resource.h>
-
 #include <libtransmission/transmission.h>
 
 #include <libtransmission/utils.h>
 
 int main(int argc, char** argv)
 {
-    // Set background priority at startup (managed dynamically by Controller based on window visibility)
-    setpriority(PRIO_DARWIN_PROCESS, 0, PRIO_DARWIN_BG);
-    setiopolicy_np(IOPOL_TYPE_DISK, IOPOL_SCOPE_PROCESS, IOPOL_THROTTLE);
-
     tr_lib_init();
 
     tr_locale_set_global("");
