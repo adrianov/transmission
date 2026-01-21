@@ -57,7 +57,12 @@ Season markers are converted to readable format:
 
 ### 5. Year Extraction
 
-Four-digit years (1900-2099) are preserved in the output, wrapped in parentheses.
+Four-digit years (1900-2099) are extracted and shown in parentheses.
+
+**Handling existing parentheses:**
+- If the year is already in parentheses like `Movie (2024) 1080p`, the parentheses are preserved as-is
+- Years with preceding dots like `Movie.2024.1080p` have the dot removed
+- The year is not duplicated in the output
 
 ### 6. Date Detection
 
@@ -135,6 +140,7 @@ Parts are assembled with specific formatting:
 | `Concert.BD50.2019` | `Concert (2019) #BD50` |
 | `The.Matrix.1999.1080p.BluRay.x264` | `The Matrix (1999) #1080p` |
 | `Documentary.4K.HDR.2023` | `Documentary (2023) #2160p` |
+| `Kinds of Kindness (2024) WEB-DL SDR 2160p.mkv` | `Kinds of Kindness (2024) #2160p` |
 
 ## Play Buttons (macOS)
 

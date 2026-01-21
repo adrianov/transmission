@@ -448,7 +448,8 @@
     title = [seasonRemoveRegex stringByReplacingMatchesInString:title options:0 range:NSMakeRange(0, title.length) withTemplate:@""];
     if (year)
     {
-        NSRegularExpression* yearRemoveRegex = [NSRegularExpression regularExpressionWithPattern:@"\\.?(19\\d{2}|20\\d{2})\\b"
+        // Remove year and surrounding parentheses or preceding dot
+        NSRegularExpression* yearRemoveRegex = [NSRegularExpression regularExpressionWithPattern:@"\\.?\\(?(19\\d{2}|20\\d{2})\\)?"
                                                                                          options:0
                                                                                            error:nil];
         title = [yearRemoveRegex stringByReplacingMatchesInString:title options:0 range:NSMakeRange(0, title.length)

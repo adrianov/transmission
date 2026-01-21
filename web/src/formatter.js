@@ -243,9 +243,9 @@ function formatHumanTitle(name) {
       '',
     )
     .replaceAll(/\.?S\d{1,2}(E\d+)?\b/gi, '');
-  // Remove year only if not part of a full date (and preceding dot)
+  // Remove year only if not part of a full date (and preceding dot or surrounding parentheses)
   if (year) {
-    title = title.replace(/\.?(19\d{2}|20\d{2})\b/, '');
+    title = title.replace(/\.?\(?(19\d{2}|20\d{2})\)?/, '');
   }
   // Remove both date formats (DD.MM.YYYY and YY.MM.DD), including surrounding parentheses
   title = title
