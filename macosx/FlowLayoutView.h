@@ -5,19 +5,19 @@
 #import <AppKit/AppKit.h>
 
 /// A view that arranges its subviews in a flow layout (left to right, wrapping to new lines).
-/// Optimized with size caching to avoid redundant calculations during resize.
+/// Buttons size to their content with minimum padding.
 @interface FlowLayoutView : NSView
 
 @property(nonatomic) CGFloat horizontalSpacing;
 @property(nonatomic) CGFloat verticalSpacing;
+/// Minimum width for buttons (default 50)
+@property(nonatomic) CGFloat minimumButtonWidth;
 
 - (void)addArrangedSubview:(NSView*)view;
+- (void)addLineBreak;
 - (NSArray<NSView*>*)arrangedSubviews;
 
-/// Returns cached height for given width. Only recalculates if width changed or cache invalidated.
+/// Returns height for given width. Uses cached sizes for subviews.
 - (CGFloat)heightForWidth:(CGFloat)width;
-
-/// Invalidates the cached layout. Call when subview content changes (e.g., button title).
-- (void)invalidateLayoutCache;
 
 @end

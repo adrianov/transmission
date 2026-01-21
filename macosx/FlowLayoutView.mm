@@ -4,9 +4,16 @@
 
 #import "FlowLayoutView.h"
 
+@interface FlowLineBreak : NSView
+@end
+
+@implementation FlowLineBreak
+@end
+
 @implementation FlowLayoutView
 {
     NSMutableArray<NSView*>* _arrangedSubviews;
+    NSMapTable<NSView*, NSValue*>* _cachedSizes;
 }
 
 - (instancetype)initWithFrame:(NSRect)frameRect
@@ -14,8 +21,10 @@
     if (self = [super initWithFrame:frameRect])
     {
         _arrangedSubviews = [NSMutableArray array];
+        _cachedSizes = [NSMapTable weakToStrongObjectsMapTable];
         _horizontalSpacing = 6;
-        _verticalSpacing = 2;
+        _verticalSpacing = 4;
+        _minimumButtonWidth = 50;
     }
     return self;
 }
@@ -24,6 +33,14 @@
 {
     [_arrangedSubviews addObject:view];
     [self addSubview:view];
+    [self setNeedsLayout:YES];
+}
+
+- (void)addLineBreak
+{
+    FlowLineBreak* br = [[FlowLineBreak alloc] init];
+    [_arrangedSubviews addObject:br];
+    [self addSubview:br];
     [self setNeedsLayout:YES];
 }
 
@@ -41,11 +58,33 @@
 {
     [super layout];
     [self layoutSubviewsForWidth:self.bounds.size.width];
-    [self invalidateIntrinsicContentSize];
+}
+
+- (NSSize)sizeForView:(NSView*)view
+{
+    NSValue* cached = [_cachedSizes objectForKey:view];
+    if (cached)
+        return cached.sizeValue;
+
+    NSSize size = view.fittingSize;
+    if (size.width <= 0)
+        size.width = 60;
+    if (size.height <= 0)
+        size.height = 18;
+
+    // Apply minimum width for buttons
+    if ([view isKindOfClass:[NSButton class]] && size.width < _minimumButtonWidth)
+        size.width = _minimumButtonWidth;
+
+    [_cachedSizes setObject:[NSValue valueWithSize:size] forKey:view];
+    return size;
 }
 
 - (void)layoutSubviewsForWidth:(CGFloat)availableWidth
 {
+    if (availableWidth <= 0)
+        return;
+
     CGFloat x = 0;
     CGFloat y = 0;
     CGFloat rowHeight = 0;
@@ -55,15 +94,16 @@
         if (view.hidden)
             continue;
 
-        NSSize size = view.intrinsicContentSize;
-        if (size.width == NSViewNoIntrinsicMetric)
-            size.width = view.fittingSize.width;
-        if (size.height == NSViewNoIntrinsicMetric)
-            size.height = view.fittingSize.height;
-        if (size.width <= 0)
-            size.width = 80;
-        if (size.height <= 0)
-            size.height = 18;
+        if ([view isKindOfClass:[FlowLineBreak class]])
+        {
+            y += rowHeight + (rowHeight > 0 ? _verticalSpacing : 0);
+            rowHeight = 0;
+            x = 0;
+            continue;
+        }
+
+        NSSize size = [self sizeForView:view];
+        size.width = MIN(size.width, availableWidth);
 
         // Wrap to next line if needed
         if (x > 0 && x + size.width > availableWidth)
@@ -81,6 +121,9 @@
 
 - (CGFloat)heightForWidth:(CGFloat)availableWidth
 {
+    if (availableWidth <= 0)
+        return 0;
+
     CGFloat x = 0;
     CGFloat y = 0;
     CGFloat rowHeight = 0;
@@ -90,15 +133,16 @@
         if (view.hidden)
             continue;
 
-        NSSize size = view.intrinsicContentSize;
-        if (size.width == NSViewNoIntrinsicMetric)
-            size.width = view.fittingSize.width;
-        if (size.height == NSViewNoIntrinsicMetric)
-            size.height = view.fittingSize.height;
-        if (size.width <= 0)
-            size.width = 80;
-        if (size.height <= 0)
-            size.height = 18;
+        if ([view isKindOfClass:[FlowLineBreak class]])
+        {
+            x = 0;
+            y += rowHeight + (rowHeight > 0 ? _verticalSpacing : 0);
+            rowHeight = 0;
+            continue;
+        }
+
+        NSSize size = [self sizeForView:view];
+        size.width = MIN(size.width, availableWidth);
 
         if (x > 0 && x + size.width > availableWidth)
         {
@@ -119,7 +163,7 @@
     BOOL hasVisible = NO;
     for (NSView* view in _arrangedSubviews)
     {
-        if (!view.hidden)
+        if (!view.hidden && ![view isKindOfClass:[FlowLineBreak class]])
         {
             hasVisible = YES;
             break;
@@ -135,10 +179,7 @@
         width = 600;
 
     CGFloat height = [self heightForWidth:width];
-    if (height < 18)
-        height = 18;
-
-    return NSMakeSize(NSViewNoIntrinsicMetric, height);
+    return NSMakeSize(NSViewNoIntrinsicMetric, MAX(height, 0));
 }
 
 @end
