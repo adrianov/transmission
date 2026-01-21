@@ -149,15 +149,28 @@ function formatHumanTitle(name) {
       /\b(DVD5|DVD9|DVD|BD25|BD50|BD66|BD100|XviD|DivX|MP3|FLAC|OGG|AAC|WAV|APE|ALAC|WMA|OPUS|M4A)\b/i,
     );
     if (bracketFormatMatch) {
-      const fmt = bracketFormatMatch[1];
+      const [, fmt] = bracketFormatMatch;
       // Disc formats (DVD/BD) uppercase, legacy codecs and audio formats lowercase
-      const discFormats = ['dvd', 'dvd5', 'dvd9', 'bd25', 'bd50', 'bd66', 'bd100'];
-      bracketFormat = discFormats.includes(fmt.toLowerCase()) ? fmt.toUpperCase() : fmt.toLowerCase();
+      const discFormats = [
+        'dvd',
+        'dvd5',
+        'dvd9',
+        'bd25',
+        'bd50',
+        'bd66',
+        'bd100',
+      ];
+      bracketFormat = discFormats.includes(fmt.toLowerCase())
+        ? fmt.toUpperCase()
+        : fmt.toLowerCase();
     }
     // Remove only year and format tags from bracket content, keep the rest
     const cleanedBracket = bracketContent
       .replaceAll(/\b(19\d{2}|20\d{2})\b/g, '')
-      .replaceAll(/\b(?:DVD5|DVD9|DVD|BD25|BD50|BD66|BD100|XviD|DivX|MP3|FLAC|OGG|AAC|WAV|APE|ALAC|WMA|OPUS|M4A)\b/gi, '')
+      .replaceAll(
+        /\b(?:DVD5|DVD9|DVD|BD25|BD50|BD66|BD100|XviD|DivX|MP3|FLAC|OGG|AAC|WAV|APE|ALAC|WMA|OPUS|M4A)\b/gi,
+        '',
+      )
       .replaceAll(/,\s*,/g, ',')
       .replaceAll(/^[\s,]+/g, '')
       .replaceAll(/[\s,]+$/g, '')
@@ -197,12 +210,14 @@ function formatHumanTitle(name) {
   // Legacy codecs and audio formats (shown as #xvid, #mp3, etc.) - lowercase
   // Also match Cyrillic МР3 (М=M, Р=P in Cyrillic)
   if (!resolution) {
-    const formatMatch = title.match(/\b(XviD|DivX|MP3|FLAC|OGG|AAC|WAV|APE|ALAC|WMA|OPUS|M4A)\b/i) ||
-                        title.match(/\(?(МР3|МРЗ)\)?/i);
+    const formatMatch =
+      title.match(
+        /\b(XviD|DivX|MP3|FLAC|OGG|AAC|WAV|APE|ALAC|WMA|OPUS|M4A)\b/i,
+      ) || title.match(/\(?(МР3|МРЗ)\)?/i);
     if (formatMatch) {
       // Normalize Cyrillic variants to mp3
       const fmt = formatMatch[1].toLowerCase();
-      resolution = (fmt === 'мр3' || fmt === 'мрз') ? 'mp3' : fmt;
+      resolution = fmt === 'мр3' || fmt === 'мрз' ? 'mp3' : fmt;
     }
   }
   // Use format extracted from brackets if no other resolution found
@@ -228,14 +243,19 @@ function formatHumanTitle(name) {
   const date = dateMatch ? dateMatch[1] : null;
 
   // Year interval pattern (e.g., "2000 - 2003" or "2000-2003")
-  const yearIntervalMatch = title.match(/\b((?:19|20)\d{2})\s*-\s*((?:19|20)\d{2})\b/);
-  const yearInterval = yearIntervalMatch ? `${yearIntervalMatch[1]}-${yearIntervalMatch[2]}` : null;
+  const yearIntervalMatch = title.match(
+    /\b((?:19|20)\d{2})\s*-\s*((?:19|20)\d{2})\b/,
+  );
+  const yearInterval = yearIntervalMatch
+    ? `${yearIntervalMatch[1]}-${yearIntervalMatch[2]}`
+    : null;
 
   // Year pattern (standalone 4-digit year between 1900-2099) - but not if it's part of a date or interval
   // Also use year extracted from bracket metadata if no other year found
-  let year = fullDateMatch || yearInterval
-    ? null
-    : title.match(/\b(19\d{2}|20\d{2})\b/)?.[1] || null;
+  let year =
+    fullDateMatch || yearInterval
+      ? null
+      : title.match(/\b(19\d{2}|20\d{2})\b/)?.[1] || null;
   if (!year && bracketYear) {
     year = bracketYear;
   }
@@ -257,11 +277,13 @@ function formatHumanTitle(name) {
   // Remove resolution, season markers, year, date (and preceding dot if used as separator)
   // Also remove Cyrillic audio format variants and surrounding parentheses
   title = title
+    .replaceAll(/\.?\(?(2160p|1080p|720p|480p|8K|4K|UHD)\)?/gi, '')
+    .replaceAll(/\.?\(?(DVD5|DVD9|DVD|BD25|BD50|BD66|BD100)\)?/gi, '')
     .replaceAll(
-      /\.?\(?(2160p|1080p|720p|480p|8K|4K|UHD|DVD5|DVD9|DVD|BD25|BD50|BD66|BD100|XviD|DivX|MP3|FLAC|OGG|AAC|WAV|APE|ALAC|WMA|OPUS|M4A)\)?/gi,
+      /\.?\(?(XviD|DivX|MP3|FLAC|OGG|AAC|WAV|APE|ALAC|WMA|OPUS|M4A)\)?/gi,
       '',
     )
-    .replaceAll(/\(?(МР3|МРЗ)\)?/gi, '')
+    .replaceAll(/\(?\(?(МР3|МРЗ)\)?/gi, '')
     .replaceAll(/\.?S\d{1,2}(E\d+)?\b/gi, '');
   // Remove year interval (and preceding dot or surrounding parentheses)
   if (yearInterval) {
