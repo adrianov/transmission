@@ -2746,24 +2746,81 @@ void tr_torrent::recalculate_file_order()
         }
     }
 
-    // Sort wanted files alphabetically by path
-    // Use the full path for sorting so files in subdirectories are grouped together
-    // and sorted naturally (e.g., "dir/a.txt" before "dir/b.txt")
+    // Sort wanted files alphabetically by path, but when one filename is a prefix
+    // of another (with same extension), shorter comes first (e.g., "file.mkv" before "file.Bonus.mkv")
+    auto const tolower_char = [](char c)
+    {
+        return std::tolower(static_cast<unsigned char>(c));
+    };
+
+    auto const compare_ci = [&tolower_char](std::string_view s1, std::string_view s2)
+    {
+        return std::lexicographical_compare(
+            s1.begin(),
+            s1.end(),
+            s2.begin(),
+            s2.end(),
+            [&](char c1, char c2) { return tolower_char(c1) < tolower_char(c2); });
+    };
+
+    auto const equal_ci = [&tolower_char](std::string_view s1, std::string_view s2)
+    {
+        return s1.size() == s2.size() &&
+            std::equal(
+                   s1.begin(),
+                   s1.end(),
+                   s2.begin(),
+                   [&](char c1, char c2) { return tolower_char(c1) == tolower_char(c2); });
+    };
+
     std::sort(
         wanted_files.begin(),
         wanted_files.end(),
-        [this](tr_file_index_t a, tr_file_index_t b)
+        [this, &compare_ci, &equal_ci](tr_file_index_t a, tr_file_index_t b)
         {
             auto const& path_a = files().path(a);
             auto const& path_b = files().path(b);
-            // Case-insensitive comparison for more natural sorting
-            return std::lexicographical_compare(
-                path_a.begin(),
-                path_a.end(),
-                path_b.begin(),
-                path_b.end(),
-                [](char c1, char c2)
-                { return std::tolower(static_cast<unsigned char>(c1)) < std::tolower(static_cast<unsigned char>(c2)); });
+
+            // Split into directory and filename
+            auto const split_path = [](std::string_view path)
+            {
+                auto const pos = path.rfind('/');
+                return pos != std::string_view::npos ? std::make_pair(path.substr(0, pos), path.substr(pos + 1)) :
+                                                       std::make_pair(std::string_view{}, path);
+            };
+
+            auto const [dir_a, name_a] = split_path(path_a);
+            auto const [dir_b, name_b] = split_path(path_b);
+
+            // Compare directories first
+            if (!equal_ci(dir_a, dir_b))
+            {
+                return compare_ci(dir_a, dir_b);
+            }
+
+            // Split filename into base and extension
+            auto const split_ext = [](std::string_view name)
+            {
+                auto const pos = name.rfind('.');
+                return (pos != std::string_view::npos && pos > 0) ? std::make_pair(name.substr(0, pos), name.substr(pos)) :
+                                                                    std::make_pair(name, std::string_view{});
+            };
+
+            auto const [base_a, ext_a] = split_ext(name_a);
+            auto const [base_b, ext_b] = split_ext(name_b);
+
+            // If same extension and one base is prefix of another, shorter wins
+            if (equal_ci(ext_a, ext_b) && base_a.size() != base_b.size())
+            {
+                auto const& shorter = base_a.size() < base_b.size() ? base_a : base_b;
+                auto const& longer = base_a.size() < base_b.size() ? base_b : base_a;
+                if (equal_ci(shorter, longer.substr(0, shorter.size())))
+                {
+                    return base_a.size() < base_b.size();
+                }
+            }
+
+            return compare_ci(name_a, name_b);
         });
 
     // Build mappings - initialize with a large value to indicate "not assigned"
