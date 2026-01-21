@@ -41,6 +41,8 @@ typedef NS_ENUM(NSInteger, TorrentMediaType) { TorrentMediaTypeNone = 0, Torrent
 @property(nonatomic) NSUInteger fMediaFileCount;
 @property(nonatomic, copy) NSString* fMediaExtension;
 @property(nonatomic) BOOL fMediaTypeDetected;
+@property(nonatomic, copy) NSArray<NSDictionary*>* fPlayableFiles;
+@property(nonatomic) BOOL fPlayableFilesDetected;
 
 @property(nonatomic, copy) NSArray<FileListNode*>* fileList;
 @property(nonatomic, copy) NSArray<FileListNode*>* flatFileList;
@@ -720,6 +722,236 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
     return nil;
 }
 
+- (NSArray<NSDictionary*>*)playableFiles
+{
+    if (self.fPlayableFilesDetected)
+    {
+        return self.fPlayableFiles;
+    }
+    self.fPlayableFilesDetected = YES;
+
+    if (self.magnet)
+    {
+        return nil;
+    }
+
+    static NSSet<NSString*>* mediaExtensions;
+    static NSSet<NSString*>* cueCompanionExtensions;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        mediaExtensions = [NSSet setWithArray:@[
+            // Video
+            @"mkv",
+            @"avi",
+            @"mp4",
+            @"mov",
+            @"wmv",
+            @"flv",
+            @"webm",
+            @"m4v",
+            @"mpg",
+            @"mpeg",
+            @"ts",
+            @"m2ts",
+            @"vob",
+            @"3gp",
+            @"ogv",
+            // Audio
+            @"mp3",
+            @"flac",
+            @"wav",
+            @"aac",
+            @"ogg",
+            @"wma",
+            @"m4a",
+            @"ape",
+            @"alac",
+            @"aiff",
+            @"opus",
+            // Cue sheets
+            @"cue"
+        ]];
+        // Audio extensions that typically have companion .cue files
+        cueCompanionExtensions = [NSSet setWithArray:@[ @"flac", @"ape", @"wav", @"wma", @"alac", @"aiff" ]];
+    });
+
+    NSMutableArray<NSDictionary*>* playable = [NSMutableArray array];
+    NSUInteger const count = self.fileCount;
+
+    // First pass: collect .cue files and their base names (without extension)
+    NSMutableSet<NSString*>* cueBaseNames = [NSMutableSet set];
+    for (NSUInteger i = 0; i < count; i++)
+    {
+        auto const file = tr_torrentFile(self.fHandle, i);
+        NSString* fileName = @(file.name);
+        NSString* ext = fileName.pathExtension.lowercaseString;
+
+        if ([ext isEqualToString:@"cue"])
+        {
+            // Check if .cue file exists on disk
+            auto const location = tr_torrentFindFile(self.fHandle, i);
+            if (!std::empty(location))
+            {
+                // Store base name (path without extension) to exclude companion audio files
+                NSString* baseName = fileName.stringByDeletingPathExtension;
+                [cueBaseNames addObject:baseName];
+            }
+        }
+    }
+
+    // Second pass: add playable files, excluding audio files that have companion .cue
+    for (NSUInteger i = 0; i < count; i++)
+    {
+        auto const file = tr_torrentFile(self.fHandle, i);
+        NSString* fileName = @(file.name);
+        NSString* ext = fileName.pathExtension.lowercaseString;
+
+        if (![mediaExtensions containsObject:ext])
+        {
+            continue;
+        }
+
+        // Skip audio files that have a companion .cue file
+        if ([cueCompanionExtensions containsObject:ext])
+        {
+            NSString* baseName = fileName.stringByDeletingPathExtension;
+            if ([cueBaseNames containsObject:baseName])
+            {
+                continue; // Skip this audio file, .cue will be used instead
+            }
+        }
+
+        // Check if file exists on disk
+        auto const location = tr_torrentFindFile(self.fHandle, i);
+        if (std::empty(location))
+        {
+            continue;
+        }
+
+        NSString* path = @(location.c_str());
+
+        // Get episode numbers for sorting and display
+        NSArray<NSNumber*>* episodeNumbers = fileName.episodeNumbers;
+        NSNumber* season = episodeNumbers ? episodeNumbers[0] : @0;
+        NSNumber* episode = episodeNumbers ? episodeNumbers[1] : @(i);
+
+        // Get display name: use humanReadableEpisodeName or humanized filename
+        NSString* displayName = fileName.lastPathComponent.humanReadableEpisodeName;
+        if (!displayName)
+        {
+            displayName = fileName.lastPathComponent.stringByDeletingPathExtension.humanReadableTitle;
+        }
+        // Strip resolution (with or without #) from button titles
+        NSRegularExpression* resolutionRegex = [NSRegularExpression regularExpressionWithPattern:@"\\s*#?(2160p|1080p|720p|480p|4K|UHD)\\s*"
+                                                                                         options:NSRegularExpressionCaseInsensitive
+                                                                                           error:nil];
+        displayName = [resolutionRegex stringByReplacingMatchesInString:displayName options:0
+                                                                  range:NSMakeRange(0, displayName.length)
+                                                           withTemplate:@" "];
+        displayName = [displayName stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet];
+
+        // Get file progress
+        auto const fileInfo = tr_torrentFile(self.fHandle, i);
+        CGFloat progress = (fileInfo.length > 0) ? (CGFloat)fileInfo.have / (CGFloat)fileInfo.length : 1.0;
+
+        [playable addObject:@{
+            @"index" : @(i),
+            @"name" : displayName,
+            @"path" : path,
+            @"season" : season,
+            @"episode" : episode,
+            @"progress" : @(progress)
+        }];
+    }
+
+    // Sort by [season, episode]
+    [playable sortUsingComparator:^NSComparisonResult(NSDictionary* a, NSDictionary* b) {
+        NSComparisonResult seasonCmp = [a[@"season"] compare:b[@"season"]];
+        if (seasonCmp != NSOrderedSame)
+        {
+            return seasonCmp;
+        }
+        return [a[@"episode"] compare:b[@"episode"]];
+    }];
+
+    // Determine if we have season info for button title formatting
+    NSMutableSet<NSNumber*>* seasons = [NSMutableSet set];
+    for (NSDictionary* fileInfo in playable)
+    {
+        [seasons addObject:fileInfo[@"season"]];
+    }
+    BOOL hasMultipleSeasons = seasons.count > 1;
+    BOOL hasSeasonInfo = seasons.count == 1 && [[seasons anyObject] integerValue] > 0;
+
+    // Pre-compute button base titles (without progress) for consistent display
+    NSMutableArray<NSDictionary*>* result = [NSMutableArray arrayWithCapacity:playable.count];
+    for (NSDictionary* fileInfo in playable)
+    {
+        NSString* baseTitle;
+        NSNumber* season = fileInfo[@"season"];
+        NSNumber* episode = fileInfo[@"episode"];
+
+        if ((hasMultipleSeasons || hasSeasonInfo) && season.integerValue > 0)
+        {
+            baseTitle = [NSString stringWithFormat:@"▶ E%@", episode];
+        }
+        else
+        {
+            baseTitle = [NSString stringWithFormat:@"▶ %@", fileInfo[@"name"]];
+        }
+
+        NSMutableDictionary* entry = [fileInfo mutableCopy];
+        entry[@"baseTitle"] = baseTitle;
+
+        // Add progress suffix if not complete
+        CGFloat progress = [fileInfo[@"progress"] doubleValue];
+        if (progress < 1.0)
+        {
+            entry[@"buttonTitle"] = [NSString stringWithFormat:@"%@ (%.0f%%)", baseTitle, progress * 100];
+        }
+        else
+        {
+            entry[@"buttonTitle"] = baseTitle;
+        }
+        [result addObject:entry];
+    }
+
+    self.fPlayableFiles = result.count > 0 ? result : nil;
+    return self.fPlayableFiles;
+}
+
+- (CGFloat)fileProgressForIndex:(NSUInteger)index
+{
+    auto const file = tr_torrentFile(self.fHandle, index);
+    return (file.length > 0) ? (CGFloat)file.have / (CGFloat)file.length : 1.0;
+}
+
+- (BOOL)hasPlayableMedia
+{
+    if (self.magnet)
+    {
+        return NO;
+    }
+
+    // For folder torrents, use detectMediaType (fast, cached)
+    if (self.folder)
+    {
+        [self detectMediaType];
+        return self.fMediaType != TorrentMediaTypeNone;
+    }
+
+    // For single-file torrents, check if it's a media file
+    static NSSet<NSString*>* mediaExtensions;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        mediaExtensions = [NSSet setWithArray:@[
+            @"mkv", @"avi", @"mp4", @"mov",  @"wmv", @"flv", @"webm", @"m4v", @"mpg", @"mpeg", @"ts",   @"m2ts", @"vob",
+            @"3gp", @"ogv", @"mp3", @"flac", @"wav", @"aac", @"ogg",  @"wma", @"m4a", @"ape",  @"alac", @"aiff", @"opus"
+        ]];
+    });
+    return [mediaExtensions containsObject:self.name.pathExtension.lowercaseString];
+}
+
 /// Detects dominant media type (video or audio) in folder torrents.
 - (void)detectMediaType
 {
@@ -737,8 +969,8 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
 
     static NSSet<NSString*>* videoExtensions;
     static NSSet<NSString*>* audioExtensions;
-    static dispatch_once_t onceToken;
-    dispatch_once(&onceToken, ^{
+    static dispatch_once_t onceToken2;
+    dispatch_once(&onceToken2, ^{
         videoExtensions = [NSSet setWithArray:@[
             @"mkv",
             @"avi",

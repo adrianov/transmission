@@ -1,6 +1,6 @@
 # Human-Friendly Torrent Titles
 
-Transmission can display human-friendly titles instead of raw technical torrent names in the main window. This document describes the transformation rules.
+Transmission displays human-friendly titles instead of raw technical torrent names in the main window and provides quick Play buttons for media torrents.
 
 ## Overview
 
@@ -13,10 +13,10 @@ Major.Grom.Igra.protiv.pravil.S01.2025.WEB-DL.HEVC.2160p.SDR.ExKinoRay
 The human-friendly title extracts the meaningful parts:
 
 ```
-Major Grom Igra protiv pravil - Season 1 - 2025 - 2160p
+Major Grom Igra protiv pravil - Season 1 (2025) #2160p
 ```
 
-## Transformation Rules
+## Title Transformation Rules
 
 ### 1. File Extension Removal
 
@@ -34,7 +34,7 @@ Resolution is extracted and normalized:
 
 Season markers are converted to readable format:
 - `S01` → `Season 1`
-- `S01E05` → `Season 1` (episode number removed)
+- `S01E05` → `Season 1` (episode number removed from title)
 - `S12` → `Season 12`
 
 ### 4. Year Extraction
@@ -84,7 +84,7 @@ Parts are assembled with specific formatting:
 4. **Year** (if present and no date) - wrapped in parentheses `(year)`
 5. **Resolution** (if present) - prefixed with `#`
 
-## Examples
+## Title Examples
 
 | Technical Name | Human-Friendly Title |
 |----------------|---------------------|
@@ -97,11 +97,56 @@ Parts are assembled with specific formatting:
 | `The.Matrix.1999.1080p.BluRay.x264` | `The Matrix (1999) #1080p` |
 | `Documentary.4K.HDR.2023` | `Documentary (2023) #2160p` |
 
+## Play Buttons (macOS)
+
+Media torrents display Play buttons below the status line for quick access to downloaded files.
+
+### Features
+
+- **Single file torrents:** Show `▶ Play` button
+- **Multi-file torrents:** Show buttons for each downloaded media file
+- **Episode detection:** Files with `S01E05` or `1x05` patterns show as `▶ E1`, `▶ E2`, etc.
+- **Season grouping:** Multiple seasons show headers (`Season 1:`, `Season 2:`) followed by episode buttons
+- **Single season:** No header shown, just episode buttons (`▶ E1`, `▶ E2`, ...)
+- **Non-episode files:** Show humanized filename without resolution tags (e.g., `▶ Artist - Track Name`)
+- **CUE file support:** If a `.cue` file exists alongside an audio file, the `.cue` is opened instead
+- **Up to 100 files:** Maximum of 100 play buttons per torrent
+
+### Individual File Title Rules
+
+Button titles for individual files follow these rules:
+
+1. **Episode files** (`S01E05`, `1x05` patterns): Show as `▶ E5`, `▶ E12`, etc.
+2. **Non-episode files**: Show humanized filename with technical tags AND resolution stripped
+   - Resolution suffixes (`#2160p`, `#1080p`, etc.) are removed from button titles
+   - All technical tags (codecs, sources, etc.) are removed
+   - Example: `Artist.Track.2160p.FLAC.flac` → `▶ Artist Track`
+
+### Supported Media Extensions
+
+**Video:** mkv, avi, mp4, mov, wmv, flv, webm, m4v, mpg, mpeg, ts, m2ts, vob, 3gp, ogv
+
+**Audio:** mp3, flac, wav, aac, ogg, wma, m4a, ape, alac, aiff, opus, cue
+
+### Episode Name Humanization
+
+Filenames are converted to readable episode names:
+
+| Filename Pattern | Button Title |
+|-----------------|--------------|
+| `Show.S01E05.720p.mkv` | `▶ E5` |
+| `Show.S1.E12.HDTV.mp4` | `▶ E12` |
+| `Show.1x05.720p.mkv` | `▶ E5` |
+| `Artist.Track.Name.mp3` | `▶ Artist Track Name` |
+| `Concert.2160p.FLAC.flac` | `▶ Concert` |
+
 ## Implementation
 
 The transformation is implemented in:
 
-- **macOS:** `NSStringAdditions.mm` - `humanReadableTitle` property on `NSString`
+- **macOS:** `NSStringAdditions.mm` - `humanReadableTitle` and `humanReadableEpisodeName` properties on `NSString`
+- **macOS:** `Torrent.mm` - `playableFiles` property for media file detection
+- **macOS:** `TorrentTableView.mm` - Play button UI and dynamic row height
 - **Web UI:** `formatter.js` - `Formatter.humanTitle()` function
 
 The original technical name remains available via the `name` property and is shown in the Inspector (detail view) where the exact filename may be needed.

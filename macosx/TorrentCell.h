@@ -26,6 +26,13 @@
 
 @property(nonatomic) IBOutlet NSView* fTorrentProgressBarView;
 
+/// Container view for dynamically created play buttons. Created programmatically.
+@property(nonatomic) NSStackView* fPlayButtonsView;
+/// Tracks which playable files array was used to create the buttons (for cache invalidation)
+@property(nonatomic, weak) NSArray* fPlayButtonsSourceFiles;
+/// Tracks the torrent hash to detect when cell is reused for a different torrent
+@property(nonatomic, copy) NSString* fTorrentHash;
+
 @property(nonatomic) TorrentTableView* fTorrentTableView;
 
 @end

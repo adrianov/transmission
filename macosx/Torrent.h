@@ -95,6 +95,19 @@ extern NSString* const kTorrentDidChangeGroupNotification;
 /// Subtitle for multi-file media torrents (e.g., "x8" for 8 video files). Nil for non-media or single file.
 @property(nonatomic, readonly) NSString* iconSubtitle;
 
+/// Array of playable media files. Each entry is a dictionary with keys:
+/// - "index": NSNumber file index
+/// - "name": NSString humanized display name (e.g., "Season 1, Episode 5")
+/// - "path": NSString file path on disk (nil if not downloaded)
+/// Only includes files that are video/audio and exist on disk.
+@property(nonatomic, readonly) NSArray<NSDictionary*>* playableFiles;
+
+/// Returns YES if torrent has any playable media files on disk.
+@property(nonatomic, readonly) BOOL hasPlayableMedia;
+
+/// Returns current file progress (0.0-1.0) for a file index.
+- (CGFloat)fileProgressForIndex:(NSUInteger)index;
+
 @property(nonatomic, readonly) NSString* name;
 @property(nonatomic, readonly) NSString* displayName;
 @property(nonatomic, getter=isFolder, readonly) BOOL folder;

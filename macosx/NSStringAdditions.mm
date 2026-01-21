@@ -382,6 +382,69 @@
     return result.length > 0 ? result : self;
 }
 
+- (NSString*)humanReadableEpisodeName
+{
+    NSString* filename = self.lastPathComponent;
+
+    // Try S01E05 or S1E5 pattern (most common for TV shows)
+    NSRegularExpression* seasonEpisodeRegex = [NSRegularExpression regularExpressionWithPattern:@"\\bS(\\d{1,2})[.\\s]?E(\\d{1,2})\\b"
+                                                                                        options:NSRegularExpressionCaseInsensitive
+                                                                                          error:nil];
+    NSTextCheckingResult* seMatch = [seasonEpisodeRegex firstMatchInString:filename options:0 range:NSMakeRange(0, filename.length)];
+    if (seMatch && seMatch.numberOfRanges >= 3)
+    {
+        NSInteger season = [[filename substringWithRange:[seMatch rangeAtIndex:1]] integerValue];
+        NSInteger episode = [[filename substringWithRange:[seMatch rangeAtIndex:2]] integerValue];
+        return [NSString stringWithFormat:@"Season %ld, Episode %ld", (long)season, (long)episode];
+    }
+
+    // Try 1x05 pattern (alternative TV format)
+    NSRegularExpression* altSeasonRegex = [NSRegularExpression regularExpressionWithPattern:@"\\b(\\d{1,2})x(\\d{1,2})\\b"
+                                                                                    options:NSRegularExpressionCaseInsensitive
+                                                                                      error:nil];
+    NSTextCheckingResult* altMatch = [altSeasonRegex firstMatchInString:filename options:0 range:NSMakeRange(0, filename.length)];
+    if (altMatch && altMatch.numberOfRanges >= 3)
+    {
+        NSInteger season = [[filename substringWithRange:[altMatch rangeAtIndex:1]] integerValue];
+        NSInteger episode = [[filename substringWithRange:[altMatch rangeAtIndex:2]] integerValue];
+        return [NSString stringWithFormat:@"Season %ld, Episode %ld", (long)season, (long)episode];
+    }
+
+    // No episode pattern found - return nil to use humanized filename instead
+    return nil;
+}
+
+- (NSArray<NSNumber*>*)episodeNumbers
+{
+    NSString* filename = self.lastPathComponent;
+
+    // Try S01E05 or S1E5 pattern
+    NSRegularExpression* seasonEpisodeRegex = [NSRegularExpression regularExpressionWithPattern:@"\\bS(\\d{1,2})[.\\s]?E(\\d{1,2})\\b"
+                                                                                        options:NSRegularExpressionCaseInsensitive
+                                                                                          error:nil];
+    NSTextCheckingResult* seMatch = [seasonEpisodeRegex firstMatchInString:filename options:0 range:NSMakeRange(0, filename.length)];
+    if (seMatch && seMatch.numberOfRanges >= 3)
+    {
+        NSInteger season = [[filename substringWithRange:[seMatch rangeAtIndex:1]] integerValue];
+        NSInteger episode = [[filename substringWithRange:[seMatch rangeAtIndex:2]] integerValue];
+        return @[ @(season), @(episode) ];
+    }
+
+    // Try 1x05 pattern
+    NSRegularExpression* altSeasonRegex = [NSRegularExpression regularExpressionWithPattern:@"\\b(\\d{1,2})x(\\d{1,2})\\b"
+                                                                                    options:NSRegularExpressionCaseInsensitive
+                                                                                      error:nil];
+    NSTextCheckingResult* altMatch = [altSeasonRegex firstMatchInString:filename options:0 range:NSMakeRange(0, filename.length)];
+    if (altMatch && altMatch.numberOfRanges >= 3)
+    {
+        NSInteger season = [[filename substringWithRange:[altMatch rangeAtIndex:1]] integerValue];
+        NSInteger episode = [[filename substringWithRange:[altMatch rangeAtIndex:2]] integerValue];
+        return @[ @(season), @(episode) ];
+    }
+
+    return nil; // No season/episode pattern found
+}
+
 @end
 
 @implementation NSString (Private)

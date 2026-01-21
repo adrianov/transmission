@@ -21,6 +21,7 @@
 #import "TorrentCellControlButton.h"
 #import "TorrentCellRevealButton.h"
 #import "TorrentCellURLButton.h"
+#import "PlayButton.h"
 
 CGFloat const kGroupSeparatorHeight = 18.0;
 
@@ -210,9 +211,24 @@ static NSTimeInterval const kToggleProgressSeconds = 0.175;
     return NO;
 }
 
+static CGFloat const kPlayButtonRowHeight = 18.0;
+
 - (CGFloat)outlineView:(NSOutlineView*)outlineView heightOfRowByItem:(id)item
 {
-    return [item isKindOfClass:[Torrent class]] ? self.rowHeight : kGroupSeparatorHeight;
+    if ([item isKindOfClass:[Torrent class]])
+    {
+        Torrent* torrent = (Torrent*)item;
+        CGFloat height = self.rowHeight;
+
+        // Add extra height for play buttons if torrent has playable media (single row)
+        BOOL const minimal = [self.fDefaults boolForKey:@"SmallView"];
+        if (!minimal && torrent.hasPlayableMedia)
+        {
+            height += kPlayButtonRowHeight + 4; // Single row of buttons + spacing
+        }
+        return height;
+    }
+    return kGroupSeparatorHeight;
 }
 
 - (NSView*)outlineView:(NSOutlineView*)outlineView viewForTableColumn:(NSTableColumn*)tableColumn item:(id)item
@@ -224,14 +240,21 @@ static NSTimeInterval const kToggleProgressSeconds = 0.175;
         BOOL const error = torrent.anyErrorOrWarning;
 
         TorrentCell* torrentCell;
+        NSString* torrentHash = torrent.hashString;
+
         if (minimal)
         {
             torrentCell = [outlineView makeViewWithIdentifier:@"SmallTorrentCell" owner:self];
+            BOOL const sameTorrentMinimal = [torrentCell.fTorrentHash isEqualToString:torrentHash];
 
-            // set torrent icon or error badge
-            torrentCell.fIconView.image = error ? [NSImage imageNamed:NSImageNameCaution] : torrent.icon;
+            // Static content - only update when torrent changes
+            if (!sameTorrentMinimal)
+            {
+                torrentCell.fTorrentHash = torrentHash;
+                torrentCell.fIconView.image = error ? [NSImage imageNamed:NSImageNameCaution] : torrent.icon;
+            }
 
-            // set torrent status
+            // Dynamic content - always update
             torrentCell.fTorrentStatusField.stringValue = [self.fDefaults boolForKey:@"DisplaySmallStatusRegular"] ?
                 torrent.shortStatusString :
                 torrent.remainingTimeString;
@@ -258,39 +281,57 @@ static NSTimeInterval const kToggleProgressSeconds = 0.175;
         else
         {
             torrentCell = [outlineView makeViewWithIdentifier:@"TorrentCell" owner:self];
+            BOOL const sameTorrentFull = [torrentCell.fTorrentHash isEqualToString:torrentHash];
+
+            // Static content - only update when torrent changes
+            if (!sameTorrentFull)
+            {
+                torrentCell.fTorrentHash = torrentHash;
+
+                // set torrent icon and error badge
+                NSImage* fileImage = torrent.icon;
+                if (error)
+                {
+                    NSRect frame = torrentCell.fIconView.frame;
+                    NSImage* resultImage = [[NSImage alloc] initWithSize:NSMakeSize(frame.size.width, frame.size.height)];
+                    [resultImage lockFocus];
+
+                    // draw fileImage
+                    [fileImage drawAtPoint:NSZeroPoint fromRect:NSZeroRect operation:NSCompositingOperationSourceOver fraction:1.0];
+
+                    // overlay error badge
+                    NSImage* errorImage = [NSImage imageNamed:NSImageNameCaution];
+                    NSRect const errorRect = NSMakeRect(0, 0, kErrorImageSize, kErrorImageSize);
+                    [errorImage drawInRect:errorRect fromRect:NSZeroRect operation:NSCompositingOperationSourceOver fraction:1.0
+                            respectFlipped:YES
+                                     hints:nil];
+
+                    [resultImage unlockFocus];
+
+                    torrentCell.fIconView.image = resultImage;
+                }
+                else
+                {
+                    torrentCell.fIconView.image = fileImage;
+                }
+
+                // set icon subtitle label (e.g., "8 videos" for multi-file media torrents)
+                NSString* iconSubtitle = torrent.iconSubtitle;
+                torrentCell.fIconSubtitleField.stringValue = iconSubtitle ?: @"";
+                torrentCell.fIconSubtitleField.hidden = (iconSubtitle == nil);
+
+                // set torrent title
+                torrentCell.fTorrentTitleField.stringValue = torrent.displayName;
+
+                // set URL button visibility
+                torrentCell.fURLButton.hidden = (torrent.commentURL == nil);
+
+                // configure play buttons for media torrents
+                [self configurePlayButtonsForCell:torrentCell torrent:torrent];
+            }
+
+            // Dynamic content - always update
             torrentCell.fTorrentProgressField.stringValue = torrent.progressString;
-
-            // set torrent icon and error badge
-            NSImage* fileImage = torrent.icon;
-            if (error)
-            {
-                NSRect frame = torrentCell.fIconView.frame;
-                NSImage* resultImage = [[NSImage alloc] initWithSize:NSMakeSize(frame.size.width, frame.size.height)];
-                [resultImage lockFocus];
-
-                // draw fileImage
-                [fileImage drawAtPoint:NSZeroPoint fromRect:NSZeroRect operation:NSCompositingOperationSourceOver fraction:1.0];
-
-                // overlay error badge
-                NSImage* errorImage = [NSImage imageNamed:NSImageNameCaution];
-                NSRect const errorRect = NSMakeRect(0, 0, kErrorImageSize, kErrorImageSize);
-                [errorImage drawInRect:errorRect fromRect:NSZeroRect operation:NSCompositingOperationSourceOver fraction:1.0
-                        respectFlipped:YES
-                                 hints:nil];
-
-                [resultImage unlockFocus];
-
-                torrentCell.fIconView.image = resultImage;
-            }
-            else
-            {
-                torrentCell.fIconView.image = fileImage;
-            }
-
-            // set icon subtitle label (e.g., "x8" for multi-file media torrents)
-            NSString* iconSubtitle = torrent.iconSubtitle;
-            torrentCell.fIconSubtitleField.stringValue = iconSubtitle ?: @"";
-            torrentCell.fIconSubtitleField.hidden = (iconSubtitle == nil);
 
             // set torrent status
             NSString* status;
@@ -305,6 +346,9 @@ static NSTimeInterval const kToggleProgressSeconds = 0.175;
                 }
             }
             torrentCell.fTorrentStatusField.stringValue = status ?: torrent.statusString;
+
+            // Update play button progress (only text, no recreation)
+            [self updatePlayButtonProgressForCell:torrentCell torrent:torrent];
         }
 
         torrentCell.fTorrentTableView = self;
@@ -312,10 +356,12 @@ static NSTimeInterval const kToggleProgressSeconds = 0.175;
         // set this so that we can draw bar in torrentCell drawRect
         torrentCell.objectValue = torrent;
 
-        torrentCell.fTorrentTitleField.stringValue = torrent.displayName;
-
+        // Actions need to be set (they reference the cell's objectValue)
         torrentCell.fActionButton.action = @selector(displayTorrentActionPopover:);
+        torrentCell.fControlButton.action = @selector(toggleControlForTorrent:);
+        torrentCell.fRevealButton.action = @selector(revealTorrentFile:);
 
+        // Group indicator - may change dynamically
         NSInteger const groupValue = torrent.groupValue;
         NSImage* groupImage;
         if (groupValue != -1)
@@ -326,13 +372,7 @@ static NSTimeInterval const kToggleProgressSeconds = 0.175;
                 groupImage = [NSImage discIconWithColor:groupColor insetFactor:0];
             }
         }
-
         torrentCell.fGroupIndicatorView.image = groupImage;
-
-        torrentCell.fControlButton.action = @selector(toggleControlForTorrent:);
-        torrentCell.fRevealButton.action = @selector(revealTorrentFile:);
-        torrentCell.fURLButton.action = @selector(openCommentURL:);
-        torrentCell.fURLButton.hidden = (torrent.commentURL == nil);
 
         // redraw buttons
         torrentCell.fControlButton.needsDisplay = YES;
@@ -820,6 +860,195 @@ static NSTimeInterval const kToggleProgressSeconds = 0.175;
     if (url)
     {
         [NSWorkspace.sharedWorkspace openURL:url];
+    }
+}
+
+- (PlayButton*)createPlayButtonWithTitle:(NSString*)title
+                                    path:(NSString*)path
+                               fileIndex:(NSNumber*)fileIndex
+                               baseTitle:(NSString*)baseTitle
+{
+    PlayButton* playButton = [[PlayButton alloc] init];
+    playButton.title = title;
+    playButton.target = self;
+    playButton.action = @selector(playMediaFile:);
+    playButton.bezelStyle = NSBezelStyleRecessed;
+    playButton.showsBorderOnlyWhileMouseInside = YES;
+    playButton.font = [NSFont systemFontOfSize:9];
+    playButton.controlSize = NSControlSizeMini;
+    playButton.toolTip = path;
+    playButton.identifier = path;
+    // Store file index and base title for progress updates
+    playButton.tag = fileIndex.integerValue;
+    playButton.accessibilityLabel = baseTitle;
+    return playButton;
+}
+
+- (void)configurePlayButtonsForCell:(TorrentCell*)cell torrent:(Torrent*)torrent
+{
+    NSArray<NSDictionary*>* playableFiles = torrent.playableFiles;
+
+    // Check if we can reuse existing buttons (same files)
+    if (cell.fPlayButtonsView && cell.fPlayButtonsSourceFiles == playableFiles)
+    {
+        return; // Reuse existing buttons
+    }
+
+    // Remove existing play buttons view if any
+    if (cell.fPlayButtonsView)
+    {
+        [cell.fPlayButtonsView removeFromSuperview];
+        cell.fPlayButtonsView = nil;
+        cell.fPlayButtonsSourceFiles = nil;
+    }
+
+    if (!playableFiles || playableFiles.count == 0)
+    {
+        return;
+    }
+
+    CGFloat const buttonSpacing = 6;
+
+    // Create a single horizontal stack - buttons will naturally flow
+    NSStackView* buttonStack = [[NSStackView alloc] init];
+    buttonStack.orientation = NSUserInterfaceLayoutOrientationHorizontal;
+    buttonStack.spacing = buttonSpacing;
+    buttonStack.alignment = NSLayoutAttributeCenterY;
+    buttonStack.translatesAutoresizingMaskIntoConstraints = NO;
+    buttonStack.distribution = NSStackViewDistributionFill;
+
+    // Single file: just show "▶ Play" (with progress if incomplete)
+    if (playableFiles.count == 1)
+    {
+        NSDictionary* fileInfo = playableFiles[0];
+        NSString* baseTitle = @"▶ Play";
+        NSString* buttonTitle = fileInfo[@"buttonTitle"];
+        // For single file, check if incomplete and add progress
+        CGFloat progress = [fileInfo[@"progress"] doubleValue];
+        if (progress < 1.0)
+        {
+            buttonTitle = [NSString stringWithFormat:@"%@ (%.0f%%)", baseTitle, progress * 100];
+        }
+        else
+        {
+            buttonTitle = baseTitle;
+        }
+        PlayButton* playButton = [self createPlayButtonWithTitle:buttonTitle path:fileInfo[@"path"] fileIndex:fileInfo[@"index"]
+                                                       baseTitle:baseTitle];
+        [buttonStack addArrangedSubview:playButton];
+    }
+    else
+    {
+        // Multiple files: group by season
+        NSMutableDictionary<NSNumber*, NSMutableArray<NSDictionary*>*>* seasonGroups = [NSMutableDictionary dictionary];
+        for (NSDictionary* fileInfo in playableFiles)
+        {
+            NSNumber* season = fileInfo[@"season"];
+            if (!seasonGroups[season])
+            {
+                seasonGroups[season] = [NSMutableArray array];
+            }
+            [seasonGroups[season] addObject:fileInfo];
+        }
+
+        // Sort seasons
+        NSArray<NSNumber*>* sortedSeasons = [seasonGroups.allKeys sortedArrayUsingSelector:@selector(compare:)];
+        BOOL hasMultipleSeasons = sortedSeasons.count > 1;
+
+        NSUInteger totalFilesShown = 0;
+        NSUInteger const maxFiles = 100;
+
+        for (NSNumber* season in sortedSeasons)
+        {
+            if (totalFilesShown >= maxFiles)
+            {
+                break;
+            }
+
+            NSArray<NSDictionary*>* filesInSeason = seasonGroups[season];
+
+            // Add season header only if there are multiple seasons
+            if (hasMultipleSeasons && season.integerValue > 0)
+            {
+                NSTextField* seasonLabel = [NSTextField labelWithString:[NSString stringWithFormat:@"Season %@:", season]];
+                seasonLabel.font = [NSFont boldSystemFontOfSize:9];
+                seasonLabel.textColor = NSColor.secondaryLabelColor;
+                [buttonStack addArrangedSubview:seasonLabel];
+            }
+
+            for (NSDictionary* fileInfo in filesInSeason)
+            {
+                if (totalFilesShown >= maxFiles)
+                {
+                    break;
+                }
+
+                PlayButton* playButton = [self createPlayButtonWithTitle:fileInfo[@"buttonTitle"] path:fileInfo[@"path"]
+                                                               fileIndex:fileInfo[@"index"]
+                                                               baseTitle:fileInfo[@"baseTitle"]];
+                [buttonStack addArrangedSubview:playButton];
+
+                totalFilesShown++;
+            }
+        }
+    }
+
+    // Position below status field (at the bottom of the cell)
+    [cell addSubview:buttonStack];
+    cell.fPlayButtonsView = buttonStack;
+    cell.fPlayButtonsSourceFiles = playableFiles;
+
+    // Constraints: align with status field, below it
+    [NSLayoutConstraint activateConstraints:@[
+        [buttonStack.leadingAnchor constraintEqualToAnchor:cell.fTorrentStatusField.leadingAnchor],
+        [buttonStack.topAnchor constraintEqualToAnchor:cell.fTorrentStatusField.bottomAnchor constant:2],
+        [buttonStack.trailingAnchor constraintLessThanOrEqualToAnchor:cell.trailingAnchor constant:-50]
+    ]];
+}
+
+- (void)updatePlayButtonProgressForCell:(TorrentCell*)cell torrent:(Torrent*)torrent
+{
+    if (!cell.fPlayButtonsView)
+    {
+        return;
+    }
+
+    for (NSView* view in cell.fPlayButtonsView.arrangedSubviews)
+    {
+        if ([view isKindOfClass:[PlayButton class]])
+        {
+            PlayButton* button = (PlayButton*)view;
+            NSInteger fileIndex = button.tag;
+            NSString* baseTitle = button.accessibilityLabel;
+
+            if (baseTitle)
+            {
+                CGFloat progress = [torrent fileProgressForIndex:fileIndex];
+                NSString* newTitle;
+                if (progress < 1.0)
+                {
+                    newTitle = [NSString stringWithFormat:@"%@ (%.0f%%)", baseTitle, progress * 100];
+                }
+                else
+                {
+                    newTitle = baseTitle;
+                }
+
+                if (![button.title isEqualToString:newTitle])
+                {
+                    button.title = newTitle;
+                }
+            }
+        }
+    }
+}
+
+- (IBAction)playMediaFile:(NSButton*)sender
+{
+    NSString* path = sender.identifier;
+    if (path)
+    {
+        [NSWorkspace.sharedWorkspace openURL:[NSURL fileURLWithPath:path]];
     }
 }
 

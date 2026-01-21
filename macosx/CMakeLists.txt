@@ -174,6 +174,8 @@ target_sources(${TR_NAME}-mac
         Torrent.mm
         TorrentCell.h
         TorrentCell.mm
+        PlayButton.h
+        PlayButton.mm
         TorrentCellActionButton.h
         TorrentCellActionButton.mm
         TorrentCellControlButton.h

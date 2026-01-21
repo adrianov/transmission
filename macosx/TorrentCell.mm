@@ -3,6 +3,7 @@
 // License text can be found in the licenses/ folder.
 
 #import "TorrentCell.h"
+#import "PlayButton.h"
 #import "ProgressBarView.h"
 #import "ProgressGradients.h"
 #import "Torrent.h"
@@ -45,6 +46,41 @@
 - (BOOL)isFlipped
 {
     return YES;
+}
+
+- (void)setBackgroundStyle:(NSBackgroundStyle)backgroundStyle
+{
+    [super setBackgroundStyle:backgroundStyle];
+
+    // Update play button colors based on selection
+    if (self.fPlayButtonsView)
+    {
+        BOOL isSelected = (backgroundStyle == NSBackgroundStyleEmphasized);
+        NSColor* textColor = isSelected ? NSColor.whiteColor : NSColor.secondaryLabelColor;
+        NSFont* buttonFont = [NSFont systemFontOfSize:9];
+
+        for (NSView* view in self.fPlayButtonsView.arrangedSubviews)
+        {
+            if ([view isKindOfClass:[PlayButton class]])
+            {
+                PlayButton* button = (PlayButton*)view;
+                // Keep button cell in normal style to prevent background change
+                button.cell.backgroundStyle = NSBackgroundStyleNormal;
+
+                // Update text color for contrast
+                NSString* title = button.title;
+                NSMutableAttributedString* attrTitle = [[NSMutableAttributedString alloc] initWithString:title];
+                [attrTitle addAttribute:NSForegroundColorAttributeName value:textColor range:NSMakeRange(0, title.length)];
+                [attrTitle addAttribute:NSFontAttributeName value:buttonFont range:NSMakeRange(0, title.length)];
+                button.attributedTitle = attrTitle;
+            }
+            else if ([view isKindOfClass:[NSTextField class]])
+            {
+                // Season labels
+                ((NSTextField*)view).textColor = textColor;
+            }
+        }
+    }
 }
 
 @end

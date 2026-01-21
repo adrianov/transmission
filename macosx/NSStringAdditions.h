@@ -41,6 +41,25 @@
  */
 @property(nonatomic, readonly, copy) NSString* humanReadableTitle;
 
+/**
+ * Converts a filename to a human-readable episode name.
+ *
+ * Examples:
+ *   Show.S01E05.720p.mkv -> Season 1, Episode 5
+ *   Show.S1.E12.HDTV.mp4 -> Season 1, Episode 12
+ *   Show.1x05.720p.mkv -> Season 1, Episode 5
+ *
+ * Returns nil if no episode pattern found.
+ */
+@property(nonatomic, readonly, copy) NSString* humanReadableEpisodeName;
+
+/**
+ * Extracts season and episode numbers from filename.
+ *
+ * Returns @[@(season), @(episode)] or nil if no pattern found.
+ */
+@property(nonatomic, readonly, copy) NSArray<NSNumber*>* episodeNumbers;
+
 @end
 
 __attribute__((annotate("returns_localized_nsstring"))) static inline NSString* LocalizationNotNeeded(NSString* s)
