@@ -340,14 +340,20 @@ typedef NS_ENUM(NSInteger, FilterTypeTag) {
 }
 
 - (void)setCountAll:(NSUInteger)all
-              active:(NSUInteger)active
+             active:(NSUInteger)active
         downloading:(NSUInteger)downloading
             seeding:(NSUInteger)seeding
              paused:(NSUInteger)paused
               error:(NSUInteger)error
 {
-    NSLog(@"[FilterBar] setCountAll: all=%lu active=%lu downloading=%lu seeding=%lu paused=%lu error=%lu",
-          (unsigned long)all, (unsigned long)active, (unsigned long)downloading, (unsigned long)seeding, (unsigned long)paused, (unsigned long)error);
+    NSLog(
+        @"[FilterBar] setCountAll: all=%lu active=%lu downloading=%lu seeding=%lu paused=%lu error=%lu",
+        (unsigned long)all,
+        (unsigned long)active,
+        (unsigned long)downloading,
+        (unsigned long)seeding,
+        (unsigned long)paused,
+        (unsigned long)error);
     self.fNoFilterButton.count = all;
     self.fActiveFilterButton.count = active;
     self.fDownloadFilterButton.count = downloading;
