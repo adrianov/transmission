@@ -5284,7 +5284,7 @@ static NSTimeInterval const kLowPriorityDelay = 15.0;
         // Manual resize mode - just ensure minimum height constraint
         NSScrollView* scrollView = self.fTableView.enclosingScrollView;
         [self removeHeightConstraints];
-        
+
         CGFloat height = self.minScrollViewHeightAllowed;
         if (self.fMinHeightConstraint == nil)
         {
@@ -5302,20 +5302,20 @@ static NSTimeInterval const kLowPriorityDelay = 15.0;
     // Get actual table content height from last row rect
     NSInteger rowCount = self.fTableView.numberOfRows;
     CGFloat tableContentHeight = 0;
-    
+
     if (rowCount > 0)
     {
         NSRect lastRowRect = [self.fTableView rectOfRow:rowCount - 1];
         tableContentHeight = NSMaxY(lastRowRect);
     }
     tableContentHeight = MAX(tableContentHeight, self.minScrollViewHeightAllowed);
-    
+
     // Get current content view height and scroll view height to find non-scroll components
     NSScrollView* scrollView = self.fTableView.enclosingScrollView;
     CGFloat currentContentHeight = self.fWindow.contentView.frame.size.height;
     CGFloat currentScrollViewHeight = scrollView.frame.size.height;
     CGFloat otherComponentsHeight = currentContentHeight - currentScrollViewHeight;
-    
+
     // Total content = table content + other UI components (status bar, filter bar, bottom bar)
     CGFloat contentHeight = tableContentHeight + otherComponentsHeight;
 
@@ -5332,18 +5332,18 @@ static NSTimeInterval const kLowPriorityDelay = 15.0;
     if (screen)
     {
         NSRect visibleFrame = screen.visibleFrame;
-        
+
         // If window goes below screen bottom, move it up
         if (NSMinY(newFrame) < NSMinY(visibleFrame))
         {
             newFrame.origin.y = NSMinY(visibleFrame);
         }
-        
+
         // If window goes above screen top, shrink from bottom
         if (NSMaxY(newFrame) > NSMaxY(visibleFrame))
         {
             newFrame.origin.y = NSMaxY(visibleFrame) - newFrame.size.height;
-            
+
             // If still below screen, clamp height
             if (NSMinY(newFrame) < NSMinY(visibleFrame))
             {
