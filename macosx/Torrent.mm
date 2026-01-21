@@ -735,15 +735,10 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
         // Clear cache if type mismatches (e.g., cache has "file" but we need "album")
         if (needsFolderBased != isFolderType)
         {
-            NSLog(
-                @"[Torrent] playableFiles: clearing cache - type mismatch (needsFolderBased: %@, isFolderType: %@)",
-                needsFolderBased ? @"YES" : @"NO",
-                isFolderType ? @"YES" : @"NO");
             self.fPlayableFiles = nil;
         }
         else
         {
-            NSLog(@"[Torrent] playableFiles: returning cached %lu items for torrent: %@", (unsigned long)self.fPlayableFiles.count, self.name);
             return self.fPlayableFiles;
         }
     }
@@ -832,8 +827,6 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
     NSMutableArray<NSDictionary*>* playable = [NSMutableArray array];
     NSUInteger const count = self.fileCount;
 
-    NSLog(@"[Torrent] buildIndividualFilePlayables: starting for torrent '%@' with %lu files", self.name, (unsigned long)count);
-
     // First pass: collect .cue files
     NSMutableSet<NSString*>* cueBaseNames = [NSMutableSet set];
     NSMutableDictionary<NSString*, NSNumber*>* cueFileIndexes = [NSMutableDictionary dictionary];
@@ -864,10 +857,7 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
         NSString* ext = fileName.pathExtension.lowercaseString;
 
         if (![mediaExtensions containsObject:ext])
-        {
-            NSLog(@"[Torrent]   File '%@' skipped: extension '%@' not in media list", fileName, ext);
             continue;
-        }
 
         if ([ext isEqualToString:@"cue"])
         {
@@ -893,19 +883,13 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
                     cueProgress[baseName] = @(cueFileProgress);
                 }
             }
-            NSLog(@"[Torrent]   File '%@' skipped: has companion .cue file", fileName);
             continue;
         }
 
         CGFloat progress = tr_torrentFileConsecutiveProgress(self.fHandle, i);
 
         if (progress < 0)
-        {
-            NSLog(@"[Torrent]   File '%@' skipped: progress %.2f < 0 (not downloaded)", fileName, progress);
             continue;
-        }
-
-        NSLog(@"[Torrent]   File '%@' added: progress %.2f", fileName, progress);
 
         NSString* path;
         auto const location = tr_torrentFindFile(self.fHandle, i);
@@ -941,13 +925,15 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
         }];
     }
 
-    if (playable.count == 0)
+    if (playable.count == 0 && cueBaseNames.count == 0)
+        return nil;
+
+    // If a cue is present alongside multiple individual audio files, treat the
+    // cue as metadata only (no separate play button). Keep the cue-only path
+    // for single-file albums where the cue is the playable unit.
+    if (playable.count > 1)
     {
-        if (cueBaseNames.count == 0)
-        {
-            NSLog(@"[Torrent] buildIndividualFilePlayables: found no playable files for torrent: %@", self.name);
-            return nil;
-        }
+        [cueBaseNames removeAllObjects];
     }
 
     for (NSString* baseName in cueBaseNames)
@@ -980,8 +966,6 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
             @"sortKey" : cueFileName.lastPathComponent
         }];
     }
-
-    NSLog(@"[Torrent] buildIndividualFilePlayables: found %lu playable files for torrent: %@", (unsigned long)playable.count, self.name);
 
     // Sort by original file name to match download order
     [playable sortUsingComparator:^NSComparisonResult(NSDictionary* a, NSDictionary* b) {
