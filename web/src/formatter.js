@@ -95,6 +95,23 @@ const techTagsOther = [
   'REMUX',
 ];
 
+// VR/3D format tags to filter (technical, not content descriptors)
+const techTagsVR = [
+  '180x180',
+  '180',
+  '360',
+  '3dh',
+  '3dv',
+  'LR',
+  'TB',
+  'SBS',
+  'OU',
+  'MKX200',
+  'FISHEYE190',
+  'RF52',
+  'VRCA220',
+];
+
 /**
  * Converts a technical torrent name to a human-friendly title.
  *
@@ -115,20 +132,68 @@ function formatHumanTitle(name) {
     '',
   );
 
+  // Extract year and format from square bracket metadata like [2006, Documentary, DVD5]
+  // Keep content descriptors (Documentary, etc.), only extract year and disc format
+  /* eslint-disable sonarjs/slow-regex -- simple patterns on short strings */
+  const bracketMatch = title.match(/\[([^\]]+)\]/);
+  let bracketYear = null;
+  let bracketFormat = null;
+  if (bracketMatch) {
+    const [, bracketContent] = bracketMatch;
+    const bracketYearMatch = bracketContent.match(/\b(19\d{2}|20\d{2})\b/);
+    if (bracketYearMatch) {
+      [, bracketYear] = bracketYearMatch;
+    }
+    // Extract disc format from brackets
+    const bracketFormatMatch = bracketContent.match(
+      /\b(DVD5|DVD9|DVD|BD25|BD50|BD66|BD100)\b/i,
+    );
+    if (bracketFormatMatch) {
+      bracketFormat = bracketFormatMatch[1].toUpperCase();
+    }
+    // Remove only year and disc format from bracket content, keep the rest
+    const cleanedBracket = bracketContent
+      .replaceAll(/\b(19\d{2}|20\d{2})\b/g, '')
+      .replaceAll(/\b(?:DVD5|DVD9|DVD|BD25|BD50|BD66|BD100)\b/gi, '')
+      .replaceAll(/,\s*,/g, ',')
+      .replaceAll(/^[\s,]+/g, '')
+      .replaceAll(/[\s,]+$/g, '')
+      .trim();
+    // If bracket still has content, keep it; otherwise remove brackets entirely
+    title = cleanedBracket
+      ? title.replace(/\[([^\]]+)\]/, `[${cleanedBracket}]`)
+      : title.replaceAll(/\s*\[([^\]]+)\]\s*/g, ' ');
+  }
+  /* eslint-enable sonarjs/slow-regex */
+
   // Handle merged resolution patterns like "BDRip1080p" -> "BDRip 1080p"
   title = title.replaceAll(
     /(BDRip|HDRip|DVDRip|WEBRip)(1080p|720p|2160p|480p)/gi,
     '$1 $2',
   );
 
+  // Normalize underscore before resolution (e.g., "_1080p" -> " 1080p")
+  title = title.replaceAll('_', ' ');
+
   // Resolution patterns
   const resMatch = title.match(/\b(2160p|1080p|720p|480p)\b/i);
   let resolution = resMatch ? resMatch[1] : null;
   if (!resolution) {
-    const uhd = title.match(/\b(4K|UHD)\b/i);
+    const uhd = title.match(/\b(8K|4K|UHD)\b/i);
     if (uhd) {
-      resolution = '2160p';
+      resolution = uhd[1].toUpperCase() === '8K' ? '8K' : '2160p';
     }
+  }
+  // DVD/BD format tags (shown as #DVD5, #BD50, etc.)
+  if (!resolution) {
+    const discMatch = title.match(/\b(DVD5|DVD9|DVD|BD25|BD50|BD66|BD100)\b/i);
+    if (discMatch) {
+      resolution = discMatch[1].toUpperCase();
+    }
+  }
+  // Use format extracted from brackets if no other resolution found
+  if (!resolution && bracketFormat) {
+    resolution = bracketFormat;
   }
 
   // Season pattern (S01, Season 1, etc.)
@@ -137,14 +202,25 @@ function formatHumanTitle(name) {
     ? `Season ${Number.parseInt(seasonMatch[1], 10)}`
     : null;
 
-  // Year pattern (standalone 4-digit year between 1900-2099)
-  const yearMatch = title.match(/\b(19\d{2}|20\d{2})\b/);
-  const year = yearMatch ? yearMatch[1] : null;
+  // Date pattern DD.MM.YYYY (e.g., 25.10.2021) - check BEFORE year to avoid partial match
+  // Also match dates wrapped in parentheses like (25.10.2021)
+  const fullDateMatch = title.match(/\(?(\d{2}\.\d{2}\.\d{4})\)?/);
 
-  // Date pattern for dated content (YY.MM.DD) - extract position for ordering
-  const dateMatch = title.match(/\b(\d{2}\.\d{2}\.\d{2})\b/);
+  // Date pattern for dated content (YY.MM.DD, e.g., 25.04.14)
+  const shortDateMatch = title.match(/\(?(\d{2}\.\d{2}\.\d{2})\)?/);
+
+  // Use full date if found, otherwise short date
+  const dateMatch = fullDateMatch || shortDateMatch;
   const date = dateMatch ? dateMatch[1] : null;
-  const dateIndex = dateMatch ? title.indexOf(dateMatch[0]) : -1;
+
+  // Year pattern (standalone 4-digit year between 1900-2099) - but not if it's part of a date
+  // Also use year extracted from bracket metadata if no other year found
+  let year = fullDateMatch
+    ? null
+    : title.match(/\b(19\d{2}|20\d{2})\b/)?.[1] || null;
+  if (!year && bracketYear) {
+    year = bracketYear;
+  }
 
   // Remove tech tags
   const allTags = [
@@ -154,28 +230,56 @@ function formatHumanTitle(name) {
     ...techTagsHdr,
     ...techTagsSource,
     ...techTagsOther,
+    ...techTagsVR,
   ];
   for (const tag of allTags) {
-    title = title.replaceAll(new RegExp(`\\b${tag}\\b`, 'gi'), '');
+    title = title.replaceAll(new RegExp(`\\.?${tag}\\b`, 'gi'), '');
   }
 
-  // Remove resolution, season markers, year, date
+  // Remove resolution, season markers, year, date (and preceding dot if used as separator)
   title = title
-    .replaceAll(/\b(2160p|1080p|720p|480p|4K|UHD)\b/gi, '')
-    .replaceAll(/\bS\d{1,2}(E\d+)?\b/gi, '')
-    .replace(/\b(19\d{2}|20\d{2})\b/, '')
-    .replace(/\b\d{2}\.\d{2}\.\d{2}\b/, '');
+    .replaceAll(
+      /\.?(2160p|1080p|720p|480p|8K|4K|UHD|DVD5|DVD9|DVD|BD25|BD50|BD66|BD100)\b/gi,
+      '',
+    )
+    .replaceAll(/\.?S\d{1,2}(E\d+)?\b/gi, '');
+  // Remove year only if not part of a full date (and preceding dot)
+  if (year) {
+    title = title.replace(/\.?(19\d{2}|20\d{2})\b/, '');
+  }
+  // Remove both date formats (DD.MM.YYYY and YY.MM.DD), including surrounding parentheses
+  title = title
+    .replace(/\(?\d{2}\.\d{2}\.\d{4}\)?/, '')
+    .replace(/\(?\d{2}\.\d{2}\.\d{2}\)?/, '');
 
-  // Replace dots/underscores with spaces, preserve existing " - "
+  // Only replace dots with spaces if title uses dots as separators (no spaces)
+  const hasDotSeparators = !title.includes(' ') && title.includes('.');
+  if (hasDotSeparators) {
+    title = title.replaceAll(/[.]/g, ' ');
+  }
+
+  // Normalize separators, preserve existing " - "
   title = title
-    .replaceAll(/[._]/g, ' ')
     .replaceAll(' - ', '\u0000')
     .replaceAll('-', ' ')
     .replaceAll('\u0000', ' - ')
     .replaceAll(/\s+/g, ' ')
     .trim();
 
-  // Remove trailing/leading hyphens and spaces
+  // Clean up dots after all removals (artifacts from tag removal)
+  // "Paris. .Bonus" -> "Paris. Bonus", "Paris .Bonus" -> "Paris Bonus"
+  // Preserve "..." ellipsis
+  /* eslint-disable sonarjs/slow-regex -- simple patterns on short strings */
+  title = title
+    .replaceAll(/\. +\./g, '. ')
+    .replaceAll(/ +\.(\w)/g, ' $1')
+    .replaceAll(/ +\.$/g, '')
+    .replaceAll(/ +\. /g, ' ')
+    .replaceAll(/([^.])\.$/g, '$1')
+    .trim();
+  /* eslint-enable sonarjs/slow-regex */
+
+  // Remove trailing/leading hyphens and spaces (but not dots - they may be ellipsis)
   while (title.startsWith(' ') || title.startsWith('-')) {
     title = title.slice(1);
   }
@@ -183,33 +287,17 @@ function formatHumanTitle(name) {
     title = title.slice(0, -1);
   }
 
-  // For dated content, split title at date position to get prefix and suffix
-  let titlePrefix = title;
-  let titleSuffix = '';
-  if (date && dateIndex > 0) {
-    // Estimate where the date was in the cleaned title (rough approximation)
-    const words = title.split(/\s+/);
-    // First word is usually the site/series name for dated content
-    if (words.length > 1) {
-      [titlePrefix] = words;
-      titleSuffix = words.slice(1).join(' ');
-    }
-  }
-
   // Build the final title
-  let result = titlePrefix;
+  let result = title;
 
   if (season) {
     result += ` - ${season}`;
   }
-  if (date) {
-    result += ` - ${date}`;
-    if (titleSuffix) {
-      result += ` - ${titleSuffix}`;
-    }
-  }
   if (year && !date) {
     result += ` (${year})`;
+  }
+  if (date) {
+    result += ` (${date})`;
   }
   if (resolution) {
     result += ` #${resolution}`;

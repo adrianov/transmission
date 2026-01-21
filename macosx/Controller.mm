@@ -5536,19 +5536,50 @@ static NSTimeInterval const kLowPriorityDelay = 15.0;
 
 - (void)searchTorrentsWithQuery:(NSString*)query
 {
+    // Search URL templates for supported trackers (domain substring -> URL format)
+    NSDictionary<NSString*, NSString*>* searchTemplates = @{
+        @"kinozal.tv" : @"https://kinozal.tv/browse.php?s=%@&t=1",
+        @"rutracker.org" : @"https://rutracker.org/forum/tracker.php?nm=%@&o=10",
+        @"pornolab.net" : @"https://pornolab.net/forum/tracker.php?nm=%@&o=10"
+    };
+
+    // Count torrents per tracker domain found in comments
+    NSCountedSet<NSString*>* domainCounts = [[NSCountedSet alloc] init];
+    for (Torrent* torrent in self.fTorrents)
+    {
+        NSString* comment = torrent.comment;
+        if (comment.length == 0)
+        {
+            continue;
+        }
+
+        for (NSString* domain in searchTemplates)
+        {
+            if ([comment rangeOfString:domain options:NSCaseInsensitiveSearch].location != NSNotFound)
+            {
+                [domainCounts addObject:domain];
+            }
+        }
+    }
+
+    if (domainCounts.count == 0)
+    {
+        return;
+    }
+
+    // Sort domains by count ascending (lowest first, so highest opens last and stays visible)
+    NSArray<NSString*>* sortedDomains = [domainCounts.allObjects sortedArrayUsingComparator:^NSComparisonResult(NSString* a, NSString* b) {
+        return [@([domainCounts countForObject:a]) compare:@([domainCounts countForObject:b])];
+    }];
+
     NSString* encodedQuery = [query stringByAddingPercentEncodingWithAllowedCharacters:NSCharacterSet.URLQueryAllowedCharacterSet];
-
-    NSArray<NSURL*>* urls = @[
-        [NSURL URLWithString:[NSString stringWithFormat:@"https://kinozal.tv/browse.php?s=%@&t=1", encodedQuery]],
-        [NSURL URLWithString:[NSString stringWithFormat:@"https://rutracker.org/forum/tracker.php?nm=%@&o=10", encodedQuery]]
-    ];
-
-    // Modern NSWorkspace API to open multiple URLs at once
     NSWorkspaceOpenConfiguration* configuration = [NSWorkspaceOpenConfiguration configuration];
     configuration.activates = YES;
 
-    for (NSURL* url in urls)
+    for (NSString* domain in sortedDomains)
     {
+        NSString* urlTemplate = searchTemplates[domain];
+        NSURL* url = [NSURL URLWithString:[NSString stringWithFormat:urlTemplate, encodedQuery]];
         [NSWorkspace.sharedWorkspace openURL:url configuration:configuration completionHandler:nil];
     }
 }

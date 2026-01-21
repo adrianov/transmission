@@ -819,6 +819,12 @@ struct tr_torrent
 
     [[nodiscard]] tr_piece_index_t file_index_for_piece(tr_piece_index_t piece) const noexcept;
 
+    // Returns true if piece is in the last 20 MB of any file it belongs to (for video playback priority)
+    [[nodiscard]] bool is_piece_in_file_tail(tr_piece_index_t piece) const noexcept;
+
+    // Returns true if piece belongs to a priority index file (IFO/BUP for DVD, index.bdmv for Blu-ray)
+    [[nodiscard]] bool is_piece_in_priority_file(tr_piece_index_t piece) const noexcept;
+
     [[nodiscard]] constexpr bool is_running() const noexcept
     {
         return is_running_;

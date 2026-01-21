@@ -348,7 +348,13 @@ static CGFloat const kPlayButtonVerticalPadding = 6.0;
             }
             torrentCell.fTorrentStatusField.stringValue = status ?: torrent.statusString;
 
-            // Update play button progress (only text, no recreation)
+            // Configure play buttons if not yet created (e.g., after magnet metadata loaded)
+            if (!torrentCell.fPlayButtonsView && torrent.playableFiles.count > 0)
+            {
+                [self configurePlayButtonsForCell:torrentCell torrent:torrent];
+            }
+
+            // Update play button progress (only text and visibility, no recreation)
             [self updatePlayButtonProgressForCell:torrentCell torrent:torrent];
         }
 
@@ -869,6 +875,7 @@ static CGFloat const kPlayButtonVerticalPadding = 6.0;
                                     path:(NSString*)path
                                fileIndex:(NSNumber*)fileIndex
                                baseTitle:(NSString*)baseTitle
+                                progress:(CGFloat)progress
 {
     PlayButton* playButton = [[PlayButton alloc] init];
     playButton.title = title;
@@ -883,6 +890,8 @@ static CGFloat const kPlayButtonVerticalPadding = 6.0;
     // Store file index and base title for progress updates
     playButton.tag = fileIndex.integerValue;
     playButton.accessibilityLabel = baseTitle;
+    // Hide button until file starts downloading
+    playButton.hidden = (progress <= 0);
     return playButton;
 }
 
@@ -890,7 +899,7 @@ static CGFloat const kPlayButtonVerticalPadding = 6.0;
 {
     NSArray<NSDictionary*>* playableFiles = torrent.playableFiles;
 
-    // Check if we can reuse existing buttons (same files)
+    // Check if we can reuse existing buttons (same files array - cached)
     if (cell.fPlayButtonsView && cell.fPlayButtonsSourceFiles == playableFiles)
     {
         return; // Reuse existing buttons
@@ -924,10 +933,9 @@ static CGFloat const kPlayButtonVerticalPadding = 6.0;
     {
         NSDictionary* fileInfo = playableFiles[0];
         NSString* baseTitle = @"▶ Play";
-        NSString* buttonTitle = fileInfo[@"buttonTitle"];
-        // For single file, check if incomplete and add progress
         CGFloat progress = [fileInfo[@"progress"] doubleValue];
-        if (progress < 1.0)
+        NSString* buttonTitle;
+        if (progress > 0 && progress < 1.0)
         {
             buttonTitle = [NSString stringWithFormat:@"%@ (%d%%)", baseTitle, (int)floor(progress * 100)];
         }
@@ -936,7 +944,8 @@ static CGFloat const kPlayButtonVerticalPadding = 6.0;
             buttonTitle = baseTitle;
         }
         PlayButton* playButton = [self createPlayButtonWithTitle:buttonTitle path:fileInfo[@"path"] fileIndex:fileInfo[@"index"]
-                                                       baseTitle:baseTitle];
+                                                       baseTitle:baseTitle
+                                                        progress:progress];
         [buttonStack addArrangedSubview:playButton];
     }
     else
@@ -985,9 +994,11 @@ static CGFloat const kPlayButtonVerticalPadding = 6.0;
                     break;
                 }
 
+                CGFloat progress = [fileInfo[@"progress"] doubleValue];
                 PlayButton* playButton = [self createPlayButtonWithTitle:fileInfo[@"buttonTitle"] path:fileInfo[@"path"]
                                                                fileIndex:fileInfo[@"index"]
-                                                               baseTitle:fileInfo[@"baseTitle"]];
+                                                               baseTitle:fileInfo[@"baseTitle"]
+                                                                progress:progress];
                 [buttonStack addArrangedSubview:playButton];
 
                 totalFilesShown++;
@@ -1025,22 +1036,47 @@ static CGFloat const kPlayButtonVerticalPadding = 6.0;
 
             if (baseTitle)
             {
-                CGFloat progress = [torrent fileProgressForIndex:fileIndex];
-                NSString* newTitle;
-                if (progress < 1.0)
+                CGFloat progress;
+                // DVD/Blu-ray buttons have tag set to NSNotFound - use disc consecutive progress
+                if (fileIndex == NSNotFound)
                 {
-                    newTitle = [NSString stringWithFormat:@"%@ (%d%%)", baseTitle, (int)floor(progress * 100)];
+                    progress = [torrent discConsecutiveProgress];
                 }
                 else
                 {
-                    newTitle = baseTitle;
+                    progress = [torrent fileProgressForIndex:fileIndex];
                 }
 
-                if (![button.title isEqualToString:newTitle])
+                // Show button only when file has started downloading (progress > 0)
+                BOOL shouldBeVisible = progress > 0;
+                if (button.hidden == shouldBeVisible) // hidden state needs to change
                 {
-                    button.title = newTitle;
+                    button.hidden = !shouldBeVisible;
+                }
+
+                if (shouldBeVisible)
+                {
+                    NSString* newTitle;
+                    if (progress < 1.0)
+                    {
+                        newTitle = [NSString stringWithFormat:@"%@ (%d%%)", baseTitle, (int)floor(progress * 100)];
+                    }
+                    else
+                    {
+                        newTitle = baseTitle;
+                    }
+
+                    if (![button.title isEqualToString:newTitle])
+                    {
+                        button.title = newTitle;
+                    }
                 }
             }
+        }
+        else if ([view isKindOfClass:[NSTextField class]])
+        {
+            // Season labels - show if any button in that season is visible
+            // For simplicity, always show labels (they're lightweight)
         }
     }
 }
@@ -1048,9 +1084,56 @@ static CGFloat const kPlayButtonVerticalPadding = 6.0;
 - (IBAction)playMediaFile:(NSButton*)sender
 {
     NSString* path = sender.identifier;
-    if (path)
+    if (!path)
     {
-        [NSWorkspace.sharedWorkspace openURL:[NSURL fileURLWithPath:path]];
+        return;
+    }
+
+    NSURL* fileURL = [NSURL fileURLWithPath:path];
+
+    // Check if this is a DVD folder (VIDEO_TS) or Blu-ray folder (BDMV)
+    BOOL isDir = NO;
+    [NSFileManager.defaultManager fileExistsAtPath:path isDirectory:&isDir];
+    NSString* folderName = path.lastPathComponent.uppercaseString;
+    BOOL isVideoTS = isDir && [folderName isEqualToString:@"VIDEO_TS"];
+    BOOL isBDMV = isDir && [folderName isEqualToString:@"BDMV"];
+
+    if (isVideoTS || isBDMV)
+    {
+        // For DVD/Blu-ray folders, try VLC first with appropriate protocol
+        NSURL* vlcURL = [NSWorkspace.sharedWorkspace URLForApplicationWithBundleIdentifier:@"org.videolan.vlc"];
+        if (vlcURL)
+        {
+            // VLC needs dvd:// or bluray:// protocol with path to the disc root folder
+            NSString* discRoot = path.stringByDeletingLastPathComponent;
+            NSString* discURI = [NSString stringWithFormat:@"%@://%@", isVideoTS ? @"dvd" : @"bluray", discRoot];
+
+            NSTask* task = [[NSTask alloc] init];
+            task.executableURL = [vlcURL URLByAppendingPathComponent:@"Contents/MacOS/VLC"];
+            task.arguments = @[ discURI ];
+            [task launchAndReturnError:nil];
+        }
+        else
+        {
+            // Try IINA as fallback
+            NSURL* iinaURL = [NSWorkspace.sharedWorkspace URLForApplicationWithBundleIdentifier:@"com.colliderli.iina"];
+            if (iinaURL)
+            {
+                NSWorkspaceOpenConfiguration* config = [NSWorkspaceOpenConfiguration configuration];
+                [NSWorkspace.sharedWorkspace openURLs:@[ fileURL ] withApplicationAtURL:iinaURL configuration:config
+                                    completionHandler:nil];
+            }
+            else
+            {
+                // No disc-capable player found, just open the folder
+                [NSWorkspace.sharedWorkspace openURL:fileURL];
+            }
+        }
+    }
+    else
+    {
+        // Regular media file - open normally
+        [NSWorkspace.sharedWorkspace openURL:fileURL];
     }
 }
 

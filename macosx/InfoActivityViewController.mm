@@ -226,19 +226,11 @@ static CGFloat const kStackViewVerticalSpacing = 8.0;
         }
         self.fProgressField.stringValue = progressString;
 
-        // Show consecutive progress if different from regular progress
+        // Show consecutive progress (playable progress from file start)
         CGFloat consecutiveProgress = torrent.consecutiveProgress;
-        if (consecutiveProgress < torrent.progress - 0.001)
-        {
-            self.fConsecutiveProgressField.stringValue = [NSString percentString:consecutiveProgress longDecimals:YES];
-            self.fConsecutiveProgressField.hidden = NO;
-            self.fConsecutiveProgressLabel.hidden = NO;
-        }
-        else
-        {
-            self.fConsecutiveProgressField.hidden = YES;
-            self.fConsecutiveProgressLabel.hidden = YES;
-        }
+        self.fConsecutiveProgressField.stringValue = [NSString percentString:consecutiveProgress longDecimals:YES];
+        self.fConsecutiveProgressField.hidden = NO;
+        self.fConsecutiveProgressLabel.hidden = NO;
 
         self.fRatioField.stringValue = [NSString stringForRatio:torrent.ratio];
 
@@ -313,8 +305,6 @@ static CGFloat const kStackViewVerticalSpacing = 8.0;
         self.fStateField.stringValue = @"";
         self.fProgressField.stringValue = @"";
         self.fConsecutiveProgressField.stringValue = @"";
-        self.fConsecutiveProgressField.hidden = YES;
-        self.fConsecutiveProgressLabel.hidden = YES;
 
         self.fErrorMessageView.string = @"";
 

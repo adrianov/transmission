@@ -2884,6 +2884,82 @@ tr_piece_index_t tr_torrent::file_index_for_piece(tr_piece_index_t piece) const 
     return 0;
 }
 
+bool tr_torrent::is_piece_in_file_tail(tr_piece_index_t piece) const noexcept
+{
+    static constexpr uint64_t TailSize = 20U * 1024U * 1024U; // 20 MB
+
+    auto const [file_begin, file_end] = fpm_.file_span_for_piece(piece);
+    for (auto file = file_begin; file < file_end; ++file)
+    {
+        if (!files_wanted_.file_wanted(file))
+        {
+            continue;
+        }
+
+        auto const file_size = metainfo_.file_size(file);
+        if (file_size <= TailSize)
+        {
+            // Small file - all pieces are in "tail"
+            return true;
+        }
+
+        // Calculate byte offset of this piece within the file
+        auto const byte_span = fpm_.byte_span_for_file(file);
+        auto const piece_byte_begin = static_cast<uint64_t>(piece) * piece_size();
+        auto const piece_byte_end = piece_byte_begin + piece_size(piece);
+
+        // Check if piece overlaps with the last 20 MB of the file
+        auto const tail_start = byte_span.end - TailSize;
+        if (piece_byte_end > tail_start && piece_byte_begin < byte_span.end)
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool tr_torrent::is_piece_in_priority_file(tr_piece_index_t piece) const noexcept
+{
+    // Priority file extensions for disc structures:
+    // DVD: IFO (index), BUP (backup index)
+    // Blu-ray: index.bdmv, MovieObject.bdmv
+    auto const [file_begin, file_end] = fpm_.file_span_for_piece(piece);
+    for (auto file = file_begin; file < file_end; ++file)
+    {
+        if (!files_wanted_.file_wanted(file))
+        {
+            continue;
+        }
+
+        auto const path = metainfo_.file_subpath(file);
+        auto const path_sv = std::string_view{ path };
+
+        // Check for DVD index files (.ifo, .bup - case insensitive)
+        if (path_sv.size() >= 4)
+        {
+            auto ext = std::string{ path_sv.substr(path_sv.size() - 4) };
+            std::transform(ext.begin(), ext.end(), ext.begin(), [](unsigned char c) { return std::tolower(c); });
+            if (ext == ".ifo" || ext == ".bup")
+            {
+                return true;
+            }
+        }
+
+        // Check for Blu-ray index files (index.bdmv, movieobject.bdmv - case insensitive)
+        if (path_sv.size() >= 10)
+        {
+            auto const slash_pos = path_sv.rfind('/');
+            auto filename = std::string{ path_sv.substr(slash_pos == std::string_view::npos ? 0 : slash_pos + 1) };
+            std::transform(filename.begin(), filename.end(), filename.begin(), [](unsigned char c) { return std::tolower(c); });
+            if (filename == "index.bdmv" || filename == "movieobject.bdmv")
+            {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
 // --- Consecutive progress (playable progress from file start)
 
 float tr_torrent::file_consecutive_progress(tr_file_index_t const file) const

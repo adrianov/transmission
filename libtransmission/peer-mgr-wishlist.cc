@@ -23,11 +23,13 @@ class Wishlist::Impl
         tr_piece_index_t file_index;
         tr_block_span_t block_span;
         tr_priority_t priority;
+        bool is_in_file_tail; // last 20 MB of file - prioritized for video playback
+        bool is_in_priority_file; // index files (IFO, BUP, index.bdmv) - prioritized for disc playback
 
-        // Sort by: priority (high first), file index, piece index
+        // Sort by: priority (high first), file index, priority files (true first), file tail (true first), piece index
         [[nodiscard]] constexpr auto sort_key() const noexcept
         {
-            return std::tuple{ -priority, file_index, piece };
+            return std::tuple{ -priority, file_index, !is_in_priority_file, !is_in_file_tail, piece };
         }
 
         [[nodiscard]] constexpr bool operator<(Candidate const& that) const noexcept
@@ -60,6 +62,8 @@ private:
                         mediator_.file_index_for_piece(piece),
                         mediator_.block_span(piece),
                         mediator_.priority(piece),
+                        mediator_.is_piece_in_file_tail(piece),
+                        mediator_.is_piece_in_priority_file(piece),
                     });
             }
         }

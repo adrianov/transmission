@@ -108,6 +108,9 @@ extern NSString* const kTorrentDidChangeGroupNotification;
 /// Returns current file progress (0.0-1.0) for a file index.
 - (CGFloat)fileProgressForIndex:(NSUInteger)index;
 
+/// Returns overall consecutive progress for DVD/Blu-ray disc files (0.0-1.0).
+- (CGFloat)discConsecutiveProgress;
+
 @property(nonatomic, readonly) NSString* name;
 @property(nonatomic, readonly) NSString* displayName;
 @property(nonatomic, getter=isFolder, readonly) BOOL folder;
@@ -163,6 +166,7 @@ extern NSString* const kTorrentDidChangeGroupNotification;
 @property(nonatomic, getter=isError, readonly) BOOL error;
 @property(nonatomic, getter=isAnyErrorOrWarning, readonly) BOOL anyErrorOrWarning;
 @property(nonatomic, readonly) NSString* errorMessage;
+@property(nonatomic, getter=isPausedForDiskSpace, readonly) BOOL pausedForDiskSpace;
 
 @property(nonatomic, readonly) NSArray<NSDictionary*>* peers;
 
