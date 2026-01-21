@@ -73,6 +73,11 @@ typedef NS_ENUM(NSUInteger, TabTag) {
     [super awakeFromNib];
     self.fNoneSelectedField.stringValue = NSLocalizedString(@"No Torrents Selected", "Inspector -> selected torrents");
 
+    // Initialize to "no selection" state - hide name and info fields
+    self.fNameField.hidden = YES;
+    self.fBasicInfoField.hidden = YES;
+    self.fNoneSelectedField.hidden = NO;
+
     // Add shadow to image view
     self.fImageView.wantsLayer = YES;
     self.fImageView.layer.shadowColor = NSColor.blackColor.CGColor;
