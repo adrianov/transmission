@@ -13,6 +13,7 @@
 @property(nonatomic) IBOutlet NSButton* fURLButton;
 
 @property(nonatomic) IBOutlet NSImageView* fIconView;
+@property(nonatomic) IBOutlet NSTextField* fIconSubtitleField;
 @property(nonatomic) IBOutlet NSImageView* fGroupIndicatorView;
 
 @property(nonatomic) IBOutlet NSStackView* fStackView;

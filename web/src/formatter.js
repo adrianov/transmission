@@ -57,6 +57,167 @@ const fmt_GBps = new Intl.NumberFormat(current_locale, {
   unit: 'gigabyte-per-second',
 });
 
+// Technical tags to filter from torrent names (split into groups to reduce regex complexity)
+const techTagsVideo = [
+  'WEBDL',
+  'WEB-DL',
+  'WEBRip',
+  'BDRip',
+  'BluRay',
+  'HDRip',
+  'DVDRip',
+  'HDTV',
+];
+const techTagsCodec = [
+  'HEVC',
+  'H264',
+  'H.264',
+  'H265',
+  'H.265',
+  'x264',
+  'x265',
+  'AVC',
+  '10bit',
+];
+const techTagsAudio = ['AAC', 'AC3', 'DTS', 'Atmos', 'TrueHD', 'FLAC', 'EAC3'];
+const techTagsHdr = ['SDR', 'HDR', 'HDR10', 'DV', 'DoVi'];
+const techTagsSource = ['AMZN', 'NF', 'DSNP', 'HMAX', 'PCOK', 'ATVP', 'APTV'];
+const techTagsOther = [
+  'ExKinoRay',
+  'RuTracker',
+  'LostFilm',
+  'MP4',
+  'IMAX',
+  'REPACK',
+  'PROPER',
+  'EXTENDED',
+  'UNRATED',
+  'REMUX',
+];
+
+/**
+ * Converts a technical torrent name to a human-friendly title.
+ *
+ * Examples:
+ *   Ponies.S01.1080p.PCOK.WEB-DL.H264 -> Ponies - Season 1 - 1080p
+ *   Major.Grom.S01.2025.WEB-DL.HEVC.2160p -> Major Grom - Season 1 - 2160p
+ *   Sting - Live At The Olympia Paris.2017.BDRip1080p -> Sting - Live At The Olympia Paris - 2017 - 1080p
+ *   2ChicksSameTime.25.04.14.Bonnie.Rotten.2160p.mp4 -> 2ChickSameTime - 25.04.14 - Bonnie Rotten - 2160p
+ */
+function formatHumanTitle(name) {
+  if (!name) {
+    return 'Unknown';
+  }
+
+  // Remove file extension
+  let title = name.replace(
+    /\.(mkv|avi|mp4|mov|wmv|flv|webm|m4v|torrent)$/i,
+    '',
+  );
+
+  // Handle merged resolution patterns like "BDRip1080p" -> "BDRip 1080p"
+  title = title.replaceAll(
+    /(BDRip|HDRip|DVDRip|WEBRip)(1080p|720p|2160p|480p)/gi,
+    '$1 $2',
+  );
+
+  // Resolution patterns
+  const resMatch = title.match(/\b(2160p|1080p|720p|480p)\b/i);
+  let resolution = resMatch ? resMatch[1] : null;
+  if (!resolution) {
+    const uhd = title.match(/\b(4K|UHD)\b/i);
+    if (uhd) {
+      resolution = '2160p';
+    }
+  }
+
+  // Season pattern (S01, Season 1, etc.)
+  const seasonMatch = title.match(/\bS(\d{1,2})(?:E\d+)?\b/i);
+  const season = seasonMatch
+    ? `Season ${Number.parseInt(seasonMatch[1], 10)}`
+    : null;
+
+  // Year pattern (standalone 4-digit year between 1900-2099)
+  const yearMatch = title.match(/\b(19\d{2}|20\d{2})\b/);
+  const year = yearMatch ? yearMatch[1] : null;
+
+  // Date pattern for dated content (YY.MM.DD) - extract position for ordering
+  const dateMatch = title.match(/\b(\d{2}\.\d{2}\.\d{2})\b/);
+  const date = dateMatch ? dateMatch[1] : null;
+  const dateIndex = dateMatch ? title.indexOf(dateMatch[0]) : -1;
+
+  // Remove tech tags
+  const allTags = [
+    ...techTagsVideo,
+    ...techTagsCodec,
+    ...techTagsAudio,
+    ...techTagsHdr,
+    ...techTagsSource,
+    ...techTagsOther,
+  ];
+  for (const tag of allTags) {
+    title = title.replaceAll(new RegExp(`\\b${tag}\\b`, 'gi'), '');
+  }
+
+  // Remove resolution, season markers, year, date
+  title = title
+    .replaceAll(/\b(2160p|1080p|720p|480p|4K|UHD)\b/gi, '')
+    .replaceAll(/\bS\d{1,2}(E\d+)?\b/gi, '')
+    .replace(/\b(19\d{2}|20\d{2})\b/, '')
+    .replace(/\b\d{2}\.\d{2}\.\d{2}\b/, '');
+
+  // Replace dots/underscores with spaces, preserve existing " - "
+  title = title
+    .replaceAll(/[._]/g, ' ')
+    .replaceAll(' - ', '\u0000')
+    .replaceAll('-', ' ')
+    .replaceAll('\u0000', ' - ')
+    .replaceAll(/\s+/g, ' ')
+    .trim();
+
+  // Remove trailing/leading hyphens and spaces
+  while (title.startsWith(' ') || title.startsWith('-')) {
+    title = title.slice(1);
+  }
+  while (title.endsWith(' ') || title.endsWith('-')) {
+    title = title.slice(0, -1);
+  }
+
+  // For dated content, split title at date position to get prefix and suffix
+  let titlePrefix = title;
+  let titleSuffix = '';
+  if (date && dateIndex > 0) {
+    // Estimate where the date was in the cleaned title (rough approximation)
+    const words = title.split(/\s+/);
+    // First word is usually the site/series name for dated content
+    if (words.length > 1) {
+      [titlePrefix] = words;
+      titleSuffix = words.slice(1).join(' ');
+    }
+  }
+
+  // Build the final title
+  let result = titlePrefix;
+
+  if (season) {
+    result += ` - ${season}`;
+  }
+  if (date) {
+    result += ` - ${date}`;
+    if (titleSuffix) {
+      result += ` - ${titleSuffix}`;
+    }
+  }
+  if (year && !date) {
+    result += ` (${year})`;
+  }
+  if (resolution) {
+    result += ` #${resolution}`;
+  }
+
+  return result || name;
+}
+
 export const Formatter = {
   /** Round a string of a number to a specified number of decimal places */
   _toTruncFixed(number, places) {
@@ -66,6 +227,11 @@ export const Formatter = {
 
   countString(msgid, msgid_plural, n) {
     return `${this.number(n)} ${this.ngettext(msgid, msgid_plural, n)}`;
+  },
+
+  /** Converts technical torrent name to human-friendly title */
+  humanTitle(name) {
+    return formatHumanTitle(name);
   },
 
   // Formats a memory size into a human-readable string

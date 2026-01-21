@@ -219,8 +219,8 @@ export class TorrentRendererFull {
     root.classList.toggle('paused', is_stopped);
     const { labels, name, peer_details, progressbar, progress_details } = root;
 
-    // name
-    setTextContent(name, torrent.getName());
+    // name (human-friendly title)
+    setTextContent(name, torrent.getDisplayName());
 
     // labels
     TorrentRendererHelper.formatLabels(torrent, labels);
@@ -319,8 +319,8 @@ export class TorrentRendererCompact {
     root.classList.toggle('paused', torrent.isStopped());
     const { labels, name, peer_details, progressbar } = root;
 
-    // name
-    setTextContent(name, torrent.getName());
+    // name (human-friendly title)
+    setTextContent(name, torrent.getDisplayName());
 
     // labels
     TorrentRendererHelper.formatLabels(torrent, labels);

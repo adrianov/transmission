@@ -265,7 +265,7 @@ static NSTimeInterval const kToggleProgressSeconds = 0.175;
             if (error)
             {
                 NSRect frame = torrentCell.fIconView.frame;
-                NSImage* resultImage = [[NSImage alloc] initWithSize:NSMakeSize(frame.size.height, frame.size.width)];
+                NSImage* resultImage = [[NSImage alloc] initWithSize:NSMakeSize(frame.size.width, frame.size.height)];
                 [resultImage lockFocus];
 
                 // draw fileImage
@@ -273,7 +273,7 @@ static NSTimeInterval const kToggleProgressSeconds = 0.175;
 
                 // overlay error badge
                 NSImage* errorImage = [NSImage imageNamed:NSImageNameCaution];
-                NSRect const errorRect = NSMakeRect(frame.origin.x, 0, kErrorImageSize, kErrorImageSize);
+                NSRect const errorRect = NSMakeRect(0, 0, kErrorImageSize, kErrorImageSize);
                 [errorImage drawInRect:errorRect fromRect:NSZeroRect operation:NSCompositingOperationSourceOver fraction:1.0
                         respectFlipped:YES
                                  hints:nil];
@@ -286,6 +286,11 @@ static NSTimeInterval const kToggleProgressSeconds = 0.175;
             {
                 torrentCell.fIconView.image = fileImage;
             }
+
+            // set icon subtitle label (e.g., "x8" for multi-file media torrents)
+            NSString* iconSubtitle = torrent.iconSubtitle;
+            torrentCell.fIconSubtitleField.stringValue = iconSubtitle ?: @"";
+            torrentCell.fIconSubtitleField.hidden = (iconSubtitle == nil);
 
             // set torrent status
             NSString* status;
@@ -307,7 +312,7 @@ static NSTimeInterval const kToggleProgressSeconds = 0.175;
         // set this so that we can draw bar in torrentCell drawRect
         torrentCell.objectValue = torrent;
 
-        torrentCell.fTorrentTitleField.stringValue = torrent.name;
+        torrentCell.fTorrentTitleField.stringValue = torrent.displayName;
 
         torrentCell.fActionButton.action = @selector(displayTorrentActionPopover:);
 

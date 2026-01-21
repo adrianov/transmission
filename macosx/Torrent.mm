@@ -25,6 +25,9 @@ static int const kETAIdleDisplaySec = 2 * 60;
 
 static dispatch_queue_t timeMachineExcludeQueue;
 
+/// Media type for folder torrents
+typedef NS_ENUM(NSInteger, TorrentMediaType) { TorrentMediaTypeNone = 0, TorrentMediaTypeVideo, TorrentMediaTypeAudio };
+
 @interface Torrent ()
 
 @property(nonatomic, readonly) tr_torrent* fHandle;
@@ -33,6 +36,11 @@ static dispatch_queue_t timeMachineExcludeQueue;
 @property(nonatomic, readonly) NSUserDefaults* fDefaults;
 
 @property(nonatomic) NSImage* fIcon;
+@property(nonatomic, copy) NSString* fDisplayName;
+@property(nonatomic) TorrentMediaType fMediaType;
+@property(nonatomic) NSUInteger fMediaFileCount;
+@property(nonatomic, copy) NSString* fMediaExtension;
+@property(nonatomic) BOOL fMediaTypeDetected;
 
 @property(nonatomic, copy) NSArray<FileListNode*>* fileList;
 @property(nonatomic, copy) NSArray<FileListNode*>* flatFileList;
@@ -630,6 +638,35 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
     return YES;
 }
 
+/// Adds a subtle drop shadow to an icon image for better visibility.
++ (NSImage*)iconWithShadow:(NSImage*)icon
+{
+    NSSize size = icon.size;
+
+    NSImage* result = [[NSImage alloc] initWithSize:size];
+    [result lockFocus];
+
+    // Save graphics state and set shadow
+    [NSGraphicsContext saveGraphicsState];
+
+    NSShadow* shadow = [[NSShadow alloc] init];
+    shadow.shadowColor = [NSColor colorWithWhite:0 alpha:0.35];
+    shadow.shadowOffset = NSMakeSize(0, -1);
+    shadow.shadowBlurRadius = 2.0;
+    [shadow set];
+
+    // Draw icon slightly smaller and offset to make room for shadow
+    CGFloat const inset = 2.0;
+    NSRect destRect = NSMakeRect(inset, inset + 1, size.width - inset * 2, size.height - inset * 2);
+    [icon drawInRect:destRect fromRect:NSZeroRect operation:NSCompositingOperationSourceOver fraction:1.0];
+
+    [NSGraphicsContext restoreGraphicsState];
+
+    [result unlockFocus];
+
+    return result;
+}
+
 - (NSImage*)icon
 {
     if (self.magnet)
@@ -639,15 +676,166 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
 
     if (!self.fIcon)
     {
-        self.fIcon = self.folder ? [NSImage imageNamed:NSImageNameFolder] :
-                                   [NSWorkspace.sharedWorkspace iconForFileType:self.name.pathExtension];
+        NSImage* baseIcon;
+        if (self.folder)
+        {
+            [self detectMediaType];
+            if (self.fMediaType != TorrentMediaTypeNone && self.fMediaExtension)
+            {
+                baseIcon = [NSWorkspace.sharedWorkspace iconForFileType:self.fMediaExtension];
+            }
+            else
+            {
+                baseIcon = [NSImage imageNamed:NSImageNameFolder];
+            }
+        }
+        else
+        {
+            baseIcon = [NSWorkspace.sharedWorkspace iconForFileType:self.name.pathExtension];
+        }
+        self.fIcon = [Torrent iconWithShadow:baseIcon];
     }
     return self.fIcon;
+}
+
+- (NSString*)iconSubtitle
+{
+    if (!self.folder || self.magnet)
+    {
+        return nil;
+    }
+
+    [self detectMediaType];
+    if (self.fMediaFileCount > 1)
+    {
+        if (self.fMediaType == TorrentMediaTypeVideo)
+        {
+            return [NSString stringWithFormat:@"%lu videos", (unsigned long)self.fMediaFileCount];
+        }
+        else if (self.fMediaType == TorrentMediaTypeAudio)
+        {
+            return [NSString stringWithFormat:@"%lu audios", (unsigned long)self.fMediaFileCount];
+        }
+    }
+    return nil;
+}
+
+/// Detects dominant media type (video or audio) in folder torrents.
+- (void)detectMediaType
+{
+    // Already detected
+    if (self.fMediaTypeDetected)
+    {
+        return;
+    }
+    self.fMediaTypeDetected = YES;
+
+    if (!self.folder || self.magnet)
+    {
+        return;
+    }
+
+    static NSSet<NSString*>* videoExtensions;
+    static NSSet<NSString*>* audioExtensions;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        videoExtensions = [NSSet setWithArray:@[
+            @"mkv",
+            @"avi",
+            @"mp4",
+            @"mov",
+            @"wmv",
+            @"flv",
+            @"webm",
+            @"m4v",
+            @"mpg",
+            @"mpeg",
+            @"ts",
+            @"m2ts",
+            @"vob",
+            @"3gp",
+            @"ogv"
+        ]];
+        audioExtensions = [NSSet
+            setWithArray:@[ @"mp3", @"flac", @"wav", @"aac", @"ogg", @"wma", @"m4a", @"ape", @"alac", @"aiff", @"opus" ]];
+    });
+
+    NSMutableDictionary<NSString*, NSNumber*>* videoExtCounts = [NSMutableDictionary dictionary];
+    NSMutableDictionary<NSString*, NSNumber*>* audioExtCounts = [NSMutableDictionary dictionary];
+
+    NSUInteger const count = self.fileCount;
+    for (NSUInteger i = 0; i < count; i++)
+    {
+        auto const file = tr_torrentFile(self.fHandle, i);
+        NSString* fileName = @(file.name);
+        NSString* ext = fileName.pathExtension.lowercaseString;
+
+        if ([videoExtensions containsObject:ext])
+        {
+            videoExtCounts[ext] = @(videoExtCounts[ext].unsignedIntegerValue + 1);
+        }
+        else if ([audioExtensions containsObject:ext])
+        {
+            audioExtCounts[ext] = @(audioExtCounts[ext].unsignedIntegerValue + 1);
+        }
+    }
+
+    // Count totals
+    NSUInteger videoCount = 0;
+    NSString* dominantVideoExt = nil;
+    NSUInteger dominantVideoCount = 0;
+    for (NSString* ext in videoExtCounts)
+    {
+        NSUInteger extCount = videoExtCounts[ext].unsignedIntegerValue;
+        videoCount += extCount;
+        if (extCount > dominantVideoCount)
+        {
+            dominantVideoCount = extCount;
+            dominantVideoExt = ext;
+        }
+    }
+
+    NSUInteger audioCount = 0;
+    NSString* dominantAudioExt = nil;
+    NSUInteger dominantAudioCount = 0;
+    for (NSString* ext in audioExtCounts)
+    {
+        NSUInteger extCount = audioExtCounts[ext].unsignedIntegerValue;
+        audioCount += extCount;
+        if (extCount > dominantAudioCount)
+        {
+            dominantAudioCount = extCount;
+            dominantAudioExt = ext;
+        }
+    }
+
+    // Determine dominant type
+    if (videoCount >= audioCount && videoCount >= 1)
+    {
+        self.fMediaType = TorrentMediaTypeVideo;
+        self.fMediaFileCount = videoCount;
+        self.fMediaExtension = dominantVideoExt;
+    }
+    else if (audioCount > videoCount && audioCount >= 1)
+    {
+        self.fMediaType = TorrentMediaTypeAudio;
+        self.fMediaFileCount = audioCount;
+        self.fMediaExtension = dominantAudioExt;
+    }
 }
 
 - (NSString*)name
 {
     return @(tr_torrentName(self.fHandle));
+}
+
+- (NSString*)displayName
+{
+    if (!self.fDisplayName)
+    {
+        self.fDisplayName = self.name.humanReadableTitle;
+    }
+    return self.fDisplayName;
 }
 
 - (BOOL)isFolder
@@ -2162,6 +2350,7 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
         self.flatFileList = flatFileList;
 
         self.fIcon = nil;
+        self.fDisplayName = nil;
     }
     else
     {

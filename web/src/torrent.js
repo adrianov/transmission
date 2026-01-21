@@ -186,6 +186,9 @@ export class Torrent extends EventTarget {
   getName() {
     return this.fields.name || 'Unknown';
   }
+  getDisplayName() {
+    return Formatter.humanTitle(this.fields.name);
+  }
   getPeers() {
     return this.fields.peers || [];
   }

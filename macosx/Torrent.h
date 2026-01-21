@@ -92,8 +92,11 @@ extern NSString* const kTorrentDidChangeGroupNotification;
 @property(nonatomic, readonly) BOOL alertForRemainingDiskSpace;
 
 @property(nonatomic, readonly) NSImage* icon;
+/// Subtitle for multi-file media torrents (e.g., "x8" for 8 video files). Nil for non-media or single file.
+@property(nonatomic, readonly) NSString* iconSubtitle;
 
 @property(nonatomic, readonly) NSString* name;
+@property(nonatomic, readonly) NSString* displayName;
 @property(nonatomic, getter=isFolder, readonly) BOOL folder;
 @property(nonatomic, readonly) uint64_t size;
 @property(nonatomic, readonly) uint64_t sizeLeft;

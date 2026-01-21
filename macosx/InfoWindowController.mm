@@ -73,6 +73,13 @@ typedef NS_ENUM(NSUInteger, TabTag) {
     [super awakeFromNib];
     self.fNoneSelectedField.stringValue = NSLocalizedString(@"No Torrents Selected", "Inspector -> selected torrents");
 
+    // Add shadow to image view
+    self.fImageView.wantsLayer = YES;
+    self.fImageView.layer.shadowColor = NSColor.blackColor.CGColor;
+    self.fImageView.layer.shadowOpacity = 0.35;
+    self.fImageView.layer.shadowOffset = CGSizeMake(0, -1);
+    self.fImageView.layer.shadowRadius = 2.0;
+
     //window location and size
     NSPanel* window = (NSPanel*)self.window;
 

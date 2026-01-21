@@ -171,6 +171,217 @@
     return data.hexString;
 }
 
+- (NSString*)humanReadableTitle
+{
+    if (self.length == 0)
+    {
+        return @"Unknown";
+    }
+
+    NSString* title = self;
+
+    // Remove file extension
+    NSArray* extensions = @[ @"mkv", @"avi", @"mp4", @"mov", @"wmv", @"flv", @"webm", @"m4v", @"torrent" ];
+    for (NSString* ext in extensions)
+    {
+        NSString* dotExt = [@"." stringByAppendingString:ext];
+        if ([title.lowercaseString hasSuffix:dotExt])
+        {
+            title = [title substringToIndex:title.length - dotExt.length];
+            break;
+        }
+    }
+
+    // Handle merged resolution patterns like "BDRip1080p" -> "BDRip 1080p"
+    NSRegularExpression* mergedResRegex = [NSRegularExpression regularExpressionWithPattern:@"(BDRip|HDRip|DVDRip|WEBRip)(1080p|720p|2160p|480p)"
+                                                                                    options:NSRegularExpressionCaseInsensitive
+                                                                                      error:nil];
+    title = [mergedResRegex stringByReplacingMatchesInString:title options:0 range:NSMakeRange(0, title.length)
+                                                withTemplate:@"$1 $2"];
+
+    // Extract resolution
+    NSRegularExpression* resRegex = [NSRegularExpression regularExpressionWithPattern:@"\\b(2160p|1080p|720p|480p)\\b"
+                                                                              options:NSRegularExpressionCaseInsensitive
+                                                                                error:nil];
+    NSTextCheckingResult* resMatch = [resRegex firstMatchInString:title options:0 range:NSMakeRange(0, title.length)];
+    NSString* resolution = resMatch ? [title substringWithRange:resMatch.range] : nil;
+
+    // Check for 4K/UHD if no standard resolution found
+    if (!resolution)
+    {
+        NSRegularExpression* uhdRegex = [NSRegularExpression regularExpressionWithPattern:@"\\b(4K|UHD)\\b"
+                                                                                  options:NSRegularExpressionCaseInsensitive
+                                                                                    error:nil];
+        if ([uhdRegex firstMatchInString:title options:0 range:NSMakeRange(0, title.length)])
+        {
+            resolution = @"2160p";
+        }
+    }
+
+    // Extract season (S01, S02, etc.)
+    NSRegularExpression* seasonRegex = [NSRegularExpression regularExpressionWithPattern:@"\\bS(\\d{1,2})(?:E\\d+)?\\b"
+                                                                                 options:NSRegularExpressionCaseInsensitive
+                                                                                   error:nil];
+    NSTextCheckingResult* seasonMatch = [seasonRegex firstMatchInString:title options:0 range:NSMakeRange(0, title.length)];
+    NSString* season = nil;
+    if (seasonMatch && seasonMatch.numberOfRanges > 1)
+    {
+        NSString* seasonNum = [title substringWithRange:[seasonMatch rangeAtIndex:1]];
+        season = [NSString stringWithFormat:@"Season %d", seasonNum.intValue];
+    }
+
+    // Extract year (1900-2099)
+    NSRegularExpression* yearRegex = [NSRegularExpression regularExpressionWithPattern:@"\\b(19\\d{2}|20\\d{2})\\b" options:0
+                                                                                 error:nil];
+    NSTextCheckingResult* yearMatch = [yearRegex firstMatchInString:title options:0 range:NSMakeRange(0, title.length)];
+    NSString* year = yearMatch ? [title substringWithRange:yearMatch.range] : nil;
+
+    // Extract date pattern (YY.MM.DD)
+    NSRegularExpression* dateRegex = [NSRegularExpression regularExpressionWithPattern:@"\\b(\\d{2}\\.\\d{2}\\.\\d{2})\\b" options:0
+                                                                                 error:nil];
+    NSTextCheckingResult* dateMatch = [dateRegex firstMatchInString:title options:0 range:NSMakeRange(0, title.length)];
+    NSString* date = dateMatch ? [title substringWithRange:dateMatch.range] : nil;
+    NSUInteger dateIndex = dateMatch ? dateMatch.range.location : NSNotFound;
+
+    // Technical tags to remove
+    NSArray* techTags = @[
+        // Video sources
+        @"WEBDL",
+        @"WEB-DL",
+        @"WEBRip",
+        @"BDRip",
+        @"BluRay",
+        @"HDRip",
+        @"DVDRip",
+        @"HDTV",
+        // Codecs
+        @"HEVC",
+        @"H264",
+        @"H.264",
+        @"H265",
+        @"H.265",
+        @"x264",
+        @"x265",
+        @"AVC",
+        @"10bit",
+        // Audio
+        @"AAC",
+        @"AC3",
+        @"DTS",
+        @"Atmos",
+        @"TrueHD",
+        @"FLAC",
+        @"EAC3",
+        // HDR
+        @"SDR",
+        @"HDR",
+        @"HDR10",
+        @"DV",
+        @"DoVi",
+        // Sources
+        @"AMZN",
+        @"NF",
+        @"DSNP",
+        @"HMAX",
+        @"PCOK",
+        @"ATVP",
+        @"APTV",
+        // Other
+        @"ExKinoRay",
+        @"RuTracker",
+        @"LostFilm",
+        @"MP4",
+        @"IMAX",
+        @"REPACK",
+        @"PROPER",
+        @"EXTENDED",
+        @"UNRATED",
+        @"REMUX"
+    ];
+
+    // Remove tech tags
+    for (NSString* tag in techTags)
+    {
+        NSString* pattern = [NSString stringWithFormat:@"\\b%@\\b", tag];
+        NSRegularExpression* tagRegex = [NSRegularExpression regularExpressionWithPattern:pattern
+                                                                                  options:NSRegularExpressionCaseInsensitive
+                                                                                    error:nil];
+        title = [tagRegex stringByReplacingMatchesInString:title options:0 range:NSMakeRange(0, title.length) withTemplate:@""];
+    }
+
+    // Remove resolution, season markers, year, date from title
+    title = [resRegex stringByReplacingMatchesInString:title options:0 range:NSMakeRange(0, title.length) withTemplate:@""];
+
+    NSRegularExpression* uhdRegex = [NSRegularExpression regularExpressionWithPattern:@"\\b(4K|UHD)\\b"
+                                                                              options:NSRegularExpressionCaseInsensitive
+                                                                                error:nil];
+    title = [uhdRegex stringByReplacingMatchesInString:title options:0 range:NSMakeRange(0, title.length) withTemplate:@""];
+    title = [seasonRegex stringByReplacingMatchesInString:title options:0 range:NSMakeRange(0, title.length) withTemplate:@""];
+    title = [yearRegex stringByReplacingMatchesInString:title options:0 range:NSMakeRange(0, title.length) withTemplate:@""];
+    title = [dateRegex stringByReplacingMatchesInString:title options:0 range:NSMakeRange(0, title.length) withTemplate:@""];
+
+    // Replace dots and underscores with spaces, preserve existing " - "
+    title = [title stringByReplacingOccurrencesOfString:@" - " withString:@"\u0000"];
+    title = [title stringByReplacingOccurrencesOfString:@"." withString:@" "];
+    title = [title stringByReplacingOccurrencesOfString:@"_" withString:@" "];
+    title = [title stringByReplacingOccurrencesOfString:@"-" withString:@" "];
+    title = [title stringByReplacingOccurrencesOfString:@"\u0000" withString:@" - "];
+
+    // Collapse multiple spaces
+    NSRegularExpression* spaceRegex = [NSRegularExpression regularExpressionWithPattern:@"\\s+" options:0 error:nil];
+    title = [spaceRegex stringByReplacingMatchesInString:title options:0 range:NSMakeRange(0, title.length) withTemplate:@" "];
+    title = [title stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet];
+
+    // Remove leading/trailing hyphens
+    while ([title hasPrefix:@"-"] || [title hasPrefix:@" "])
+    {
+        title = [title substringFromIndex:1];
+    }
+    while ([title hasSuffix:@"-"] || [title hasSuffix:@" "])
+    {
+        title = [title substringToIndex:title.length - 1];
+    }
+
+    // For dated content, split title at date position
+    NSString* titlePrefix = title;
+    NSString* titleSuffix = @"";
+    if (date && dateIndex != NSNotFound && dateIndex > 0)
+    {
+        NSArray* words = [title componentsSeparatedByString:@" "];
+        if (words.count > 1)
+        {
+            titlePrefix = words[0];
+            titleSuffix = [[words subarrayWithRange:NSMakeRange(1, words.count - 1)] componentsJoinedByString:@" "];
+        }
+    }
+
+    // Build final title
+    NSMutableString* result = [NSMutableString stringWithString:titlePrefix];
+
+    if (season)
+    {
+        [result appendFormat:@" - %@", season];
+    }
+    if (date)
+    {
+        [result appendFormat:@" - %@", date];
+        if (titleSuffix.length > 0)
+        {
+            [result appendFormat:@" - %@", titleSuffix];
+        }
+    }
+    if (year && !date)
+    {
+        [result appendFormat:@" (%@)", year];
+    }
+    if (resolution)
+    {
+        [result appendFormat:@" #%@", resolution];
+    }
+
+    return result.length > 0 ? result : self;
+}
+
 @end
 
 @implementation NSString (Private)

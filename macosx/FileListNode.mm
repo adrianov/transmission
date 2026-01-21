@@ -78,10 +78,38 @@
 {
     if (!_iconInternal)
     {
-        _iconInternal = [NSWorkspace.sharedWorkspace
+        NSImage* baseIcon = [NSWorkspace.sharedWorkspace
             iconForFileType:_isFolder ? NSFileTypeForHFSTypeCode(kGenericFolderIcon) : _name.pathExtension];
+        _iconInternal = [FileListNode iconWithShadow:baseIcon];
     }
     return _iconInternal;
+}
+
+/// Adds a subtle drop shadow to an icon image for better visibility.
++ (NSImage*)iconWithShadow:(NSImage*)icon
+{
+    NSSize size = icon.size;
+
+    NSImage* result = [[NSImage alloc] initWithSize:size];
+    [result lockFocus];
+
+    [NSGraphicsContext saveGraphicsState];
+
+    NSShadow* shadow = [[NSShadow alloc] init];
+    shadow.shadowColor = [NSColor colorWithWhite:0 alpha:0.35];
+    shadow.shadowOffset = NSMakeSize(0, -1);
+    shadow.shadowBlurRadius = 2.0;
+    [shadow set];
+
+    CGFloat const inset = 2.0;
+    NSRect destRect = NSMakeRect(inset, inset + 1, size.width - inset * 2, size.height - inset * 2);
+    [icon drawInRect:destRect fromRect:NSZeroRect operation:NSCompositingOperationSourceOver fraction:1.0];
+
+    [NSGraphicsContext restoreGraphicsState];
+
+    [result unlockFocus];
+
+    return result;
 }
 
 - (NSIndexSet*)indexes

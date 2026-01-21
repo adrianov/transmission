@@ -30,6 +30,17 @@
 
 + (NSString*)convertedStringFromCString:(char const*)bytes;
 
+/**
+ * Converts a technical torrent name to a human-friendly title.
+ *
+ * Examples:
+ *   Ponies.S01.1080p.PCOK.WEB-DL.H264 -> Ponies - Season 1 - 1080p
+ *   Major.Grom.S01.2025.WEB-DL.HEVC.2160p -> Major Grom - Season 1 - 2160p
+ *   Sting - Live At The Olympia Paris.2017.BDRip1080p -> Sting - Live At The Olympia Paris - 2017 - 1080p
+ *   2ChicksSameTime.25.04.14.Bonnie.Rotten.2160p.mp4 -> 2ChickSameTime - 25.04.14 - Bonnie Rotten - 2160p
+ */
+@property(nonatomic, readonly, copy) NSString* humanReadableTitle;
+
 @end
 
 __attribute__((annotate("returns_localized_nsstring"))) static inline NSString* LocalizationNotNeeded(NSString* s)

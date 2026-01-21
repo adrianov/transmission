@@ -151,6 +151,14 @@
                                                             </constraints>
                                                             <imageCell key="cell" refusesFirstResponder="YES" alignment="left" imageScaling="proportionallyDown" image="NSFolder" id="WGQ-kl-WZm"/>
                                                         </imageView>
+                                                        <textField horizontalHuggingPriority="251" verticalHuggingPriority="750" translatesAutoresizingMaskIntoConstraints="NO" id="icn-sub-tf1">
+                                                            <rect key="frame" x="13" y="0" width="36" height="11"/>
+                                                            <textFieldCell key="cell" controlSize="mini" lineBreakMode="clipping" alignment="center" title="" id="icn-sub-tc1">
+                                                                <font key="font" metaFont="system" size="9"/>
+                                                                <color key="textColor" name="secondaryLabelColor" catalog="System" colorSpace="catalog"/>
+                                                                <color key="backgroundColor" name="textBackgroundColor" catalog="System" colorSpace="catalog"/>
+                                                            </textFieldCell>
+                                                        </textField>
                                                         <stackView distribution="fill" orientation="horizontal" alignment="centerY" spacing="4" horizontalStackHuggingPriority="249.99998474121094" verticalStackHuggingPriority="249.99998474121094" detachesHiddenViews="YES" translatesAutoresizingMaskIntoConstraints="NO" id="vYS-eL-CGb">
                                                             <rect key="frame" x="65" y="44" width="41" height="15"/>
                                                             <subviews>
@@ -250,6 +258,8 @@
                                                     <constraints>
                                                         <constraint firstItem="FLl-ue-i20" firstAttribute="centerY" secondItem="7Ic-8y-f3v" secondAttribute="centerY" id="7iF-OP-ifv"/>
                                                         <constraint firstItem="WTV-L6-lc2" firstAttribute="leading" secondItem="FLl-ue-i20" secondAttribute="trailing" constant="3" id="8e4-oE-Kzh"/>
+                                                        <constraint firstItem="icn-sub-tf1" firstAttribute="centerX" secondItem="WTV-L6-lc2" secondAttribute="centerX" id="icn-sub-cx1"/>
+                                                        <constraint firstItem="icn-sub-tf1" firstAttribute="top" secondItem="WTV-L6-lc2" secondAttribute="bottom" constant="0" id="icn-sub-tp1"/>
                                                         <constraint firstItem="J4v-0p-u4L" firstAttribute="top" secondItem="Ifq-ub-ay4" secondAttribute="bottom" constant="1" id="AyP-y5-tmL"/>
                                                         <constraint firstItem="Ifq-ub-ay4" firstAttribute="leading" secondItem="vYS-eL-CGb" secondAttribute="leading" id="Dyg-7e-eOb"/>
                                                         <constraint firstItem="kNl-5i-USx" firstAttribute="centerY" secondItem="Ifq-ub-ay4" secondAttribute="centerY" id="F2k-wy-sR2"/>
@@ -278,6 +288,7 @@
                                                         <outlet property="fControlButton" destination="kNl-5i-USx" id="iN7-sX-ciA"/>
                                                         <outlet property="fGroupIndicatorView" destination="FLl-ue-i20" id="0QU-wF-59e"/>
                                                         <outlet property="fIconView" destination="WTV-L6-lc2" id="gmV-h3-Muk"/>
+                                                        <outlet property="fIconSubtitleField" destination="icn-sub-tf1" id="icn-sub-ol1"/>
                                                         <outlet property="fRevealButton" destination="k5I-MN-hYk" id="Qkq-Yq-UAY"/>
                                                         <outlet property="fURLButton" destination="url-bt-001" id="url-ol-001"/>
                                                         <outlet property="fStackView" destination="vYS-eL-CGb" id="MDM-8N-HVT"/>
