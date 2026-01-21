@@ -907,7 +907,7 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
         CGFloat progress = [fileInfo[@"progress"] doubleValue];
         if (progress < 1.0)
         {
-            entry[@"buttonTitle"] = [NSString stringWithFormat:@"%@ (%.0f%%)", baseTitle, progress * 100];
+            entry[@"buttonTitle"] = [NSString stringWithFormat:@"%@ (%d%%)", baseTitle, (int)floor(progress * 100)];
         }
         else
         {

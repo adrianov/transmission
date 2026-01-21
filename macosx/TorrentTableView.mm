@@ -360,6 +360,7 @@ static CGFloat const kPlayButtonRowHeight = 18.0;
         torrentCell.fActionButton.action = @selector(displayTorrentActionPopover:);
         torrentCell.fControlButton.action = @selector(toggleControlForTorrent:);
         torrentCell.fRevealButton.action = @selector(revealTorrentFile:);
+        torrentCell.fURLButton.action = @selector(openCommentURL:);
 
         // Group indicator - may change dynamically
         NSInteger const groupValue = torrent.groupValue;
@@ -927,7 +928,7 @@ static CGFloat const kPlayButtonRowHeight = 18.0;
         CGFloat progress = [fileInfo[@"progress"] doubleValue];
         if (progress < 1.0)
         {
-            buttonTitle = [NSString stringWithFormat:@"%@ (%.0f%%)", baseTitle, progress * 100];
+            buttonTitle = [NSString stringWithFormat:@"%@ (%d%%)", baseTitle, (int)floor(progress * 100)];
         }
         else
         {
@@ -1027,7 +1028,7 @@ static CGFloat const kPlayButtonRowHeight = 18.0;
                 NSString* newTitle;
                 if (progress < 1.0)
                 {
-                    newTitle = [NSString stringWithFormat:@"%@ (%.0f%%)", baseTitle, progress * 100];
+                    newTitle = [NSString stringWithFormat:@"%@ (%d%%)", baseTitle, (int)floor(progress * 100)];
                 }
                 else
                 {
