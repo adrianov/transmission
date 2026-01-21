@@ -31,6 +31,11 @@
 {
     self.isHovered = YES;
     self.needsDisplay = YES;
+
+    if (self.onHover)
+    {
+        self.onHover(self);
+    }
 }
 
 - (void)mouseExited:(NSEvent*)event

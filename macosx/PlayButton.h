@@ -8,5 +8,6 @@
 @interface PlayButton : NSButton
 
 @property(nonatomic) BOOL isHovered;
+@property(nonatomic, copy) void (^onHover)(PlayButton* button);
 
 @end

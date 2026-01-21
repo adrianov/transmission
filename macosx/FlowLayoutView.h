@@ -20,4 +20,7 @@
 /// Returns height for given width. Uses cached sizes for subviews.
 - (CGFloat)heightForWidth:(CGFloat)width;
 
+/// Clears cached size for a specific view (call when view content changes)
+- (void)invalidateSizeForView:(NSView*)view;
+
 @end

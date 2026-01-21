@@ -182,4 +182,9 @@
     return NSMakeSize(NSViewNoIntrinsicMetric, MAX(height, 0));
 }
 
+- (void)invalidateSizeForView:(NSView*)view
+{
+    [_cachedSizes removeObjectForKey:view];
+}
+
 @end

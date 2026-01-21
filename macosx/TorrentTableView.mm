@@ -97,45 +97,43 @@ static NSTimeInterval const kToggleProgressSeconds = 0.175;
 - (void)awakeFromNib
 {
     [super awakeFromNib];
-    [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(refreshTorrentTable) name:@"RefreshTorrentTable"
-                                             object:nil];
     self.fLastKnownWidth = self.bounds.size.width;
+    NSNotificationCenter* nc = NSNotificationCenter.defaultCenter;
+    [nc addObserver:self selector:@selector(refreshTorrentTable) name:@"RefreshTorrentTable" object:nil];
+    [nc addObserver:self selector:@selector(updateVisiblePlayButtons) name:@"UpdateUI" object:nil];
 }
 
 - (void)viewDidEndLiveResize
 {
     [super viewDidEndLiveResize];
-    [self handleWidthChangeIfNeeded];
-}
-
-- (void)setFrameSize:(NSSize)newSize
-{
-    [super setFrameSize:newSize];
-    if (!self.inLiveResize)
-    {
-        [self handleWidthChangeIfNeeded];
-    }
-}
-
-- (void)handleWidthChangeIfNeeded
-{
     CGFloat currentWidth = self.bounds.size.width;
-    if (fabs(currentWidth - self.fLastKnownWidth) > 1.0)
+    if (fabs(currentWidth - self.fLastKnownWidth) > 10.0)
     {
         self.fLastKnownWidth = currentWidth;
-        [self invalidatePlayButtonHeightsAndReload];
+        [self reloadData];
     }
-}
-
-- (void)invalidatePlayButtonHeightsAndReload
-{
-    // Force reload of visible rows - this will reconfigure buttons with new width
-    [self reloadData];
 }
 
 - (void)refreshTorrentTable
 {
     self.needsDisplay = YES;
+}
+
+- (void)updateVisiblePlayButtons
+{
+    NSRange visibleRows = [self rowsInRect:self.visibleRect];
+    for (NSUInteger row = visibleRows.location; row < NSMaxRange(visibleRows); row++)
+    {
+        id item = [self itemAtRow:row];
+        if (![item isKindOfClass:[Torrent class]])
+            continue;
+
+        TorrentCell* cell = [self viewAtColumn:0 row:row makeIfNecessary:NO];
+        if (cell && cell.fPlayButtonsView)
+        {
+            [self updatePlayButtonProgressForCell:cell torrent:(Torrent*)item];
+        }
+    }
 }
 
 //make sure we don't lose selection on manual reloads
@@ -384,15 +382,6 @@ static CGFloat const kPlayButtonVerticalPadding = 4.0;
                 }
             }
             torrentCell.fTorrentStatusField.stringValue = status ?: torrent.statusString;
-
-            // Configure play buttons if needed (handles width changes internally)
-            [self configurePlayButtonsForCell:torrentCell torrent:torrent];
-
-            // Update play button progress (only text and visibility, no recreation)
-            if (torrentCell.fPlayButtonsView)
-            {
-                [self updatePlayButtonProgressForCell:torrentCell torrent:torrent];
-            }
         }
 
         torrentCell.fTorrentTableView = self;
@@ -928,6 +917,10 @@ static CGFloat const kPlayButtonVerticalPadding = 4.0;
     playButton.title = title;
     playButton.target = self;
     playButton.action = @selector(playMediaFile:);
+    __weak TorrentTableView* weakSelf = self;
+    playButton.onHover = ^(PlayButton* button) {
+        [weakSelf setHighPriorityForButton:button];
+    };
     playButton.bezelStyle = NSBezelStyleRecessed;
     playButton.showsBorderOnlyWhileMouseInside = YES;
     playButton.font = [NSFont systemFontOfSize:11];
@@ -961,16 +954,11 @@ static CGFloat const kPlayButtonVerticalPadding = 4.0;
 {
     NSArray<NSDictionary*>* playableFiles = torrent.playableFiles;
 
-    // Check if we can reuse existing buttons (same files AND width hasn't changed significantly)
+    // Reuse existing buttons if same torrent/files
     if (cell.fPlayButtonsView && cell.fPlayButtonsSourceFiles == playableFiles)
-    {
-        CGFloat currentWidth = [self playButtonsAvailableWidthForCell:cell];
-        if (fabs(currentWidth - torrent.cachedPlayButtonsWidth) < 10.0)
-            return;
-        // Width changed - need to reconfigure
-    }
+        return;
 
-    // Remove existing buttons
+    // Remove existing buttons (cell is being reused for different torrent)
     if (cell.fPlayButtonsView)
     {
         [cell.fPlayButtonsView removeFromSuperview];
@@ -1075,21 +1063,9 @@ static CGFloat const kPlayButtonVerticalPadding = 4.0;
 
     CGFloat totalHeight = self.rowHeight + (hasVisibleButtons ? (buttonHeight + kPlayButtonVerticalPadding) : 0);
 
-    // Only update cache and refresh row if height or width changed
-    if (torrent.cachedPlayButtonsHeight != totalHeight || torrent.cachedPlayButtonsWidth != availableWidth)
-    {
-        torrent.cachedPlayButtonsHeight = totalHeight;
-        torrent.cachedPlayButtonsWidth = availableWidth;
-
-        // Schedule row height refresh
-        NSInteger row = [self rowForItem:torrent];
-        if (row != -1)
-        {
-            dispatch_async(dispatch_get_main_queue(), ^{
-                [self noteHeightOfRowsWithIndexesChanged:[NSIndexSet indexSetWithIndex:row]];
-            });
-        }
-    }
+    // Update cache (heartbeat will handle row height updates)
+    torrent.cachedPlayButtonsHeight = totalHeight;
+    torrent.cachedPlayButtonsWidth = availableWidth;
 }
 
 - (void)updatePlayButtonProgressForCell:(TorrentCell*)cell torrent:(Torrent*)torrent
@@ -1125,11 +1101,8 @@ static CGFloat const kPlayButtonVerticalPadding = 4.0;
                     folder = [folder substringFromIndex:1];
             }
 
-            // Albums show when first media file is playable, discs use folder progress
-            if ([type isEqualToString:@"album"])
-                progress = folder ? [torrent folderFirstMediaProgress:folder] : 0.0;
-            else
-                progress = folder ? [torrent folderConsecutiveProgress:folder] : 0.0;
+            // Use consecutive progress for all folder-based items (albums, discs)
+            progress = folder ? [torrent folderConsecutiveProgress:folder] : 0.0;
         }
         else
         {
@@ -1155,6 +1128,8 @@ static CGFloat const kPlayButtonVerticalPadding = 4.0;
             {
                 button.title = newTitle;
                 [button invalidateIntrinsicContentSize];
+                [(FlowLayoutView*)cell.fPlayButtonsView invalidateSizeForView:button];
+                visibilityChanged = YES; // Trigger relayout
             }
         }
     }
@@ -1163,10 +1138,10 @@ static CGFloat const kPlayButtonVerticalPadding = 4.0;
     {
         FlowLayoutView* flowView = (FlowLayoutView*)cell.fPlayButtonsView;
         [flowView setNeedsLayout:YES];
-        [flowView invalidateIntrinsicContentSize];
+        [flowView layoutSubtreeIfNeeded];
 
+        // Recalculate height and update row
         CGFloat availableWidth = [self playButtonsAvailableWidthForCell:cell];
-
         CGFloat buttonHeight = [flowView heightForWidth:availableWidth];
         BOOL hasVisibleButtons = buttonHeight > 0;
         if (hasVisibleButtons && buttonHeight < kPlayButtonRowHeight)
@@ -1176,29 +1151,31 @@ static CGFloat const kPlayButtonVerticalPadding = 4.0;
             cell.fPlayButtonsHeightConstraint.constant = buttonHeight;
 
         CGFloat totalHeight = self.rowHeight + (hasVisibleButtons ? (buttonHeight + kPlayButtonVerticalPadding) : 0);
-        if (torrent.cachedPlayButtonsHeight != totalHeight)
-        {
-            torrent.cachedPlayButtonsHeight = totalHeight;
-            torrent.cachedPlayButtonsWidth = availableWidth;
+        CGFloat oldHeight = torrent.cachedPlayButtonsHeight;
+        torrent.cachedPlayButtonsHeight = totalHeight;
+        torrent.cachedPlayButtonsWidth = availableWidth;
 
+        // Notify table if height changed (dispatch to avoid layout issues during animation)
+        if (fabs(totalHeight - oldHeight) > 1.0)
+        {
             NSInteger row = [self rowForItem:torrent];
-            if (row != -1)
+            if (row >= 0)
             {
+                NSIndexSet* indexSet = [NSIndexSet indexSetWithIndex:row];
                 dispatch_async(dispatch_get_main_queue(), ^{
-                    [self noteHeightOfRowsWithIndexesChanged:[NSIndexSet indexSetWithIndex:row]];
+                    [self noteHeightOfRowsWithIndexesChanged:indexSet];
                 });
             }
         }
     }
 }
 
-- (IBAction)playMediaFile:(NSButton*)sender
+- (void)setHighPriorityForButton:(NSButton*)sender
 {
     NSString* path = sender.identifier;
     if (!path)
         return;
 
-    NSString* type = sender.accessibilityHelp;
     Torrent* torrent = [self itemAtRow:[self rowForView:[sender superview]]];
     if (!torrent)
         return;
@@ -1231,6 +1208,17 @@ static CGFloat const kPlayButtonVerticalPadding = 4.0;
             }
         }
     }
+}
+
+- (IBAction)playMediaFile:(NSButton*)sender
+{
+    [self setHighPriorityForButton:sender];
+
+    NSString* path = sender.identifier;
+    if (!path)
+        return;
+
+    NSString* type = sender.accessibilityHelp;
 
     NSURL* fileURL = [NSURL fileURLWithPath:path];
 
