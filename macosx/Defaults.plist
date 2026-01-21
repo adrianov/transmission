@@ -70,6 +70,8 @@
 	<true/>
 	<key>EncryptionRequire</key>
 	<false/>
+	<key>EncryptionAllowFallback</key>
+	<true/>
 	<key>Filter</key>
 	<string>None</string>
 	<key>FilterBar</key>

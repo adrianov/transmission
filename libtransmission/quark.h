@@ -179,6 +179,7 @@ enum // NOLINT(performance-enum-size)
     TR_KEY_edit_date,
     TR_KEY_encoding,
     TR_KEY_encryption,
+    TR_KEY_encryption_allow_fallback,
     TR_KEY_end_piece,
     TR_KEY_error,
     TR_KEY_error_string_camel_APICOMPAT,

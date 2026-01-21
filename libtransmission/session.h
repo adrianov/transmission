@@ -476,6 +476,7 @@ public:
         std::string script_torrent_done_filename;
         std::string script_torrent_done_seeding_filename;
         tr_encryption_mode encryption_mode = TR_ENCRYPTION_PREFERRED;
+        bool encryption_allow_fallback = true; // allow unencrypted when no encrypted peers connected
         tr_log_level log_level = TR_LOG_INFO;
         tr_mode_t umask = 022;
         tr_open_files::Preallocation preallocation_mode = tr_open_files::Preallocation::Sparse;
@@ -503,6 +504,7 @@ public:
             Field<&Settings::download_queue_enabled>{ TR_KEY_download_queue_enabled },
             Field<&Settings::download_queue_size>{ TR_KEY_download_queue_size },
             Field<&Settings::encryption_mode>{ TR_KEY_encryption },
+            Field<&Settings::encryption_allow_fallback>{ TR_KEY_encryption_allow_fallback },
             Field<&Settings::idle_seeding_limit_minutes>{ TR_KEY_idle_seeding_limit },
             Field<&Settings::idle_seeding_limit_enabled>{ TR_KEY_idle_seeding_limit_enabled },
             Field<&Settings::incomplete_dir>{ TR_KEY_incomplete_dir },
@@ -987,6 +989,11 @@ public:
         return settings().encryption_mode;
     }
 
+    [[nodiscard]] constexpr auto encryptionAllowFallback() const noexcept
+    {
+        return settings().encryption_allow_fallback;
+    }
+
     [[nodiscard]] auto serialize_encryption_mode() const noexcept
     {
         auto var = libtransmission::serializer::to_variant(settings().encryption_mode);
@@ -1308,6 +1315,7 @@ private:
     friend void tr_sessionSetDHTEnabled(tr_session* session, bool enabled);
     friend void tr_sessionSetDeleteSource(tr_session* session, bool delete_source);
     friend void tr_sessionSetEncryption(tr_session* session, tr_encryption_mode mode);
+    friend void tr_sessionSetEncryptionAllowFallback(tr_session* session, bool allow);
     friend void tr_sessionSetIdleLimit(tr_session* session, uint16_t idle_minutes);
     friend void tr_sessionSetIdleLimited(tr_session* session, bool is_limited);
     friend void tr_sessionSetIncompleteFileNamingEnabled(tr_session* session, bool enabled);

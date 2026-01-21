@@ -733,6 +733,7 @@ static NSString* const kWebUIURLFormat = @"http://localhost:%ld/";
         ([self.fDefaults boolForKey:@"EncryptionRequire"] ? TR_ENCRYPTION_REQUIRED : TR_ENCRYPTION_PREFERRED) :
         TR_CLEAR_PREFERRED;
     tr_sessionSetEncryption(self.fHandle, mode);
+    tr_sessionSetEncryptionAllowFallback(self.fHandle, [self.fDefaults boolForKey:@"EncryptionAllowFallback"]);
 }
 
 - (void)setBlocklistEnabled:(id)sender
@@ -1480,6 +1481,7 @@ static NSString* const kWebUIURLFormat = @"http://localhost:%ld/";
     tr_encryption_mode const encryptionMode = tr_sessionGetEncryption(self.fHandle);
     [self.fDefaults setBool:encryptionMode != TR_CLEAR_PREFERRED forKey:@"EncryptionPrefer"];
     [self.fDefaults setBool:encryptionMode == TR_ENCRYPTION_REQUIRED forKey:@"EncryptionRequire"];
+    [self.fDefaults setBool:tr_sessionGetEncryptionAllowFallback(self.fHandle) forKey:@"EncryptionAllowFallback"];
 
     //download directory
     NSString* downloadLocation = @(tr_sessionGetDownloadDir(self.fHandle)).stringByStandardizingPath;

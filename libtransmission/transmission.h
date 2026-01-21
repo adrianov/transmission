@@ -454,6 +454,9 @@ void tr_sessionSetCacheLimit_MB(tr_session* session, size_t mbytes);
 tr_encryption_mode tr_sessionGetEncryption(tr_session const* session);
 void tr_sessionSetEncryption(tr_session* session, tr_encryption_mode mode);
 
+bool tr_sessionGetEncryptionAllowFallback(tr_session const* session);
+void tr_sessionSetEncryptionAllowFallback(tr_session* session, bool allow);
+
 // --- Incoming Peer Connections Port
 
 bool tr_sessionIsPortForwardingEnabled(tr_session const* session);

@@ -468,6 +468,14 @@ public:
         return std::size(peers);
     }
 
+    [[nodiscard]] auto encryptedPeerCount() const noexcept
+    {
+        return std::count_if(
+            std::begin(peers),
+            std::end(peers),
+            [](auto const& peer) { return peer->is_encrypted(); });
+    }
+
     void remove_peer(std::shared_ptr<tr_peerMsgs> const& peer)
     {
         auto const lock = unique_lock();
@@ -2984,10 +2992,21 @@ void initiate_connection(tr_peerMgr* mgr, tr_swarm* s, tr_peer_info& peer_info)
     }
     else
     {
+        // Determine encryption mode for this connection
+        auto encryption_mode = session->encryptionMode();
+
+        // If encryption is preferred but fallback is allowed and we have no encrypted peers yet,
+        // allow unencrypted connections to bootstrap the swarm
+        if (encryption_mode == TR_ENCRYPTION_PREFERRED && session->encryptionAllowFallback() &&
+            s->encryptedPeerCount() == 0)
+        {
+            encryption_mode = TR_CLEAR_PREFERRED;
+        }
+
         peer_info.start_handshake(
             &mgr->handshake_mediator_,
             peer_io,
-            session->encryptionMode(),
+            encryption_mode,
             [mgr](tr_handshake::Result const& result) { return on_handshake_done(mgr, result); });
     }
 

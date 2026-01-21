@@ -392,6 +392,18 @@ void tr_sessionSetEncryption(tr_session* session, tr_encryption_mode mode)
     session->settings_.encryption_mode = mode;
 }
 
+bool tr_sessionGetEncryptionAllowFallback(tr_session const* session)
+{
+    TR_ASSERT(session != nullptr);
+    return session->encryptionAllowFallback();
+}
+
+void tr_sessionSetEncryptionAllowFallback(tr_session* session, bool allow)
+{
+    TR_ASSERT(session != nullptr);
+    session->settings_.encryption_allow_fallback = allow;
+}
+
 // ---
 
 void tr_session::onIncomingPeerConnection(tr_socket_t fd, void* vsession)

@@ -336,6 +336,7 @@ static void removeKeRangerRansomware()
 @property(nonatomic) BOOL fSoundPlaying;
 @property(nonatomic) BOOL fWindowMiniaturized;
 @property(nonatomic) NSTimer* fLowPriorityTimer;
+@property(nonatomic) BOOL fUpdatingUI;
 
 @end
 
@@ -2464,46 +2465,65 @@ static NSTimeInterval const kLowPriorityDelay = 15.0;
 
 - (void)updateUI
 {
-    CGFloat dlRate = 0.0, ulRate = 0.0;
-    BOOL anyCompleted = NO;
-    BOOL anyActive = NO;
-
-    [Torrent updateTorrents:self.fTorrents];
-
-    for (Torrent* torrent in self.fTorrents)
+    // Skip if previous update is still in progress
+    if (self.fUpdatingUI)
     {
-        //pull the upload and download speeds - most consistent by using current stats
-        dlRate += torrent.downloadRate;
-        ulRate += torrent.uploadRate;
-
-        anyCompleted |= torrent.finishedSeeding;
-        anyActive |= torrent.active && !torrent.stalled && !torrent.error;
+        return;
     }
+    self.fUpdatingUI = YES;
 
-    PowerManager.shared.shouldPreventSleep = anyActive && [self.fDefaults boolForKey:@"SleepPrevent"];
+    // Capture torrents array for background processing
+    NSArray<Torrent*>* torrents = [self.fTorrents copy];
 
-    if (!NSApp.hidden)
-    {
-        if (self.fWindow.visible)
-        {
-            [self sortTorrentsAndIncludeQueueOrder:NO];
+    // Move the potentially blocking libtransmission call to a background thread
+    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+        // This call may block waiting for session locks - now it won't freeze the UI
+        [Torrent updateTorrents:torrents];
 
-            [self.fStatusBar updateWithDownload:dlRate upload:ulRate];
+        // Process results and update UI on main thread
+        dispatch_async(dispatch_get_main_queue(), ^{
+            CGFloat dlRate = 0.0, ulRate = 0.0;
+            BOOL anyCompleted = NO;
+            BOOL anyActive = NO;
 
-            self.fClearCompletedButton.hidden = !anyCompleted;
-        }
+            for (Torrent* torrent in torrents)
+            {
+                //pull the upload and download speeds - most consistent by using current stats
+                dlRate += torrent.downloadRate;
+                ulRate += torrent.uploadRate;
 
-        //update non-constant parts of info window
-        if (self.fInfoController.window.visible)
-        {
-            [self.fInfoController updateInfoStats];
-        }
+                anyCompleted |= torrent.finishedSeeding;
+                anyActive |= torrent.active && !torrent.stalled && !torrent.error;
+            }
 
-        [self.fTableView reloadVisibleRows];
-    }
+            PowerManager.shared.shouldPreventSleep = anyActive && [self.fDefaults boolForKey:@"SleepPrevent"];
 
-    //badge dock
-    [self.fBadger updateBadgeWithDownload:dlRate upload:ulRate];
+            if (!NSApp.hidden)
+            {
+                if (self.fWindow.visible)
+                {
+                    [self sortTorrentsAndIncludeQueueOrder:NO];
+
+                    [self.fStatusBar updateWithDownload:dlRate upload:ulRate];
+
+                    self.fClearCompletedButton.hidden = !anyCompleted;
+                }
+
+                //update non-constant parts of info window
+                if (self.fInfoController.window.visible)
+                {
+                    [self.fInfoController updateInfoStats];
+                }
+
+                [self.fTableView reloadVisibleRows];
+            }
+
+            //badge dock
+            [self.fBadger updateBadgeWithDownload:dlRate upload:ulRate];
+
+            self.fUpdatingUI = NO;
+        });
+    });
 }
 
 #warning can this be removed or refined?
@@ -5541,11 +5561,19 @@ static NSTimeInterval const kLowPriorityDelay = 15.0;
 {
     NSString* encodedQuery = [query stringByAddingPercentEncodingWithAllowedCharacters:NSCharacterSet.URLQueryAllowedCharacterSet];
 
-    NSString* kinozalUrl = [NSString stringWithFormat:@"https://kinozal.tv/browse.php?s=%@&t=1", encodedQuery];
-    [NSWorkspace.sharedWorkspace openURL:[NSURL URLWithString:kinozalUrl]];
+    NSArray<NSURL*>* urls = @[
+        [NSURL URLWithString:[NSString stringWithFormat:@"https://kinozal.tv/browse.php?s=%@&t=1", encodedQuery]],
+        [NSURL URLWithString:[NSString stringWithFormat:@"https://rutracker.org/forum/tracker.php?nm=%@&o=10", encodedQuery]]
+    ];
 
-    NSString* rutrackerUrl = [NSString stringWithFormat:@"https://rutracker.org/forum/tracker.php?nm=%@&o=10", encodedQuery];
-    [NSWorkspace.sharedWorkspace openURL:[NSURL URLWithString:rutrackerUrl]];
+    // Modern NSWorkspace API to open multiple URLs at once
+    NSWorkspaceOpenConfiguration* configuration = [NSWorkspaceOpenConfiguration configuration];
+    configuration.activates = YES;
+
+    for (NSURL* url in urls)
+    {
+        [NSWorkspace.sharedWorkspace openURL:url configuration:configuration completionHandler:nil];
+    }
 }
 
 - (void)rpcCallback:(tr_rpc_callback_type)type forTorrentStruct:(struct tr_torrent*)torrentStruct

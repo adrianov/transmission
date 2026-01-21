@@ -166,6 +166,7 @@ auto constexpr MyStatic = std::array<std::string_view, TR_N_KEYS>{
     "edit_date"sv, // rpc
     "encoding"sv, // .torrent
     "encryption"sv, // daemon, rpc, tr_session::Settings
+    "encryption-allow-fallback"sv, // tr_session::Settings - allow unencrypted when no encrypted peers
     "end_piece"sv, // rpc
     "error"sv, // rpc
     "errorString"sv, // rpc

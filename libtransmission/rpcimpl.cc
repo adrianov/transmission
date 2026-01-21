@@ -2280,6 +2280,17 @@ using SessionAccessors = std::pair<SessionGetter, SessionSetter>;
         });
 
     map.try_emplace(
+        TR_KEY_encryption_allow_fallback,
+        [](tr_session const& src) -> tr_variant { return tr_sessionGetEncryptionAllowFallback(&src); },
+        [](tr_session& tgt, tr_variant const& src, ErrorInfo& /*err*/)
+        {
+            if (auto const val = src.value_if<bool>())
+            {
+                tr_sessionSetEncryptionAllowFallback(&tgt, *val);
+            }
+        });
+
+    map.try_emplace(
         TR_KEY_idle_seeding_limit,
         [](tr_session const& src) -> tr_variant { return src.idleLimitMinutes(); },
         [](tr_session& tgt, tr_variant const& src, ErrorInfo& /*err*/)

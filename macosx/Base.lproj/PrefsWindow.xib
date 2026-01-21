@@ -1829,6 +1829,18 @@
                                 <binding destination="365" name="value" keyPath="values.EncryptionRequire" id="1466"/>
                             </connections>
                         </button>
+                        <button verticalHuggingPriority="1000" horizontalCompressionResistancePriority="1000" translatesAutoresizingMaskIntoConstraints="NO" id="encFallback">
+                            <rect key="frame" x="144" y="108" width="280" height="18"/>
+                            <buttonCell key="cell" type="check" title="Allow unencrypted if no encrypted peers yet" bezelStyle="regularSquare" imagePosition="left" alignment="left" inset="2" id="encFallbackCell">
+                                <behavior key="behavior" changeContents="YES" doesNotDimImage="YES" lightByContents="YES"/>
+                                <font key="font" metaFont="system"/>
+                            </buttonCell>
+                            <connections>
+                                <action selector="setEncryptionMode:" target="-2" id="encFallbackAction"/>
+                                <binding destination="365" name="enabled" keyPath="values.EncryptionRequire" id="encFallbackEnabled"/>
+                                <binding destination="365" name="value" keyPath="values.EncryptionAllowFallback" id="encFallbackValue"/>
+                            </connections>
+                        </button>
                         <textField focusRingType="none" verticalHuggingPriority="750" horizontalCompressionResistancePriority="1000" allowsCharacterPickerTouchBarItem="YES" translatesAutoresizingMaskIntoConstraints="NO" id="1428">
                             <rect key="frame" x="417" y="276" width="39" height="16"/>
                             <textFieldCell key="cell" sendsActionOnEndEditing="YES" alignment="left" title="peers" id="1446">
