@@ -470,10 +470,7 @@ public:
 
     [[nodiscard]] auto encryptedPeerCount() const noexcept
     {
-        return std::count_if(
-            std::begin(peers),
-            std::end(peers),
-            [](auto const& peer) { return peer->is_encrypted(); });
+        return std::count_if(std::begin(peers), std::end(peers), [](auto const& peer) { return peer->is_encrypted(); });
     }
 
     void remove_peer(std::shared_ptr<tr_peerMsgs> const& peer)
@@ -2997,8 +2994,7 @@ void initiate_connection(tr_peerMgr* mgr, tr_swarm* s, tr_peer_info& peer_info)
 
         // If encryption is preferred but fallback is allowed and we have no encrypted peers yet,
         // allow unencrypted connections to bootstrap the swarm
-        if (encryption_mode == TR_ENCRYPTION_PREFERRED && session->encryptionAllowFallback() &&
-            s->encryptedPeerCount() == 0)
+        if (encryption_mode == TR_ENCRYPTION_PREFERRED && session->encryptionAllowFallback() && s->encryptedPeerCount() == 0)
         {
             encryption_mode = TR_CLEAR_PREFERRED;
         }
