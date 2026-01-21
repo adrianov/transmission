@@ -3,7 +3,6 @@
 // License text can be found in the licenses/ folder.
 
 #import "TorrentCell.h"
-#import "FlowLayoutView.h"
 #import "PlayButton.h"
 #import "ProgressBarView.h"
 #import "ProgressGradients.h"
@@ -54,31 +53,29 @@
     [super setBackgroundStyle:backgroundStyle];
 
     // Update play button colors based on selection
-    if (self.fPlayButtonsView && [self.fPlayButtonsView isKindOfClass:[FlowLayoutView class]])
+    if (self.fPlayButtonsView)
     {
         BOOL isSelected = (backgroundStyle == NSBackgroundStyleEmphasized);
         NSColor* textColor = isSelected ? NSColor.whiteColor : NSColor.secondaryLabelColor;
-        NSFont* buttonFont = [NSFont systemFontOfSize:11];
 
-        for (NSView* view in [(FlowLayoutView*)self.fPlayButtonsView arrangedSubviews])
+        for (NSView* subview in self.fPlayButtonsView.subviews)
         {
-            if ([view isKindOfClass:[PlayButton class]])
+            if ([subview isKindOfClass:[PlayButton class]])
             {
-                PlayButton* button = (PlayButton*)view;
-                // Keep button cell in normal style to prevent background change
-                button.cell.backgroundStyle = NSBackgroundStyleNormal;
-
-                // Update text color for contrast
-                NSString* title = button.title;
+                PlayButton* button = (PlayButton*)subview;
+                NSString* title = button.title ?: @"";
                 NSMutableAttributedString* attrTitle = [[NSMutableAttributedString alloc] initWithString:title];
                 [attrTitle addAttribute:NSForegroundColorAttributeName value:textColor range:NSMakeRange(0, title.length)];
-                [attrTitle addAttribute:NSFontAttributeName value:buttonFont range:NSMakeRange(0, title.length)];
+                [attrTitle addAttribute:NSFontAttributeName value:[NSFont systemFontOfSize:11] range:NSMakeRange(0, title.length)];
                 button.attributedTitle = attrTitle;
+                if (button.cell)
+                {
+                    button.cell.backgroundStyle = NSBackgroundStyleNormal;
+                }
             }
-            else if ([view isKindOfClass:[NSTextField class]])
+            else if ([subview isKindOfClass:[NSTextField class]])
             {
-                // Season labels
-                ((NSTextField*)view).textColor = textColor;
+                ((NSTextField*)subview).textColor = textColor;
             }
         }
     }

@@ -37,4 +37,6 @@
 
 @property(nonatomic) TorrentTableView* fTorrentTableView;
 
+- (void)configureCollectionView;
+
 @end
