@@ -5274,70 +5274,87 @@ static NSTimeInterval const kLowPriorityDelay = 15.0;
 
 - (void)setWindowSizeToFit
 {
-    if (!self.isFullScreen)
+    if (self.isFullScreen)
     {
+        return;
+    }
+
+    if (![self.fDefaults boolForKey:@"AutoSize"])
+    {
+        // Manual resize mode - just ensure minimum height constraint
         NSScrollView* scrollView = self.fTableView.enclosingScrollView;
-
-        scrollView.hasVerticalScroller = NO;
-
         [self removeHeightConstraints];
-
-        if (![self.fDefaults boolForKey:@"AutoSize"])
+        
+        CGFloat height = self.minScrollViewHeightAllowed;
+        if (self.fMinHeightConstraint == nil)
         {
-            // Only set a minimum height constraint
-            CGFloat height = self.minScrollViewHeightAllowed;
-            if (self.fMinHeightConstraint == nil)
-            {
-                self.fMinHeightConstraint = [scrollView.heightAnchor constraintGreaterThanOrEqualToConstant:height];
-            }
-            else
-            {
-                self.fMinHeightConstraint.constant = height;
-            }
-
-            self.fMinHeightConstraint.active = YES;
+            self.fMinHeightConstraint = [scrollView.heightAnchor constraintGreaterThanOrEqualToConstant:height];
         }
         else
         {
-            // Set a fixed height constraint
-            CGFloat height = [self calculateScrollViewHeightWithDockAdjustment];
-            if (self.fFixedHeightConstraint == nil)
-            {
-                self.fFixedHeightConstraint = [scrollView.heightAnchor constraintEqualToConstant:height];
-            }
-            else
-            {
-                self.fFixedHeightConstraint.constant = height;
-            }
-
-            // Redraw table to avoid empty cells
-            [self.fTableView reloadData];
-
-            self.fFixedHeightConstraint.active = YES;
+            self.fMinHeightConstraint.constant = height;
         }
-
-        scrollView.hasVerticalScroller = YES;
+        self.fMinHeightConstraint.active = YES;
+        return;
     }
-    else
+
+    // AutoSize mode - calculate content height
+    // Get actual table content height from last row rect
+    NSInteger rowCount = self.fTableView.numberOfRows;
+    CGFloat tableContentHeight = 0;
+    
+    if (rowCount > 0)
     {
-        [self removeHeightConstraints];
+        NSRect lastRowRect = [self.fTableView rectOfRow:rowCount - 1];
+        tableContentHeight = NSMaxY(lastRowRect);
     }
-}
+    tableContentHeight = MAX(tableContentHeight, self.minScrollViewHeightAllowed);
+    
+    // Get current content view height and scroll view height to find non-scroll components
+    NSScrollView* scrollView = self.fTableView.enclosingScrollView;
+    CGFloat currentContentHeight = self.fWindow.contentView.frame.size.height;
+    CGFloat currentScrollViewHeight = scrollView.frame.size.height;
+    CGFloat otherComponentsHeight = currentContentHeight - currentScrollViewHeight;
+    
+    // Total content = table content + other UI components (status bar, filter bar, bottom bar)
+    CGFloat contentHeight = tableContentHeight + otherComponentsHeight;
 
-- (CGFloat)calculateScrollViewHeightWithDockAdjustment
-{
-    CGFloat height = self.scrollViewHeight;
+    // 3. Build new window frame (keep window top fixed)
+    NSRect contentRect = NSMakeRect(0, 0, self.fWindow.contentView.frame.size.width, contentHeight);
+    NSRect newFrame = [self.fWindow frameRectForContentRect:contentRect];
 
-    // Get the main screen's visible frame
+    NSRect oldFrame = self.fWindow.frame;
+    newFrame.origin.x = oldFrame.origin.x;
+    newFrame.origin.y = NSMaxY(oldFrame) - newFrame.size.height; // Keep top fixed
+
+    // 4. Constrain to screen bounds
     NSScreen* screen = self.fWindow.screen;
     if (screen)
     {
-        // This frame respects the Dock and menu bar
         NSRect visibleFrame = screen.visibleFrame;
-        height = MIN(height, visibleFrame.size.height - [self toolbarHeight] - [self mainWindowComponentHeight]);
+        
+        // If window goes below screen bottom, move it up
+        if (NSMinY(newFrame) < NSMinY(visibleFrame))
+        {
+            newFrame.origin.y = NSMinY(visibleFrame);
+        }
+        
+        // If window goes above screen top, shrink from bottom
+        if (NSMaxY(newFrame) > NSMaxY(visibleFrame))
+        {
+            newFrame.origin.y = NSMaxY(visibleFrame) - newFrame.size.height;
+            
+            // If still below screen, clamp height
+            if (NSMinY(newFrame) < NSMinY(visibleFrame))
+            {
+                newFrame.origin.y = NSMinY(visibleFrame);
+                newFrame.size.height = visibleFrame.size.height;
+            }
+        }
     }
 
-    return height;
+    // 5. Set frame
+    [self.fWindow setFrame:newFrame display:YES animate:NO];
 }
 
 - (void)updateForAutoSize
@@ -5422,50 +5439,10 @@ static NSTimeInterval const kLowPriorityDelay = 15.0;
     return height;
 }
 
+// Note: This method is only used by non-AutoSize mode now
 - (CGFloat)scrollViewHeight
 {
-    CGFloat height;
-    CGFloat minHeight = self.minScrollViewHeightAllowed;
-
-    if ([self.fDefaults boolForKey:@"AutoSize"])
-    {
-        NSUInteger groups = ![self.fDisplayedTorrents.firstObject isKindOfClass:[Torrent class]] ? self.fDisplayedTorrents.count : 0;
-
-        height = (kGroupSeparatorHeight + self.fTableView.intercellSpacing.height) * groups +
-            (self.fTableView.rowHeight + self.fTableView.intercellSpacing.height) * (self.fTableView.numberOfRows - groups);
-
-        //account for group padding...
-        if (groups > 1)
-        {
-            height += (groups - 1) * 20;
-        }
-    }
-    else
-    {
-        height = NSHeight(self.fTableView.enclosingScrollView.frame);
-    }
-
-    //make sure we don't go bigger than the screen height
-    NSScreen* screen = self.fWindow.screen;
-    if (screen)
-    {
-        NSSize maxSize = screen.visibleFrame.size;
-        maxSize.height -= self.toolbarHeight;
-        maxSize.height -= self.mainWindowComponentHeight;
-
-        if (height > maxSize.height)
-        {
-            height = maxSize.height;
-        }
-    }
-
-    //make sure we don't have zero height
-    if (height < minHeight)
-    {
-        height = minHeight;
-    }
-
-    return height;
+    return NSHeight(self.fTableView.enclosingScrollView.frame);
 }
 
 - (BOOL)isFullScreen

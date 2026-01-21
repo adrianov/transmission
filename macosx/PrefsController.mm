@@ -298,11 +298,6 @@ static NSString* const kWebUIURLFormat = @"http://localhost:%ld/";
     //set fRPCWhitelistTable column width to table width
     [self.fRPCWhitelistTable sizeToFit];
 
-    //set proxy URL - create UI dynamically if not connected via XIB
-    if (!self.fProxyURLField)
-    {
-        [self setupProxyURLField];
-    }
     // Load proxy URL from settings.json
     NSString* configDir = [NSString stringWithUTF8String:tr_getDefaultConfigDir("Transmission").c_str()];
     NSString* settingsPath = [configDir stringByAppendingPathComponent:@"settings.json"];
@@ -320,105 +315,6 @@ static NSString* const kWebUIURLFormat = @"http://localhost:%ld/";
             }
         }
     }
-}
-
-- (void)setupProxyURLField
-{
-    // Find the inner content view, help button, and "System sleep:" label
-    NSView* innerContentView = nil;
-    NSButton* helpButton = nil;
-    NSTextField* systemSleepLabel = nil;
-
-    for (NSView* subview in self.fNetworkView.subviews)
-    {
-        if ([subview isKindOfClass:[NSButton class]])
-        {
-            NSButton* btn = (NSButton*)subview;
-            if (btn.bezelStyle == NSBezelStyleHelpButton)
-            {
-                helpButton = btn;
-            }
-        }
-        else if (subview.subviews.count > 5)
-        {
-            innerContentView = subview;
-            // Find "System sleep:" label inside inner content view
-            for (NSView* innerSubview in subview.subviews)
-            {
-                if ([innerSubview isKindOfClass:[NSTextField class]])
-                {
-                    NSTextField* tf = (NSTextField*)innerSubview;
-                    if ([tf.stringValue isEqualToString:@"System sleep:"])
-                    {
-                        systemSleepLabel = tf;
-                    }
-                }
-            }
-        }
-    }
-
-    if (!innerContentView || !systemSleepLabel)
-    {
-        return;
-    }
-
-    // Create proxy URL label
-    NSTextField* proxyLabel = [NSTextField labelWithString:NSLocalizedString(@"Proxy URL:", "Preferences -> Network -> proxy label")];
-    proxyLabel.alignment = NSTextAlignmentRight;
-    proxyLabel.font = [NSFont systemFontOfSize:[NSFont systemFontSize]];
-    proxyLabel.translatesAutoresizingMaskIntoConstraints = NO;
-    [self.fNetworkView addSubview:proxyLabel];
-
-    // Create proxy URL text field
-    self.fProxyURLField = [[NSTextField alloc] initWithFrame:NSMakeRect(0, 0, 250, 21)];
-    NSTextFieldCell* cell = self.fProxyURLField.cell;
-    cell.scrollable = YES;
-    cell.lineBreakMode = NSLineBreakByClipping;
-    cell.selectable = YES;
-    cell.editable = YES;
-    cell.sendsActionOnEndEditing = YES;
-    cell.bordered = YES;
-    cell.bezeled = YES;
-    cell.bezelStyle = NSTextFieldSquareBezel;
-    cell.drawsBackground = YES;
-    cell.backgroundColor = NSColor.textBackgroundColor;
-    cell.textColor = NSColor.controlTextColor;
-    cell.font = [NSFont systemFontOfSize:[NSFont systemFontSize]];
-    cell.placeholderString = @"socks5://127.0.0.1:1080";
-
-    self.fProxyURLField.translatesAutoresizingMaskIntoConstraints = NO;
-    self.fProxyURLField.target = self;
-    self.fProxyURLField.action = @selector(setProxyURL:);
-    [self.fNetworkView addSubview:self.fProxyURLField];
-
-    // Position below the inner content view, aligned with "System sleep:" label
-    // systemSleepLabel.trailing is relative to innerContentView, so we need to match that
-    CGFloat labelRightEdgeInNetworkView = innerContentView.frame.origin.x + systemSleepLabel.frame.origin.x +
-        systemSleepLabel.frame.size.width;
-
-    [NSLayoutConstraint activateConstraints:@[
-        // Label aligned with "System sleep:" label's right edge
-        [proxyLabel.trailingAnchor constraintEqualToAnchor:self.fNetworkView.leadingAnchor constant:labelRightEdgeInNetworkView],
-        [proxyLabel.topAnchor constraintEqualToAnchor:innerContentView.bottomAnchor constant:12],
-
-        // Text field next to label (same spacing as other fields)
-        [self.fProxyURLField.leadingAnchor constraintEqualToAnchor:proxyLabel.trailingAnchor constant:6],
-        [self.fProxyURLField.centerYAnchor constraintEqualToAnchor:proxyLabel.centerYAnchor],
-        [self.fProxyURLField.widthAnchor constraintEqualToConstant:300],
-        [self.fProxyURLField.heightAnchor constraintEqualToConstant:21],
-    ]];
-
-    // Move help button down and increase Network view height
-    if (helpButton)
-    {
-        NSRect helpFrame = helpButton.frame;
-        helpFrame.origin.y -= 35;
-        helpButton.frame = helpFrame;
-    }
-
-    NSRect frame = self.fNetworkView.frame;
-    frame.size.height += 35;
-    self.fNetworkView.frame = frame;
 }
 
 - (NSToolbarItem*)toolbar:(NSToolbar*)toolbar itemForItemIdentifier:(NSString*)ident willBeInsertedIntoToolbar:(BOOL)flag

@@ -21,6 +21,8 @@
                 <outlet property="fPiecesControl" destination="8" id="73"/>
                 <outlet property="fPiecesView" destination="19" id="74"/>
                 <outlet property="fProgressField" destination="6" id="63"/>
+                <outlet property="fConsecutiveProgressField" destination="cns-fld" id="cns-out1"/>
+                <outlet property="fConsecutiveProgressLabel" destination="cns-lb" id="cns-out2"/>
                 <outlet property="fRatioField" destination="24" id="68"/>
                 <outlet property="fSeedTimeField" destination="80" id="98"/>
                 <outlet property="fStateField" destination="20" id="62"/>
@@ -192,6 +194,22 @@
                                         <color key="backgroundColor" name="controlColor" catalog="System" colorSpace="catalog"/>
                                     </textFieldCell>
                                 </textField>
+                                <textField verticalHuggingPriority="1000" horizontalCompressionResistancePriority="1000" verticalCompressionResistancePriority="1000" allowsCharacterPickerTouchBarItem="YES" preferredMaxLayoutWidth="0.0" translatesAutoresizingMaskIntoConstraints="NO" id="cns-lb">
+                                    <rect key="frame" x="-2" y="152" width="73" height="14"/>
+                                    <textFieldCell key="cell" sendsActionOnEndEditing="YES" alignment="right" title="Consecutive:" id="cns-lc">
+                                        <font key="font" metaFont="smallSystem"/>
+                                        <color key="textColor" name="controlTextColor" catalog="System" colorSpace="catalog"/>
+                                        <color key="backgroundColor" name="controlColor" catalog="System" colorSpace="catalog"/>
+                                    </textFieldCell>
+                                </textField>
+                                <textField horizontalHuggingPriority="249" verticalHuggingPriority="750" horizontalCompressionResistancePriority="1000" allowsCharacterPickerTouchBarItem="YES" preferredMaxLayoutWidth="0.0" translatesAutoresizingMaskIntoConstraints="NO" id="cns-fld" customClass="InfoTextField">
+                                    <rect key="frame" x="75" y="152" width="23" height="14"/>
+                                    <textFieldCell key="cell" lineBreakMode="truncatingTail" sendsActionOnEndEditing="YES" placeholderString="N/A" id="cns-fc">
+                                        <font key="font" metaFont="smallSystem"/>
+                                        <color key="textColor" name="controlTextColor" catalog="System" colorSpace="catalog"/>
+                                        <color key="backgroundColor" name="controlColor" catalog="System" colorSpace="catalog"/>
+                                    </textFieldCell>
+                                </textField>
                                 <scrollView horizontalHuggingPriority="249" verticalHuggingPriority="1000" horizontalCompressionResistancePriority="1000" verticalCompressionResistancePriority="1000" horizontalLineScroll="10" horizontalPageScroll="10" verticalLineScroll="10" verticalPageScroll="10" hasHorizontalScroller="NO" usesPredominantAxisScrolling="NO" translatesAutoresizingMaskIntoConstraints="NO" id="3">
                                     <rect key="frame" x="77" y="12" width="257" height="58"/>
                                     <clipView key="contentView" drawsBackground="NO" id="5oS-8e-S2G">
@@ -273,16 +291,21 @@
                                 <constraint firstItem="18" firstAttribute="leading" secondItem="Vhd-qH-kFK" secondAttribute="leading" id="lIw-C6-37q"/>
                                 <constraint firstItem="22" firstAttribute="leading" secondItem="20" secondAttribute="leading" id="qEp-oT-lvl"/>
                                 <constraint firstItem="11" firstAttribute="top" secondItem="Vhd-qH-kFK" secondAttribute="top" id="qJC-LH-Ja3"/>
-                                <constraint firstAttribute="height" constant="198" id="qul-ec-RYB"/>
+                                <constraint firstAttribute="height" constant="214" id="qul-ec-RYB"/>
                                 <constraint firstItem="29" firstAttribute="trailing" secondItem="21" secondAttribute="trailing" id="rCV-0c-u3g"/>
                                 <constraint firstItem="29" firstAttribute="top" secondItem="23" secondAttribute="bottom" constant="2" id="rXV-7x-Lp4"/>
                                 <constraint firstItem="20" firstAttribute="leading" secondItem="21" secondAttribute="trailing" constant="8" symbolic="YES" id="t6g-E7-H8Z"/>
                                 <constraint firstItem="5" firstAttribute="top" secondItem="27" secondAttribute="bottom" constant="2" id="u0m-Dv-H7X"/>
-                                <constraint firstItem="23" firstAttribute="top" secondItem="7" secondAttribute="bottom" constant="2" id="ufZ-N4-aoT"/>
+                                <constraint firstItem="cns-lb" firstAttribute="top" secondItem="7" secondAttribute="bottom" constant="2" id="cns-c1"/>
+                                <constraint firstItem="23" firstAttribute="top" secondItem="cns-lb" secondAttribute="bottom" constant="2" id="ufZ-N4-aoT"/>
                                 <constraint firstItem="24" firstAttribute="leading" secondItem="20" secondAttribute="leading" id="vPm-MD-TXW"/>
                                 <constraint firstItem="23" firstAttribute="width" secondItem="21" secondAttribute="width" id="xu9-sy-zHq"/>
                                 <constraint firstItem="8" firstAttribute="trailing" secondItem="19" secondAttribute="trailing" id="yUh-hM-Eyy"/>
                                 <constraint firstItem="25" firstAttribute="top" secondItem="5" secondAttribute="bottom" constant="2" id="zr8-ni-Jdk"/>
+                                <constraint firstItem="cns-lb" firstAttribute="width" secondItem="21" secondAttribute="width" id="cns-c2"/>
+                                <constraint firstItem="cns-lb" firstAttribute="trailing" secondItem="21" secondAttribute="trailing" id="cns-c3"/>
+                                <constraint firstItem="cns-fld" firstAttribute="leading" secondItem="20" secondAttribute="leading" id="cns-c4"/>
+                                <constraint firstItem="cns-fld" firstAttribute="centerY" secondItem="cns-lb" secondAttribute="centerY" id="cns-c5"/>
                             </constraints>
                         </customView>
                         <customView horizontalHuggingPriority="1000" verticalHuggingPriority="1000" horizontalCompressionResistancePriority="1000" translatesAutoresizingMaskIntoConstraints="NO" id="WMr-Dh-mdg">

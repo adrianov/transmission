@@ -143,6 +143,7 @@ extern NSString* const kTorrentDidChangeGroupNotification;
 @property(nonatomic, readonly) CGFloat progress;
 @property(nonatomic, readonly) CGFloat progressDone;
 @property(nonatomic, readonly) CGFloat progressLeft;
+@property(nonatomic, readonly) CGFloat consecutiveProgress;
 @property(nonatomic, readonly) CGFloat checkingProgress;
 
 @property(nonatomic, readonly) CGFloat availableDesired;

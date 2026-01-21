@@ -30,6 +30,8 @@ static CGFloat const kStackViewVerticalSpacing = 8.0;
 @property(nonatomic) IBOutlet NSTextField* fDateActivityField;
 @property(nonatomic) IBOutlet NSTextField* fStateField;
 @property(nonatomic) IBOutlet NSTextField* fProgressField;
+@property(nonatomic) IBOutlet NSTextField* fConsecutiveProgressField;
+@property(nonatomic) IBOutlet NSTextField* fConsecutiveProgressLabel;
 @property(nonatomic) IBOutlet NSTextField* fHaveField;
 @property(nonatomic) IBOutlet NSTextField* fDownloadedTotalField;
 @property(nonatomic) IBOutlet NSTextField* fUploadedTotalField;
@@ -224,6 +226,20 @@ static CGFloat const kStackViewVerticalSpacing = 8.0;
         }
         self.fProgressField.stringValue = progressString;
 
+        // Show consecutive progress if different from regular progress
+        CGFloat consecutiveProgress = torrent.consecutiveProgress;
+        if (consecutiveProgress < torrent.progress - 0.001)
+        {
+            self.fConsecutiveProgressField.stringValue = [NSString percentString:consecutiveProgress longDecimals:YES];
+            self.fConsecutiveProgressField.hidden = NO;
+            self.fConsecutiveProgressLabel.hidden = NO;
+        }
+        else
+        {
+            self.fConsecutiveProgressField.hidden = YES;
+            self.fConsecutiveProgressLabel.hidden = YES;
+        }
+
         self.fRatioField.stringValue = [NSString stringForRatio:torrent.ratio];
 
         NSString* errorMessage = torrent.errorMessage;
@@ -296,6 +312,9 @@ static CGFloat const kStackViewVerticalSpacing = 8.0;
 
         self.fStateField.stringValue = @"";
         self.fProgressField.stringValue = @"";
+        self.fConsecutiveProgressField.stringValue = @"";
+        self.fConsecutiveProgressField.hidden = YES;
+        self.fConsecutiveProgressLabel.hidden = YES;
 
         self.fErrorMessageView.string = @"";
 

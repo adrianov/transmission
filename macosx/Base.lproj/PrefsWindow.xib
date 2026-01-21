@@ -26,6 +26,7 @@
                 <outlet property="fImportFolderPopUp" destination="216" id="225"/>
                 <outlet property="fIncompleteFolderPopUp" destination="538" id="551"/>
                 <outlet property="fNatCheck" destination="332" id="333"/>
+                <outlet property="fProxyURLField" destination="prx-fld" id="prx-out"/>
                 <outlet property="fNetworkView" destination="66" id="1469"/>
                 <outlet property="fPeersGlobalField" destination="1426" id="1470"/>
                 <outlet property="fPeersTorrentField" destination="1429" id="1471"/>
@@ -2136,11 +2137,11 @@
             <point key="canvasLocation" x="114" y="1005.5"/>
         </customView>
         <customView id="66" userLabel="Network">
-            <rect key="frame" x="0.0" y="0.0" width="637" height="219"/>
+            <rect key="frame" x="0.0" y="0.0" width="637" height="247"/>
             <autoresizingMask key="autoresizingMask"/>
             <subviews>
                 <customView translatesAutoresizingMaskIntoConstraints="NO" id="CZ6-Q4-MLF">
-                    <rect key="frame" x="40" y="40" width="557" height="159"/>
+                    <rect key="frame" x="40" y="40" width="557" height="187"/>
                     <subviews>
                         <button verticalHuggingPriority="750" translatesAutoresizingMaskIntoConstraints="NO" id="1891">
                             <rect key="frame" x="336" y="69" width="101" height="32"/>
@@ -2241,12 +2242,34 @@
                             </connections>
                         </button>
                         <textField focusRingType="none" verticalHuggingPriority="750" horizontalCompressionResistancePriority="1000" allowsCharacterPickerTouchBarItem="YES" translatesAutoresizingMaskIntoConstraints="NO" id="665">
-                            <rect key="frame" x="18" y="0.0" width="132" height="16"/>
+                            <rect key="frame" x="18" y="22" width="132" height="16"/>
                             <textFieldCell key="cell" sendsActionOnEndEditing="YES" alignment="right" title="System sleep:" usesSingleLineMode="YES" id="1255">
                                 <font key="font" metaFont="system"/>
                                 <color key="textColor" name="controlTextColor" catalog="System" colorSpace="catalog"/>
                                 <color key="backgroundColor" name="controlColor" catalog="System" colorSpace="catalog"/>
                             </textFieldCell>
+                        </textField>
+                        <textField focusRingType="none" verticalHuggingPriority="750" horizontalCompressionResistancePriority="1000" allowsCharacterPickerTouchBarItem="YES" translatesAutoresizingMaskIntoConstraints="NO" id="prx-lb">
+                            <rect key="frame" x="18" y="0.0" width="132" height="16"/>
+                            <textFieldCell key="cell" sendsActionOnEndEditing="YES" alignment="right" title="Proxy URL:" usesSingleLineMode="YES" id="prx-lc">
+                                <font key="font" metaFont="system"/>
+                                <color key="textColor" name="controlTextColor" catalog="System" colorSpace="catalog"/>
+                                <color key="backgroundColor" name="controlColor" catalog="System" colorSpace="catalog"/>
+                            </textFieldCell>
+                        </textField>
+                        <textField focusRingType="none" verticalHuggingPriority="750" allowsCharacterPickerTouchBarItem="YES" translatesAutoresizingMaskIntoConstraints="NO" id="prx-fld">
+                            <rect key="frame" x="154" y="0.0" width="300" height="21"/>
+                            <constraints>
+                                <constraint firstAttribute="width" constant="300" id="prx-wd"/>
+                            </constraints>
+                            <textFieldCell key="cell" scrollable="YES" lineBreakMode="clipping" selectable="YES" editable="YES" sendsActionOnEndEditing="YES" borderStyle="bezel" placeholderString="socks5://127.0.0.1:1080" drawsBackground="YES" id="prx-fc">
+                                <font key="font" metaFont="system"/>
+                                <color key="textColor" name="controlTextColor" catalog="System" colorSpace="catalog"/>
+                                <color key="backgroundColor" name="textBackgroundColor" catalog="System" colorSpace="catalog"/>
+                            </textFieldCell>
+                            <connections>
+                                <action selector="setProxyURL:" target="-2" id="prx-act"/>
+                            </connections>
                         </textField>
                         <button verticalHuggingPriority="1000" translatesAutoresizingMaskIntoConstraints="NO" id="2077">
                             <rect key="frame" x="152" y="142" width="259" height="18"/>
@@ -2274,7 +2297,7 @@
                         <constraint firstAttribute="trailing" relation="greaterThanOrEqual" secondItem="357" secondAttribute="trailing" constant="20" symbolic="YES" id="FtE-7d-frf"/>
                         <constraint firstItem="2077" firstAttribute="leading" secondItem="660" secondAttribute="trailing" constant="6" id="HMn-GA-Sra"/>
                         <constraint firstAttribute="trailing" relation="greaterThanOrEqual" secondItem="1891" secondAttribute="trailing" constant="20" symbolic="YES" id="KPE-O0-Roh"/>
-                        <constraint firstAttribute="bottom" secondItem="664" secondAttribute="bottom" id="KSx-05-hEE"/>
+                        <constraint firstItem="664" firstAttribute="bottom" secondItem="prx-lb" secondAttribute="top" constant="-6" id="KSx-05-hEE"/>
                         <constraint firstItem="68" firstAttribute="top" secondItem="2077" secondAttribute="bottom" constant="21" id="L6f-61-wa6"/>
                         <constraint firstItem="664" firstAttribute="top" secondItem="336" secondAttribute="bottom" constant="20" id="Laz-l8-h0f"/>
                         <constraint firstItem="332" firstAttribute="leading" secondItem="2077" secondAttribute="leading" id="NCj-3Q-kBP"/>
@@ -2301,6 +2324,12 @@
                         <constraint firstItem="354" firstAttribute="centerX" secondItem="353" secondAttribute="centerX" id="saB-pe-8lR"/>
                         <constraint firstItem="660" firstAttribute="top" secondItem="CZ6-Q4-MLF" secondAttribute="top" id="v05-Z8-iS7"/>
                         <constraint firstItem="2081" firstAttribute="trailing" secondItem="660" secondAttribute="trailing" id="vXK-Q9-wXT"/>
+                        <constraint firstItem="prx-lb" firstAttribute="width" secondItem="660" secondAttribute="width" id="prx-c1"/>
+                        <constraint firstItem="prx-lb" firstAttribute="trailing" secondItem="660" secondAttribute="trailing" id="prx-c2"/>
+                        <constraint firstItem="prx-lb" firstAttribute="top" secondItem="665" secondAttribute="bottom" constant="6" id="prx-c3"/>
+                        <constraint firstItem="prx-fld" firstAttribute="leading" secondItem="2077" secondAttribute="leading" id="prx-c4"/>
+                        <constraint firstItem="prx-fld" firstAttribute="centerY" secondItem="prx-lb" secondAttribute="centerY" id="prx-c5"/>
+                        <constraint firstAttribute="bottom" secondItem="prx-fld" secondAttribute="bottom" id="prx-c6"/>
                     </constraints>
                 </customView>
                 <button horizontalHuggingPriority="750" verticalHuggingPriority="750" translatesAutoresizingMaskIntoConstraints="NO" id="326">

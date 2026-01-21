@@ -211,7 +211,8 @@ static NSTimeInterval const kToggleProgressSeconds = 0.175;
     return NO;
 }
 
-static CGFloat const kPlayButtonRowHeight = 18.0;
+static CGFloat const kPlayButtonHeight = 16.0;
+static CGFloat const kPlayButtonVerticalPadding = 6.0;
 
 - (CGFloat)outlineView:(NSOutlineView*)outlineView heightOfRowByItem:(id)item
 {
@@ -220,11 +221,11 @@ static CGFloat const kPlayButtonRowHeight = 18.0;
         Torrent* torrent = (Torrent*)item;
         CGFloat height = self.rowHeight;
 
-        // Add extra height for play buttons if torrent has playable media (single row)
+        // Add extra height for play buttons if torrent has playable media
         BOOL const minimal = [self.fDefaults boolForKey:@"SmallView"];
         if (!minimal && torrent.hasPlayableMedia)
         {
-            height += kPlayButtonRowHeight + 4; // Single row of buttons + spacing
+            height += kPlayButtonHeight + kPlayButtonVerticalPadding;
         }
         return height;
     }

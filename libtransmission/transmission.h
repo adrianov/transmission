@@ -1310,6 +1310,14 @@ tr_file_view tr_torrentFile(tr_torrent const* torrent, tr_file_index_t file);
 
 size_t tr_torrentFileCount(tr_torrent const* torrent);
 
+/**
+ * Get the consecutive progress for a file (0.0-1.0).
+ * This represents how much of the file can be played/read from the beginning,
+ * counting only consecutive completed pieces from the file's start.
+ * Useful for media files where playback requires sequential data.
+ */
+float tr_torrentFileConsecutiveProgress(tr_torrent const* torrent, tr_file_index_t file);
+
 /*
  * This view structure is intended for short-term use. Its pointers are owned
  * by the torrent and may be invalidated if the torrent is edited or removed.

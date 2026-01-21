@@ -197,6 +197,16 @@ The heart of Transmission is `libtransmission/`, a C++ library containing all Bi
 **utils/** - Standalone CLI utilities (create, edit, show)  
 **web/** - JavaScript-based web interface
 
+### macOS UI with XIB Files
+
+The macOS client uses XIB (Interface Builder) files for UI layout (`macosx/Base.lproj/*.xib`).
+
+**Guidelines:**
+- When modifying existing windows/views that use XIB, edit the XIB file rather than creating UI programmatically
+- For new windows and components in macOS, prefer XIB-based layout over programmatic creation
+- XIB files can be edited in Xcode Interface Builder or directly as XML
+- See `docs/Editing-XIB-Files.md` for detailed instructions on XIB editing
+
 ### API Boundaries
 
 All client code interfaces with libtransmission through:
@@ -211,7 +221,7 @@ New features must be accessible via both APIs.
 
 1. Search codebase for relevant code
 2. Make changes following code style
-3. Run `./code_style.sh` to format
+3. Format changed C++ files: `clang-format -i <file.cc|file.mm|file.h>`
 4. Build and verify no warnings
 5. Run tests with `ctest`
 6. For GUI changes, consider all three clients (macOS, GTK, Qt)

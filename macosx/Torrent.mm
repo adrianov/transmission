@@ -850,9 +850,8 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
                                                            withTemplate:@" "];
         displayName = [displayName stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet];
 
-        // Get file progress
-        auto const fileInfo = tr_torrentFile(self.fHandle, i);
-        CGFloat progress = (fileInfo.length > 0) ? (CGFloat)fileInfo.have / (CGFloat)fileInfo.length : 1.0;
+        // Get consecutive progress (playable from start)
+        CGFloat progress = tr_torrentFileConsecutiveProgress(self.fHandle, i);
 
         [playable addObject:@{
             @"index" : @(i),
@@ -922,8 +921,8 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
 
 - (CGFloat)fileProgressForIndex:(NSUInteger)index
 {
-    auto const file = tr_torrentFile(self.fHandle, index);
-    return (file.length > 0) ? (CGFloat)file.have / (CGFloat)file.length : 1.0;
+    // Use consecutive progress for playable files (progress from file start)
+    return (CGFloat)tr_torrentFileConsecutiveProgress(self.fHandle, (tr_file_index_t)index);
 }
 
 - (BOOL)hasPlayableMedia
@@ -1339,6 +1338,28 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
 - (CGFloat)progressDone
 {
     return self.fStat->percentDone;
+}
+
+- (CGFloat)consecutiveProgress
+{
+    // Calculate weighted average consecutive progress across all files
+    auto const fileCount = tr_torrentFileCount(self.fHandle);
+    if (fileCount == 0)
+    {
+        return 1.0;
+    }
+
+    CGFloat totalProgress = 0;
+    uint64_t totalSize = 0;
+
+    for (tr_file_index_t i = 0; i < fileCount; ++i)
+    {
+        auto const file = tr_torrentFile(self.fHandle, i);
+        totalProgress += [self fileProgressForIndex:i] * file.length;
+        totalSize += file.length;
+    }
+
+    return (totalSize > 0) ? totalProgress / totalSize : 1.0;
 }
 
 - (CGFloat)progressLeft

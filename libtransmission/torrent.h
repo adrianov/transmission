@@ -1476,6 +1476,21 @@ private:
     // start the torrent after all the startup scaffolding is done,
     // e.g. fetching metadata from peers and/or verifying the torrent
     bool start_when_stable_ = false;
+
+    // Cached consecutive progress per file (playable progress from start)
+    // Updated when pieces complete, -1.0 means not yet calculated
+    mutable std::vector<float> file_consecutive_progress_;
+
+public:
+    // Get consecutive progress for a file (0.0-1.0)
+    // This represents how much of the file can be played from the beginning
+    [[nodiscard]] float file_consecutive_progress(tr_file_index_t file) const;
+
+    // Update consecutive progress cache for files affected by a piece
+    void update_file_consecutive_progress(tr_piece_index_t piece);
+
+    // Invalidate all consecutive progress (e.g., after verify)
+    void invalidate_file_consecutive_progress();
 };
 
 // ---
