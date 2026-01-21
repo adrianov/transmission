@@ -202,6 +202,7 @@ Torrents containing DVD or Blu-ray disc structures receive special handling:
 - VLC is preferred for disc playback, launched with `dvd://` or `bluray://` protocol
 - IINA is used as fallback if VLC is not installed
 - The disc root folder (parent of `VIDEO_TS` or `BDMV`) is passed to the player
+- IINA is preferred for album playback (including cue+flac albums), with system default music player as fallback
 
 **Progress display:**
 - VOB files (DVD) and M2TS files (Blu-ray) are not counted as separate videos
