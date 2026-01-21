@@ -176,6 +176,8 @@ target_sources(${TR_NAME}-mac
         TorrentCell.mm
         PlayButton.h
         PlayButton.mm
+        FlowLayoutView.h
+        FlowLayoutView.mm
         TorrentCellActionButton.h
         TorrentCellActionButton.mm
         TorrentCellControlButton.h

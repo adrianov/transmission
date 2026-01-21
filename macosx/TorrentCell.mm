@@ -3,6 +3,7 @@
 // License text can be found in the licenses/ folder.
 
 #import "TorrentCell.h"
+#import "FlowLayoutView.h"
 #import "PlayButton.h"
 #import "ProgressBarView.h"
 #import "ProgressGradients.h"
@@ -53,13 +54,13 @@
     [super setBackgroundStyle:backgroundStyle];
 
     // Update play button colors based on selection
-    if (self.fPlayButtonsView)
+    if (self.fPlayButtonsView && [self.fPlayButtonsView isKindOfClass:[FlowLayoutView class]])
     {
         BOOL isSelected = (backgroundStyle == NSBackgroundStyleEmphasized);
         NSColor* textColor = isSelected ? NSColor.whiteColor : NSColor.secondaryLabelColor;
-        NSFont* buttonFont = [NSFont systemFontOfSize:9];
+        NSFont* buttonFont = [NSFont systemFontOfSize:11];
 
-        for (NSView* view in self.fPlayButtonsView.arrangedSubviews)
+        for (NSView* view in [(FlowLayoutView*)self.fPlayButtonsView arrangedSubviews])
         {
             if ([view isKindOfClass:[PlayButton class]])
             {

@@ -43,8 +43,10 @@ typedef NS_ENUM(NSInteger, TorrentMediaType) { TorrentMediaTypeNone = 0, Torrent
 @property(nonatomic) BOOL fMediaTypeDetected;
 @property(nonatomic) BOOL fIsDVD;
 @property(nonatomic) BOOL fIsBluRay;
-@property(nonatomic, copy) NSString* fDiscFolderPath; // Path to VIDEO_TS (DVD) or BDMV (Blu-ray) folder
+@property(nonatomic) BOOL fIsAlbumCollection; // Multiple audio albums in subfolders
+@property(nonatomic, copy) NSArray<NSString*>* fFolderItems; // Disc or album folders (relative paths)
 @property(nonatomic, copy) NSArray<NSDictionary*>* fPlayableFiles;
+@property(nonatomic, copy) NSDictionary<NSString*, NSArray<NSNumber*>*>* fFolderToFiles; // Cache: folder -> file indices
 
 @property(nonatomic, copy) NSArray<FileListNode*>* fileList;
 @property(nonatomic, copy) NSArray<FileListNode*>* flatFileList;
@@ -691,137 +693,170 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
     }
 
     [self detectMediaType];
+
+    // Folder-based: show folder count
+    if (self.fFolderItems.count > 1)
+    {
+        if (self.fIsDVD || self.fIsBluRay)
+            return [NSString stringWithFormat:@"%lu discs", (unsigned long)self.fFolderItems.count];
+        if (self.fIsAlbumCollection)
+            return [NSString stringWithFormat:@"%lu albums", (unsigned long)self.fFolderItems.count];
+    }
+
+    // File-based: show file count
     if (self.fMediaFileCount > 1)
     {
         if (self.fMediaType == TorrentMediaTypeVideo)
-        {
             return [NSString stringWithFormat:@"%lu videos", (unsigned long)self.fMediaFileCount];
-        }
-        else if (self.fMediaType == TorrentMediaTypeAudio)
-        {
+        if (self.fMediaType == TorrentMediaTypeAudio)
             return [NSString stringWithFormat:@"%lu audios", (unsigned long)self.fMediaFileCount];
-        }
     }
     return nil;
 }
 
+/// Returns playable items for this torrent.
+/// Each item is a dictionary with: type, name, path, folder (relative), progress, baseTitle
+/// Types: "file" (individual media file), "dvd", "bluray", "album" (folder-based)
 - (NSArray<NSDictionary*>*)playableFiles
 {
-    // Only use cache if we found files; re-scan if cache is empty
-    // (files might not have been available on first scan, e.g., magnet resolving)
+
+    [self detectMediaType];
+
+    // Check if cache needs clearing based on media type
     if (self.fPlayableFiles.count > 0)
     {
-        return self.fPlayableFiles;
+        // Determine what type of playable items we need
+        BOOL needsFolderBased = (self.fIsDVD || self.fIsBluRay || self.fIsAlbumCollection);
+
+        // Check what type is cached
+        NSString* cachedType = self.fPlayableFiles.firstObject[@"type"];
+        BOOL isFolderType = [cachedType isEqualToString:@"dvd"] ||
+                           [cachedType isEqualToString:@"bluray"] ||
+                           [cachedType isEqualToString:@"album"];
+
+        // Clear cache if type mismatches (e.g., cache has "file" but we need "album")
+        if (needsFolderBased != isFolderType)
+        {
+            NSLog(@"[Torrent] playableFiles: clearing cache - type mismatch (needsFolderBased: %@, isFolderType: %@)",
+                   needsFolderBased ? @"YES" : @"NO", isFolderType ? @"YES" : @"NO");
+            self.fPlayableFiles = nil;
+        }
+        else
+        {
+            NSLog(@"[Torrent] playableFiles: returning cached %lu items for torrent: %@", (unsigned long)self.fPlayableFiles.count, self.name);
+            return self.fPlayableFiles;
+        }
     }
 
-    if (self.magnet)
+    if (self.magnet || self.fileCount == 0)
     {
         return nil;
     }
 
-    if (self.fileCount == 0)
+    // Folder-based playables: DVD, Blu-ray, or Album collections
+    if (self.fFolderItems.count > 0)
     {
-        return nil; // Metadata not loaded yet
-    }
+        NSMutableArray<NSDictionary*>* entries = [NSMutableArray arrayWithCapacity:self.fFolderItems.count];
+        NSArray<NSString*>* folders = [self.fFolderItems sortedArrayUsingSelector:@selector(localizedStandardCompare:)];
 
-    // Detect media type first (also detects DVD/Blu-ray structure)
-    [self detectMediaType];
+        NSString* type = self.fIsDVD ? @"dvd" : (self.fIsBluRay ? @"bluray" : @"album");
+        BOOL isDisc = self.fIsDVD || self.fIsBluRay;
 
-    // Handle DVD/Blu-ray torrents - return single entry for disc folder
-    if ((self.fIsDVD || self.fIsBluRay) && self.fDiscFolderPath)
-    {
-        NSString* discFullPath = [self.currentDirectory stringByAppendingPathComponent:self.fDiscFolderPath];
+        for (NSUInteger i = 0; i < folders.count; i++)
+        {
+            NSString* folder = folders[i];
+            NSString* fullPath = [self.currentDirectory stringByAppendingPathComponent:folder];
 
-        // Calculate overall consecutive progress for the disc
-        // Use weighted average of consecutive progress for all files in the disc folder
-        CGFloat progress = [self discConsecutiveProgress];
+            // Progress: discs use consecutive progress, albums use first media file progress
+            CGFloat progress = isDisc ? [self folderConsecutiveProgress:folder] : [self folderFirstMediaProgress:folder];
 
-        NSString* baseTitle = @"▶ Play";
-        NSString* buttonTitle = (progress >= 1.0) ? baseTitle :
-            (progress > 0) ? [NSString stringWithFormat:@"%@ (%d%%)", baseTitle, (int)floor(progress * 100)] :
-                             @"▶ Play (0%)";
+            // Display name
+            NSString* name;
+            if (folders.count == 1 && isDisc)
+            {
+                name = self.fIsDVD ? @"DVD" : @"Blu-ray";
+            }
+            else
+            {
+                name = folder.lastPathComponent;
+                if (name.length == 0)
+                {
+                    name = [NSString stringWithFormat:@"%@ %lu", (isDisc ? @"Disc" : @"Album"), (unsigned long)(i + 1)];
+                }
+                else if (!isDisc)
+                {
+                    // Humanize album names
+                    NSString* humanized = name.humanReadableEpisodeName;
+                    if (humanized.length > 0)
+                    {
+                        name = humanized;
+                    }
+                }
+            }
 
-        self.fPlayableFiles = @[ @{
-            @"index" : @(NSNotFound), // Special marker for disc
-            @"name" : self.fIsDVD ? @"DVD" : @"Blu-ray",
-            @"path" : discFullPath,
-            @"season" : @0,
-            @"episode" : @0,
-            @"progress" : @(progress),
-            @"baseTitle" : baseTitle,
-            @"buttonTitle" : buttonTitle,
-            @"isDVD" : @(self.fIsDVD),
-            @"isBluRay" : @(self.fIsBluRay)
-        } ];
+            NSString* baseTitle = [NSString stringWithFormat:@"▶ %@", name];
+
+            [entries addObject:@{
+                @"type" : type,
+                @"name" : name,
+                @"path" : fullPath,
+                @"folder" : folder,
+                @"progress" : @(progress),
+                @"baseTitle" : baseTitle
+            }];
+        }
+
+        self.fPlayableFiles = entries;
         return self.fPlayableFiles;
     }
 
+    // Individual media files (not folder-based)
+    self.fPlayableFiles = [self buildIndividualFilePlayables];
+    return self.fPlayableFiles;
+}
+
+/// Builds playable entries for individual media files
+- (NSArray<NSDictionary*>*)buildIndividualFilePlayables
+{
     static NSSet<NSString*>* mediaExtensions;
     static NSSet<NSString*>* cueCompanionExtensions;
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
         mediaExtensions = [NSSet setWithArray:@[
-            // Video
-            @"mkv",
-            @"avi",
-            @"mp4",
-            @"mov",
-            @"wmv",
-            @"flv",
-            @"webm",
-            @"m4v",
-            @"mpg",
-            @"mpeg",
-            @"ts",
-            @"m2ts",
-            @"vob",
-            @"3gp",
-            @"ogv",
-            // Audio
-            @"mp3",
-            @"flac",
-            @"wav",
-            @"aac",
-            @"ogg",
-            @"wma",
-            @"m4a",
-            @"ape",
-            @"alac",
-            @"aiff",
-            @"opus",
-            // Cue sheets
-            @"cue"
+            @"mkv", @"avi", @"mp4",  @"mov", @"wmv", @"flv", @"webm", @"m4v", @"mpg", @"mpeg", @"ts",   @"m2ts", @"vob", @"3gp",
+            @"ogv", @"mp3", @"flac", @"wav", @"aac", @"ogg", @"wma",  @"m4a", @"ape", @"alac", @"aiff", @"opus", @"cue"
         ]];
-        // Audio extensions that typically have companion .cue files
         cueCompanionExtensions = [NSSet setWithArray:@[ @"flac", @"ape", @"wav", @"wma", @"alac", @"aiff" ]];
     });
 
     NSMutableArray<NSDictionary*>* playable = [NSMutableArray array];
     NSUInteger const count = self.fileCount;
 
-    // First pass: collect .cue files and their base names (without extension)
+    NSLog(@"[Torrent] buildIndividualFilePlayables: starting for torrent '%@' with %lu files", self.name, (unsigned long)count);
+
+    // First pass: collect .cue files
     NSMutableSet<NSString*>* cueBaseNames = [NSMutableSet set];
+    NSMutableDictionary<NSString*, NSNumber*>* cueFileIndexes = [NSMutableDictionary dictionary];
+    NSMutableDictionary<NSString*, NSString*>* cueFileNames = [NSMutableDictionary dictionary];
     for (NSUInteger i = 0; i < count; i++)
     {
         auto const file = tr_torrentFile(self.fHandle, i);
         NSString* fileName = @(file.name);
-        NSString* ext = fileName.pathExtension.lowercaseString;
-
-        if ([ext isEqualToString:@"cue"])
+        if ([fileName.pathExtension.lowercaseString isEqualToString:@"cue"])
         {
-            // Check if .cue file exists on disk
             auto const location = tr_torrentFindFile(self.fHandle, i);
             if (!std::empty(location))
             {
-                // Store base name (path without extension) to exclude companion audio files
                 NSString* baseName = fileName.stringByDeletingPathExtension;
                 [cueBaseNames addObject:baseName];
+                cueFileIndexes[baseName] = @(i);
+                cueFileNames[baseName] = fileName;
             }
         }
     }
 
-    // Second pass: add playable files, excluding audio files that have companion .cue
-    // Also skip VOB/m2ts files inside VIDEO_TS/BDMV folders (handled as disc above)
+    // Second pass: collect playable files
+    NSMutableDictionary<NSString*, NSNumber*>* cueProgress = [NSMutableDictionary dictionary];
     for (NSUInteger i = 0; i < count; i++)
     {
         auto const file = tr_torrentFile(self.fHandle, i);
@@ -830,115 +865,144 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
 
         if (![mediaExtensions containsObject:ext])
         {
+            NSLog(@"[Torrent]   File '%@' skipped: extension '%@' not in media list", fileName, ext);
             continue;
         }
 
-        // Skip VOB files in VIDEO_TS folders (DVD structure)
-        if ([ext isEqualToString:@"vob"])
+        if ([ext isEqualToString:@"cue"])
         {
-            NSRange videoTSRange = [fileName rangeOfString:@"VIDEO_TS/" options:NSCaseInsensitiveSearch];
-            if (videoTSRange.location != NSNotFound)
-            {
-                continue;
-            }
+            continue;
         }
 
-        // Skip m2ts files in BDMV folders (Blu-ray structure)
-        if ([ext isEqualToString:@"m2ts"])
+        // Skip disc structure files (handled as folders)
+        if ([ext isEqualToString:@"vob"] && [fileName.uppercaseString containsString:@"VIDEO_TS/"])
+            continue;
+        if ([ext isEqualToString:@"m2ts"] && [fileName.uppercaseString containsString:@"BDMV/"])
+            continue;
+
+        // Skip audio with companion .cue; it will be represented by the cue entry
+        if ([cueCompanionExtensions containsObject:ext] && [cueBaseNames containsObject:fileName.stringByDeletingPathExtension])
         {
-            NSRange bdmvRange = [fileName rangeOfString:@"BDMV/" options:NSCaseInsensitiveSearch];
-            if (bdmvRange.location != NSNotFound)
+            CGFloat cueFileProgress = tr_torrentFileConsecutiveProgress(self.fHandle, i);
+            if (cueFileProgress >= 0)
             {
-                continue;
+                NSString* baseName = fileName.stringByDeletingPathExtension;
+                NSNumber* existing = cueProgress[baseName];
+                if (!existing || cueFileProgress > existing.doubleValue)
+                {
+                    cueProgress[baseName] = @(cueFileProgress);
+                }
             }
+            NSLog(@"[Torrent]   File '%@' skipped: has companion .cue file", fileName);
+            continue;
         }
 
-        // Skip audio files that have a companion .cue file
-        if ([cueCompanionExtensions containsObject:ext])
-        {
-            NSString* baseName = fileName.stringByDeletingPathExtension;
-            if ([cueBaseNames containsObject:baseName])
-            {
-                continue; // Skip this audio file, .cue will be used instead
-            }
-        }
-
-        // Get consecutive progress (playable from start)
         CGFloat progress = tr_torrentFileConsecutiveProgress(self.fHandle, i);
 
-        // Get file path - either from disk or construct expected path
-        NSString* path;
-        auto const location = tr_torrentFindFile(self.fHandle, i);
-        if (!std::empty(location))
+        if (progress < 0)
         {
-            path = @(location.c_str());
-        }
-        else
-        {
-            // File doesn't exist yet, construct expected path
-            path = [self.currentDirectory stringByAppendingPathComponent:fileName];
+            NSLog(@"[Torrent]   File '%@' skipped: progress %.2f < 0 (not downloaded)", fileName, progress);
+            continue;
         }
 
-        // Get episode numbers for sorting and display
+        NSLog(@"[Torrent]   File '%@' added: progress %.2f", fileName, progress);
+
+        NSString* path;
+        auto const location = tr_torrentFindFile(self.fHandle, i);
+        path = !std::empty(location) ? @(location.c_str()) : [self.currentDirectory stringByAppendingPathComponent:fileName];
+
         NSArray<NSNumber*>* episodeNumbers = fileName.episodeNumbers;
         NSNumber* season = episodeNumbers ? episodeNumbers[0] : @0;
         NSNumber* episode = episodeNumbers ? episodeNumbers[1] : @(i);
 
-        // Get display name: use humanReadableEpisodeName or humanized filename
         NSString* displayName = fileName.lastPathComponent.humanReadableEpisodeName;
         if (!displayName)
         {
             displayName = fileName.lastPathComponent.stringByDeletingPathExtension.humanReadableTitle;
         }
-        // Strip resolution (with or without #) from button titles
-        NSRegularExpression* resolutionRegex = [NSRegularExpression regularExpressionWithPattern:@"\\s*#?(2160p|1080p|720p|480p|4K|UHD)\\s*"
-                                                                                         options:NSRegularExpressionCaseInsensitive
-                                                                                           error:nil];
-        displayName = [resolutionRegex stringByReplacingMatchesInString:displayName options:0
-                                                                  range:NSMakeRange(0, displayName.length)
-                                                           withTemplate:@" "];
+        // Strip resolution from button titles
+        displayName = [displayName stringByReplacingOccurrencesOfString:@"#2160p" withString:@"" options:NSCaseInsensitiveSearch
+                                                                  range:NSMakeRange(0, displayName.length)];
+        displayName = [displayName stringByReplacingOccurrencesOfString:@"#1080p" withString:@"" options:NSCaseInsensitiveSearch
+                                                                  range:NSMakeRange(0, displayName.length)];
+        displayName = [displayName stringByReplacingOccurrencesOfString:@"#720p" withString:@"" options:NSCaseInsensitiveSearch
+                                                                  range:NSMakeRange(0, displayName.length)];
         displayName = [displayName stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet];
 
         [playable addObject:@{
+            @"type" : @"file",
             @"index" : @(i),
             @"name" : displayName,
             @"path" : path,
             @"season" : season,
             @"episode" : episode,
-            @"progress" : @(progress)
+            @"progress" : @(progress),
+            @"sortKey" : fileName.lastPathComponent
         }];
     }
 
-    // Sort by [season, episode]
-    [playable sortUsingComparator:^NSComparisonResult(NSDictionary* a, NSDictionary* b) {
-        NSComparisonResult seasonCmp = [a[@"season"] compare:b[@"season"]];
-        if (seasonCmp != NSOrderedSame)
+    if (playable.count == 0)
+    {
+        if (cueBaseNames.count == 0)
         {
-            return seasonCmp;
+            NSLog(@"[Torrent] buildIndividualFilePlayables: found no playable files for torrent: %@", self.name);
+            return nil;
         }
-        return [a[@"episode"] compare:b[@"episode"]];
+    }
+
+    for (NSString* baseName in cueBaseNames)
+    {
+        NSNumber* cueIndex = cueFileIndexes[baseName];
+        NSString* cueFileName = cueFileNames[baseName];
+        if (!cueIndex || !cueFileName)
+            continue;
+
+        auto const location = tr_torrentFindFile(self.fHandle, (tr_file_index_t)cueIndex.unsignedIntegerValue);
+        NSString* path = !std::empty(location) ? @(location.c_str()) : [self.currentDirectory stringByAppendingPathComponent:cueFileName];
+
+        CGFloat progress = cueProgress[baseName] ? cueProgress[baseName].doubleValue : tr_torrentFileConsecutiveProgress(self.fHandle, cueIndex.unsignedIntegerValue);
+        if (progress < 0)
+            progress = 0;
+
+        NSString* displayName = baseName.lastPathComponent.humanReadableTitle;
+        if (!displayName || displayName.length == 0)
+            displayName = baseName.lastPathComponent;
+
+        [playable addObject:@{
+            @"type" : @"file",
+            @"index" : cueIndex,
+            @"name" : displayName,
+            @"path" : path,
+            @"season" : @0,
+            @"episode" : cueIndex,
+            @"progress" : @(progress),
+            @"sortKey" : cueFileName.lastPathComponent
+        }];
+    }
+
+    NSLog(@"[Torrent] buildIndividualFilePlayables: found %lu playable files for torrent: %@", (unsigned long)playable.count, self.name);
+
+    // Sort by original file name to match download order
+    [playable sortUsingComparator:^NSComparisonResult(NSDictionary* a, NSDictionary* b) {
+        NSString* aKey = a[@"sortKey"] ?: a[@"name"];
+        NSString* bKey = b[@"sortKey"] ?: b[@"name"];
+        return [aKey localizedStandardCompare:bKey];
     }];
 
-    // Determine if we have season info for button title formatting
+    // Determine season info for titles
     NSMutableSet<NSNumber*>* seasons = [NSMutableSet set];
-    for (NSDictionary* fileInfo in playable)
-    {
-        [seasons addObject:fileInfo[@"season"]];
-    }
-    BOOL hasMultipleSeasons = seasons.count > 1;
-    BOOL hasSeasonInfo = seasons.count == 1 && [[seasons anyObject] integerValue] > 0;
+    for (NSDictionary* f in playable)
+        [seasons addObject:f[@"season"]];
+    BOOL hasSeasonInfo = (seasons.count > 1) || (seasons.count == 1 && [[seasons anyObject] integerValue] > 0);
 
-    // Pre-compute button base titles (without progress) for consistent display
+    // Build final entries with titles
     NSMutableArray<NSDictionary*>* result = [NSMutableArray arrayWithCapacity:playable.count];
     for (NSDictionary* fileInfo in playable)
     {
         NSString* baseTitle;
-        NSNumber* season = fileInfo[@"season"];
-        NSNumber* episode = fileInfo[@"episode"];
-
-        if ((hasMultipleSeasons || hasSeasonInfo) && season.integerValue > 0)
+        if (hasSeasonInfo && [fileInfo[@"season"] integerValue] > 0)
         {
-            baseTitle = [NSString stringWithFormat:@"▶ E%@", episode];
+            baseTitle = [NSString stringWithFormat:@"▶ E%@", fileInfo[@"episode"]];
         }
         else
         {
@@ -947,113 +1011,142 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
 
         NSMutableDictionary* entry = [fileInfo mutableCopy];
         entry[@"baseTitle"] = baseTitle;
-
-        // Add progress suffix if not complete
-        CGFloat progress = [fileInfo[@"progress"] doubleValue];
-        if (progress < 1.0)
-        {
-            entry[@"buttonTitle"] = [NSString stringWithFormat:@"%@ (%d%%)", baseTitle, (int)floor(progress * 100)];
-        }
-        else
-        {
-            entry[@"buttonTitle"] = baseTitle;
-        }
         [result addObject:entry];
     }
 
-    self.fPlayableFiles = result.count > 0 ? result : nil;
-    return self.fPlayableFiles;
+    return result;
 }
 
 - (CGFloat)fileProgressForIndex:(NSUInteger)index
 {
-    // Use consecutive progress for playable files (progress from file start)
     return (CGFloat)tr_torrentFileConsecutiveProgress(self.fHandle, (tr_file_index_t)index);
 }
 
-/// Checks if all disc index files (IFO/BUP for DVD, index.bdmv for Blu-ray) are fully downloaded
-- (BOOL)discIndexFilesComplete
+/// Builds cache mapping folders to their file indices (for fast progress lookups)
+- (void)buildFolderToFilesCache:(NSSet<NSString*>*)folders
 {
-    if (!self.fDiscFolderPath)
+    NSMutableDictionary<NSString*, NSMutableArray<NSNumber*>*>* cache = [NSMutableDictionary dictionary];
+
+    for (NSString* folder in folders)
     {
-        return NO;
+        cache[folder] = [NSMutableArray array];
     }
 
-    NSString* discFolder = self.fIsDVD ? @"VIDEO_TS/" : @"BDMV/";
     NSUInteger const count = self.fileCount;
-
     for (NSUInteger i = 0; i < count; i++)
     {
         auto const file = tr_torrentFile(self.fHandle, i);
         NSString* fileName = @(file.name);
 
-        // Only check files in the disc folder
-        NSRange range = [fileName rangeOfString:discFolder options:NSCaseInsensitiveSearch];
-        if (range.location == NSNotFound)
+        for (NSString* folder in folders)
         {
-            continue;
+            if ([fileName hasPrefix:folder] || [fileName hasPrefix:[folder stringByAppendingString:@"/"]] || [fileName isEqualToString:folder])
+            {
+                [cache[folder] addObject:@(i)];
+                break;
+            }
         }
+    }
 
+    self.fFolderToFiles = cache;
+}
+
+/// Checks if disc index files for a folder are fully downloaded
+- (BOOL)discIndexFilesCompleteForFolder:(NSString*)folder
+{
+    NSArray<NSNumber*>* fileIndices = self.fFolderToFiles[folder];
+    if (!fileIndices)
+        return NO;
+
+    for (NSNumber* fileIndex in fileIndices)
+    {
+        NSUInteger i = fileIndex.unsignedIntegerValue;
+        auto const file = tr_torrentFile(self.fHandle, i);
+        NSString* fileName = @(file.name);
         NSString* ext = fileName.pathExtension.lowercaseString;
         NSString* lastComponent = fileName.lastPathComponent.lowercaseString;
 
         BOOL isIndexFile = NO;
         if (self.fIsDVD)
-        {
-            // DVD index files: .ifo, .bup
             isIndexFile = [ext isEqualToString:@"ifo"] || [ext isEqualToString:@"bup"];
-        }
         else if (self.fIsBluRay)
-        {
-            // Blu-ray index files: index.bdmv, movieobject.bdmv
             isIndexFile = [lastComponent isEqualToString:@"index.bdmv"] || [lastComponent isEqualToString:@"movieobject.bdmv"];
-        }
 
         if (isIndexFile && file.have < file.length)
-        {
-            return NO; // Index file not complete
-        }
+            return NO;
     }
-
     return YES;
 }
 
-/// Calculates overall consecutive progress for DVD/Blu-ray disc files
-/// Returns 0 if index files are not yet complete (Play button won't show)
-- (CGFloat)discConsecutiveProgress
+/// Calculates consecutive progress for a folder (disc or album)
+- (CGFloat)folderConsecutiveProgress:(NSString*)folder
 {
-    if (!self.fDiscFolderPath)
-    {
+    // For discs, wait for index files
+    if ((self.fIsDVD || self.fIsBluRay) && ![self discIndexFilesCompleteForFolder:folder])
         return 0.0;
-    }
 
-    // Don't show progress until index files are complete
-    if (![self discIndexFilesComplete])
-    {
+    NSArray<NSNumber*>* fileIndices = self.fFolderToFiles[folder];
+    if (!fileIndices)
         return 0.0;
-    }
 
-    NSString* discFolder = self.fIsDVD ? @"VIDEO_TS/" : @"BDMV/";
     CGFloat totalProgress = 0;
     uint64_t totalSize = 0;
 
-    NSUInteger const count = self.fileCount;
-    for (NSUInteger i = 0; i < count; i++)
+    for (NSNumber* fileIndex in fileIndices)
     {
+        NSUInteger i = fileIndex.unsignedIntegerValue;
         auto const file = tr_torrentFile(self.fHandle, i);
-        NSString* fileName = @(file.name);
-
-        // Check if file is in the disc folder
-        NSRange range = [fileName rangeOfString:discFolder options:NSCaseInsensitiveSearch];
-        if (range.location != NSNotFound)
-        {
-            CGFloat fileProgress = tr_torrentFileConsecutiveProgress(self.fHandle, i);
-            totalProgress += fileProgress * file.length;
-            totalSize += file.length;
-        }
+        CGFloat fileProgress = tr_torrentFileConsecutiveProgress(self.fHandle, i);
+        totalProgress += fileProgress * file.length;
+        totalSize += file.length;
     }
 
     return (totalSize > 0) ? totalProgress / totalSize : 0.0;
+}
+
+/// Returns consecutive progress for the first media file in a folder (by file index).
+- (CGFloat)folderFirstMediaProgress:(NSString*)folder
+{
+    NSArray<NSNumber*>* fileIndices = self.fFolderToFiles[folder];
+    if (!fileIndices)
+        return 0.0;
+
+    static NSSet<NSString*>* audioExtensions;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        audioExtensions = [NSSet setWithArray:@[
+            @"mp3", @"flac", @"wav", @"aac", @"ogg", @"wma", @"m4a", @"ape", @"alac", @"aiff", @"opus", @"cue"
+        ]];
+    });
+
+    for (NSNumber* fileIndex in fileIndices)
+    {
+        NSUInteger i = fileIndex.unsignedIntegerValue;
+        auto const file = tr_torrentFile(self.fHandle, i);
+        NSString* fileName = @(file.name);
+        NSString* ext = fileName.pathExtension.lowercaseString;
+        if (![audioExtensions containsObject:ext])
+            continue;
+
+        CGFloat progress = tr_torrentFileConsecutiveProgress(self.fHandle, i);
+        return progress > 0 ? progress : 0.0;
+    }
+
+    return 0.0;
+}
+
+- (NSIndexSet*)fileIndexesForFolder:(NSString*)folder
+{
+    NSArray<NSNumber*>* fileIndices = self.fFolderToFiles[folder];
+    if (!fileIndices || fileIndices.count == 0)
+        return nil;
+
+    NSMutableIndexSet* indexes = [NSMutableIndexSet indexSet];
+    for (NSNumber* fileIndex in fileIndices)
+    {
+        [indexes addIndex:fileIndex.unsignedIntegerValue];
+    }
+    return indexes;
 }
 
 - (BOOL)hasPlayableMedia
@@ -1125,46 +1218,64 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
 
     NSMutableDictionary<NSString*, NSNumber*>* videoExtCounts = [NSMutableDictionary dictionary];
     NSMutableDictionary<NSString*, NSNumber*>* audioExtCounts = [NSMutableDictionary dictionary];
-    NSString* videoTSFolder = nil;
-    NSString* bdmvFolder = nil;
-    BOOL hasVOBInVideoTS = NO;
-    BOOL hasM2TSInBDMV = NO;
+    NSMutableSet<NSString*>* dvdDiscFolders = [NSMutableSet set]; // Parent folders containing VIDEO_TS.IFO
+    NSMutableSet<NSString*>* blurayDiscFolders = [NSMutableSet set]; // Parent folders containing index.bdmv
 
     NSUInteger const count = self.fileCount;
     for (NSUInteger i = 0; i < count; i++)
     {
         auto const file = tr_torrentFile(self.fHandle, i);
         NSString* fileName = @(file.name);
+        NSString* lastComponent = fileName.lastPathComponent.lowercaseString;
         NSString* ext = fileName.pathExtension.lowercaseString;
 
-        // Check for DVD structure: VIDEO_TS folder containing VOB files
-        NSRange videoTSRange = [fileName rangeOfString:@"VIDEO_TS/" options:NSCaseInsensitiveSearch];
-        if (videoTSRange.location != NSNotFound)
+        // Detect DVD by VIDEO_TS.IFO file (each disc has one)
+        if ([lastComponent isEqualToString:@"video_ts.ifo"])
         {
-            if ([ext isEqualToString:@"vob"])
-            {
-                hasVOBInVideoTS = YES;
-                if (!videoTSFolder)
-                {
-                    videoTSFolder = [fileName substringToIndex:videoTSRange.location + videoTSRange.length - 1];
-                }
-            }
-            continue; // Don't count VOB files in VIDEO_TS as individual videos
+            // Get the parent folder (the disc folder, e.g., "Disk.1" or "VIDEO_TS")
+            NSString* discFolder = fileName.stringByDeletingLastPathComponent;
+            [dvdDiscFolders addObject:discFolder];
+            continue;
         }
 
-        // Check for Blu-ray structure: BDMV folder containing m2ts files in STREAM subfolder
-        NSRange bdmvRange = [fileName rangeOfString:@"BDMV/" options:NSCaseInsensitiveSearch];
-        if (bdmvRange.location != NSNotFound)
+        // Detect Blu-ray by index.bdmv file (each disc has one)
+        if ([lastComponent isEqualToString:@"index.bdmv"])
         {
-            if ([ext isEqualToString:@"m2ts"])
+            // Get the parent folder (BDMV folder), then its parent (the disc folder)
+            NSString* bdmvFolder = fileName.stringByDeletingLastPathComponent;
+            NSString* discFolder = bdmvFolder.stringByDeletingLastPathComponent;
+            [blurayDiscFolders addObject:discFolder.length > 0 ? discFolder : bdmvFolder];
+            continue;
+        }
+
+        // Skip VOB files in folders that have VIDEO_TS.IFO (will be counted as DVD discs)
+        if ([ext isEqualToString:@"vob"])
+        {
+            NSString* folder = fileName.stringByDeletingLastPathComponent;
+            // Check if this folder or any detected disc folder is a parent
+            BOOL isInDVD = NO;
+            for (NSString* dvdFolder in dvdDiscFolders)
             {
-                hasM2TSInBDMV = YES;
-                if (!bdmvFolder)
+                if ([folder isEqualToString:dvdFolder] || [fileName hasPrefix:[dvdFolder stringByAppendingString:@"/"]])
                 {
-                    bdmvFolder = [fileName substringToIndex:bdmvRange.location + bdmvRange.length - 1];
+                    isInDVD = YES;
+                    break;
                 }
             }
-            continue; // Don't count m2ts files in BDMV as individual videos
+            if (isInDVD)
+            {
+                continue;
+            }
+        }
+
+        // Skip m2ts files in BDMV folders
+        if ([ext isEqualToString:@"m2ts"])
+        {
+            NSRange bdmvRange = [fileName rangeOfString:@"/BDMV/" options:NSCaseInsensitiveSearch];
+            if (bdmvRange.location != NSNotFound || [fileName.lowercaseString hasPrefix:@"bdmv/"])
+            {
+                continue;
+            }
         }
 
         if ([videoExtensions containsObject:ext])
@@ -1177,53 +1288,71 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
         }
     }
 
+    // Detect album folders for audio collections
+    NSMutableSet<NSString*>* albumFolders = [NSMutableSet set];
+    for (NSUInteger i = 0; i < count; i++)
+    {
+        auto const file = tr_torrentFile(self.fHandle, i);
+        NSString* fileName = @(file.name);
+        NSString* ext = fileName.pathExtension.lowercaseString;
+
+        if ([audioExtensions containsObject:ext])
+        {
+            // Get the immediate parent folder of the audio file
+            NSString* parentFolder = fileName.stringByDeletingLastPathComponent;
+            if (parentFolder.length > 0)
+            {
+                [albumFolders addObject:parentFolder];
+            }
+        }
+    }
+
     // Check if this is a DVD torrent
-    if (hasVOBInVideoTS && videoTSFolder)
+    if (dvdDiscFolders.count > 0)
     {
         self.fIsDVD = YES;
-        self.fDiscFolderPath = videoTSFolder;
+        self.fFolderItems = dvdDiscFolders.allObjects;
         self.fMediaType = TorrentMediaTypeVideo;
-        self.fMediaFileCount = 1;
+        self.fMediaFileCount = dvdDiscFolders.count;
         self.fMediaExtension = @"vob";
+        [self buildFolderToFilesCache:dvdDiscFolders];
         return;
     }
 
     // Check if this is a Blu-ray torrent
-    if (hasM2TSInBDMV && bdmvFolder)
+    if (blurayDiscFolders.count > 0)
     {
         self.fIsBluRay = YES;
-        self.fDiscFolderPath = bdmvFolder;
+        self.fFolderItems = blurayDiscFolders.allObjects;
         self.fMediaType = TorrentMediaTypeVideo;
-        self.fMediaFileCount = 1;
+        self.fMediaFileCount = blurayDiscFolders.count;
         self.fMediaExtension = @"m2ts";
+        [self buildFolderToFilesCache:blurayDiscFolders];
         return;
     }
 
-    // Count totals for non-DVD torrents
-    NSUInteger videoCount = 0;
-    NSString* dominantVideoExt = nil;
-    NSUInteger dominantVideoCount = 0;
+    // Count video/audio files
+    NSUInteger videoCount = 0, audioCount = 0;
+    NSString *dominantVideoExt = nil, *dominantAudioExt = nil;
+    NSUInteger dominantVideoCount = 0, dominantAudioCount = 0;
+
     for (NSString* ext in videoExtCounts)
     {
-        NSUInteger extCount = videoExtCounts[ext].unsignedIntegerValue;
-        videoCount += extCount;
-        if (extCount > dominantVideoCount)
+        NSUInteger c = videoExtCounts[ext].unsignedIntegerValue;
+        videoCount += c;
+        if (c > dominantVideoCount)
         {
-            dominantVideoCount = extCount;
+            dominantVideoCount = c;
             dominantVideoExt = ext;
         }
     }
-
-    NSUInteger audioCount = 0;
-    NSString* dominantAudioExt = nil;
-    NSUInteger dominantAudioCount = 0;
     for (NSString* ext in audioExtCounts)
     {
-        NSUInteger extCount = audioExtCounts[ext].unsignedIntegerValue;
-        audioCount += extCount;
-        if (extCount > dominantAudioCount)
+        NSUInteger c = audioExtCounts[ext].unsignedIntegerValue;
+        audioCount += c;
+        if (c > dominantAudioCount)
         {
-            dominantAudioCount = extCount;
+            dominantAudioCount = c;
             dominantAudioExt = ext;
         }
     }
@@ -1240,6 +1369,15 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
         self.fMediaType = TorrentMediaTypeAudio;
         self.fMediaFileCount = audioCount;
         self.fMediaExtension = dominantAudioExt;
+
+        // Album collection: multiple album folders show as albums,
+        // single folder shows individual tracks via buildIndividualFilePlayables
+        if (albumFolders.count > 1)
+        {
+            self.fIsAlbumCollection = YES;
+            self.fFolderItems = albumFolders.allObjects;
+            [self buildFolderToFilesCache:albumFolders];
+        }
     }
 }
 

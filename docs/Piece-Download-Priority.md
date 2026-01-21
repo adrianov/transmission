@@ -102,6 +102,12 @@ For DVD and Blu-ray disc structures, index files are prioritized to enable prope
 
 These files are downloaded before the actual video content (VOB/M2TS) to ensure players can properly navigate the disc structure.
 
+**Multi-disc torrents:**
+- Torrents may contain multiple disc folders (e.g., `Disk.1/VIDEO_TS/`, `Disk.2/VIDEO_TS/`)
+- Index files for all discs are prioritized equally
+- Each disc's play button appears only after its specific index files are complete
+- Progress is tracked per-disc for accurate display
+
 ## User-Facing Settings
 
 - **File Priority**: Set via the UI or RPC for individual files

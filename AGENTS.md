@@ -25,7 +25,9 @@ open Transmission.xcodeproj
 **With CMake:**
 ```bash
 cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo
-cmake --build build -t transmission-mac 2>&1 | tail -5
+# Use -j$(sysctl -n hw.ncpu) for parallel builds (faster)
+# Use tail -5 to save tokens by showing only last 5 lines of output
+cmake --build build -t transmission-mac -j$(sysctl -n hw.ncpu) 2>&1 | tail -5
 open ./build/macosx/Transmission.app
 
 # Reveal built binary in Finder
@@ -36,7 +38,7 @@ open -R ./build/macosx/Transmission.app
 ```bash
 brew install gtk4 gtkmm4
 cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DENABLE_GTK=ON -DENABLE_MAC=OFF
-cmake --build build -t transmission-gtk
+cmake --build build -t transmission-gtk -j$(sysctl -n hw.ncpu) 2>&1 | tail -5
 ./build/gtk/transmission-gtk
 ```
 
@@ -45,7 +47,7 @@ cmake --build build -t transmission-gtk
 brew install qt
 brew services start dbus
 cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DENABLE_QT=ON -DENABLE_MAC=OFF
-cmake --build build -t transmission-qt
+cmake --build build -t transmission-qt -j$(sysctl -n hw.ncpu) 2>&1 | tail -5
 ./build/qt/transmission-qt
 ```
 
@@ -57,7 +59,8 @@ git clone --recurse-submodules https://github.com/transmission/transmission Tran
 cd Transmission
 cmake -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo
 cd build
-cmake --build .
+# Use -j$(nproc) for parallel builds (faster)
+cmake --build . -j$(nproc) 2>&1 | tail -5
 sudo cmake --install .
 ```
 
@@ -68,7 +71,8 @@ cmake --build . -t clean
 git submodule foreach --recursive git clean -xfd
 git pull --rebase --prune
 git submodule update --init --recursive
-cmake --build .
+# Use -j$(nproc) for parallel builds (faster)
+cmake --build . -j$(nproc) 2>&1 | tail -5
 sudo cmake --install .
 ```
 
@@ -223,6 +227,8 @@ New features must be accessible via both APIs.
 2. Make changes following code style
 3. Format changed C++ files: `clang-format -i <file.cc|file.mm|file.h>`
 4. Build and verify no warnings
+   - Use parallel builds for faster compilation: `-j$(nproc)` on Linux, `-j$(sysctl -n hw.ncpu)` on macOS
+   - Use `2>&1 | tail -5` to save tokens by showing only last 5 lines of build output
 5. Run tests with `ctest`
 6. For GUI changes, consider all three clients (macOS, GTK, Qt)
 

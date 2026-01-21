@@ -46,6 +46,13 @@ Resolution and disc format tags are extracted and shown with `#` prefix:
 - `DVD`, `DVD5`, `DVD9` - shown as `#DVD`, `#DVD5`, `#DVD9`
 - `BD25`, `BD50`, `BD66`, `BD100` - shown as `#BD25`, `#BD50`, etc.
 
+**Legacy Codecs:**
+- `XviD`, `DivX` - shown lowercase as `#xvid`, `#divx`
+
+**Audio Formats:**
+- `MP3`, `FLAC`, `OGG`, `AAC`, `WAV`, `APE`, `ALAC`, `WMA`, `OPUS`, `M4A`
+- Shown lowercase as `#mp3`, `#flac`, etc.
+
 Merged patterns like `BDRip1080p` are split to `BDRip 1080p` before processing.
 
 ### 4. Season/Episode Detection
@@ -58,6 +65,10 @@ Season markers are converted to readable format:
 ### 5. Year Extraction
 
 Four-digit years (1900-2099) are extracted and shown in parentheses.
+
+**Year intervals:**
+- `2000 - 2003` or `2000-2003` → `(2000-2003)`
+- Intervals take precedence over single years
 
 **Handling existing parentheses:**
 - If the year is already in parentheses like `Movie (2024) 1080p`, the parentheses are preserved as-is
@@ -141,6 +152,10 @@ Parts are assembled with specific formatting:
 | `The.Matrix.1999.1080p.BluRay.x264` | `The Matrix (1999) #1080p` |
 | `Documentary.4K.HDR.2023` | `Documentary (2023) #2160p` |
 | `Kinds of Kindness (2024) WEB-DL SDR 2160p.mkv` | `Kinds of Kindness (2024) #2160p` |
+| `Movie.Name.2004.XviD.avi` | `Movie Name (2004) #xvid` |
+| `Golden Disco Hits - 2000 - 2003` | `Golden Disco Hits (2000-2003)` |
+| `Artist - Album Name (2020) [FLAC]` | `Artist - Album Name (2020) #flac` |
+| `Artist.Album.2019.MP3` | `Artist Album (2019) #mp3` |
 
 ## Play Buttons (macOS)
 
@@ -155,7 +170,8 @@ Media torrents display Play buttons below the status line for quick access to do
 - **Single season:** No header shown, just episode buttons (`▶ E1`, `▶ E2`, ...)
 - **Non-episode files:** Show humanized filename without resolution tags (e.g., `▶ Artist - Track Name`)
 - **CUE file support:** If a `.cue` file exists alongside an audio file, the `.cue` is opened instead
-- **DVD/Blu-ray support:** Torrents with `VIDEO_TS` or `BDMV` folders show a single `▶ Play` button
+- **DVD/Blu-ray support:** Torrents with `VIDEO_TS` or `BDMV` folders are detected as disc media
+- **Multi-disc torrents:** Torrents with multiple discs (e.g., `Disk.1/VIDEO_TS`, `Disk.2/VIDEO_TS`) show individual play buttons for each disc
 - **Up to 100 files:** Maximum of 100 play buttons per torrent
 
 ### Individual File Title Rules
@@ -167,6 +183,34 @@ Button titles for individual files follow these rules:
    - Resolution suffixes (`#2160p`, `#1080p`, etc.) are removed from button titles
    - All technical tags (codecs, sources, etc.) are removed
    - Example: `Artist.Track.2160p.FLAC.flac` → `▶ Artist Track`
+
+### DVD/Blu-ray Disc Support
+
+Torrents containing DVD or Blu-ray disc structures receive special handling:
+
+**Detection:**
+- **DVD:** Detected by presence of `VIDEO_TS.IFO` file (not just `VIDEO_TS` folder name)
+- **Blu-ray:** Detected by presence of `index.bdmv` file within a `BDMV` folder
+
+**Multi-disc torrents:**
+- Torrents may contain multiple discs in separate folders (e.g., `Disk.1/VIDEO_TS/`, `Disk.2/VIDEO_TS/`)
+- Each disc gets its own play button showing the folder name (e.g., `▶ Disk.1`, `▶ Disk.2`)
+- Single-disc torrents show `▶ DVD` or `▶ Blu-ray`
+- The subtitle shows "X discs" instead of video count
+
+**Playback:**
+- VLC is preferred for disc playback, launched with `dvd://` or `bluray://` protocol
+- IINA is used as fallback if VLC is not installed
+- The disc root folder (parent of `VIDEO_TS` or `BDMV`) is passed to the player
+
+**Progress display:**
+- VOB files (DVD) and M2TS files (Blu-ray) are not counted as separate videos
+- Progress is calculated per-disc based on consecutive download progress
+- Play buttons only appear after index files (IFO/BUP for DVD, index.bdmv for Blu-ray) are fully downloaded
+
+**Download priority:**
+- Disc index files are prioritized for download before video content
+- See [Piece-Download-Priority.md](Piece-Download-Priority.md) for details
 
 ### Supported Media Extensions
 

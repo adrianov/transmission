@@ -213,15 +213,19 @@
             bracketYear = [bracketContent substringWithRange:yearInBracketMatch.range];
         }
 
-        // Extract disc format from brackets
-        NSRegularExpression* formatInBracketRegex = [NSRegularExpression regularExpressionWithPattern:@"\\b(DVD5|DVD9|DVD|BD25|BD50|BD66|BD100)\\b"
-                                                                                              options:NSRegularExpressionCaseInsensitive
-                                                                                                error:nil];
+        // Extract disc format, legacy codec, or audio format from brackets
+        NSRegularExpression* formatInBracketRegex = [NSRegularExpression
+            regularExpressionWithPattern:@"\\b(DVD5|DVD9|DVD|BD25|BD50|BD66|BD100|XviD|DivX|MP3|FLAC|OGG|AAC|WAV|APE|ALAC|WMA|OPUS|M4A)\\b"
+                                 options:NSRegularExpressionCaseInsensitive
+                                   error:nil];
         NSTextCheckingResult* formatInBracketMatch = [formatInBracketRegex firstMatchInString:bracketContent options:0
                                                                                         range:NSMakeRange(0, bracketContent.length)];
         if (formatInBracketMatch)
         {
-            bracketFormat = [bracketContent substringWithRange:formatInBracketMatch.range].uppercaseString;
+            NSString* fmt = [bracketContent substringWithRange:formatInBracketMatch.range];
+            // Disc formats (DVD/BD) uppercase, legacy codecs and audio formats lowercase
+            NSSet* discFormats = [NSSet setWithArray:@[ @"dvd", @"dvd5", @"dvd9", @"bd25", @"bd50", @"bd66", @"bd100" ]];
+            bracketFormat = [discFormats containsObject:fmt.lowercaseString] ? fmt.uppercaseString : fmt.lowercaseString;
         }
 
         // Remove only year and disc format from bracket content, keep the rest
@@ -281,7 +285,7 @@
         }
     }
 
-    // Check for DVD/BD format tags (shown as #DVD5, #BD50, etc.)
+    // Check for DVD/BD format tags (shown as #DVD5, #BD50, etc.) - uppercase
     if (!resolution)
     {
         NSRegularExpression* discRegex = [NSRegularExpression regularExpressionWithPattern:@"\\b(DVD5|DVD9|DVD|BD25|BD50|BD66|BD100)\\b"
@@ -291,6 +295,47 @@
         if (discMatch)
         {
             resolution = [title substringWithRange:discMatch.range].uppercaseString;
+        }
+    }
+
+    // Legacy codecs (shown as #xvid, #divx) - lowercase
+    if (!resolution)
+    {
+        NSRegularExpression* codecRegex = [NSRegularExpression regularExpressionWithPattern:@"\\b(XviD|DivX)\\b"
+                                                                                    options:NSRegularExpressionCaseInsensitive
+                                                                                      error:nil];
+        NSTextCheckingResult* codecMatch = [codecRegex firstMatchInString:title options:0 range:NSMakeRange(0, title.length)];
+        if (codecMatch)
+        {
+            resolution = [title substringWithRange:codecMatch.range].lowercaseString;
+        }
+    }
+
+    // Audio format tags (shown as #mp3, #flac, etc.) - keep lowercase
+    // Also match Cyrillic МР3 (М=M, Р=P in Cyrillic)
+    if (!resolution)
+    {
+        NSRegularExpression* audioFormatRegex = [NSRegularExpression regularExpressionWithPattern:@"\\b(MP3|FLAC|OGG|AAC|WAV|APE|ALAC|WMA|OPUS|M4A)\\b"
+                                                                                          options:NSRegularExpressionCaseInsensitive
+                                                                                            error:nil];
+        NSTextCheckingResult* audioFormatMatch = [audioFormatRegex firstMatchInString:title options:0
+                                                                                range:NSMakeRange(0, title.length)];
+        if (audioFormatMatch)
+        {
+            resolution = [title substringWithRange:audioFormatMatch.range].lowercaseString;
+        }
+        else
+        {
+            // Check for Cyrillic variants
+            NSRegularExpression* cyrillicMp3Regex = [NSRegularExpression regularExpressionWithPattern:@"\\(?(МР3|МРЗ)\\)?"
+                                                                                              options:NSRegularExpressionCaseInsensitive
+                                                                                                error:nil];
+            NSTextCheckingResult* cyrillicMatch = [cyrillicMp3Regex firstMatchInString:title options:0
+                                                                                 range:NSMakeRange(0, title.length)];
+            if (cyrillicMatch)
+            {
+                resolution = @"mp3";
+            }
         }
     }
 
@@ -336,10 +381,24 @@
         dateIndex = dateMatch.range.location;
     }
 
-    // Extract year (1900-2099) - but not if it's part of a date
+    // Year interval pattern (e.g., "2000 - 2003" or "2000-2003")
+    NSRegularExpression* yearIntervalRegex = [NSRegularExpression regularExpressionWithPattern:@"\\b((?:19|20)\\d{2})\\s*-\\s*((?:19|20)\\d{2})\\b"
+                                                                                       options:0
+                                                                                         error:nil];
+    NSTextCheckingResult* yearIntervalMatch = [yearIntervalRegex firstMatchInString:title options:0
+                                                                              range:NSMakeRange(0, title.length)];
+    NSString* yearInterval = nil;
+    if (yearIntervalMatch && yearIntervalMatch.numberOfRanges > 2)
+    {
+        NSString* startYear = [title substringWithRange:[yearIntervalMatch rangeAtIndex:1]];
+        NSString* endYear = [title substringWithRange:[yearIntervalMatch rangeAtIndex:2]];
+        yearInterval = [NSString stringWithFormat:@"%@-%@", startYear, endYear];
+    }
+
+    // Extract year (1900-2099) - but not if it's part of a date or interval
     // Also use year extracted from bracket metadata if no other year found
     NSString* year = nil;
-    if (!fullDateMatch)
+    if (!fullDateMatch && !yearInterval)
     {
         NSRegularExpression* yearRegex = [NSRegularExpression regularExpressionWithPattern:@"\\b(19\\d{2}|20\\d{2})\\b" options:0
                                                                                      error:nil];
@@ -431,21 +490,38 @@
         title = [tagRegex stringByReplacingMatchesInString:title options:0 range:NSMakeRange(0, title.length) withTemplate:@""];
     }
 
-    // Remove resolution, season markers, year, date from title (and preceding dot if used as separator)
-    NSRegularExpression* resRemoveRegex = [NSRegularExpression regularExpressionWithPattern:@"\\.?(2160p|1080p|720p|480p)\\b"
+    // Remove resolution, season markers, year, date from title (and preceding dot or surrounding parentheses)
+    NSRegularExpression* resRemoveRegex = [NSRegularExpression regularExpressionWithPattern:@"\\.?\\(?(2160p|1080p|720p|480p)\\)?"
                                                                                     options:NSRegularExpressionCaseInsensitive
                                                                                       error:nil];
     title = [resRemoveRegex stringByReplacingMatchesInString:title options:0 range:NSMakeRange(0, title.length) withTemplate:@""];
 
-    NSRegularExpression* uhdRemoveRegex = [NSRegularExpression regularExpressionWithPattern:@"\\.?(8K|4K|UHD|DVD5|DVD9|DVD|BD25|BD50|BD66|BD100)\\b"
-                                                                                    options:NSRegularExpressionCaseInsensitive
-                                                                                      error:nil];
+    NSRegularExpression* uhdRemoveRegex = [NSRegularExpression
+        regularExpressionWithPattern:@"\\.?\\(?(8K|4K|UHD|DVD5|DVD9|DVD|BD25|BD50|BD66|BD100|XviD|DivX|MP3|FLAC|OGG|AAC|WAV|APE|ALAC|WMA|OPUS|M4A)\\)?"
+                             options:NSRegularExpressionCaseInsensitive
+                               error:nil];
     title = [uhdRemoveRegex stringByReplacingMatchesInString:title options:0 range:NSMakeRange(0, title.length) withTemplate:@""];
+
+    // Remove Cyrillic audio format variants
+    NSRegularExpression* cyrillicMp3RemoveRegex = [NSRegularExpression regularExpressionWithPattern:@"\\(?(МР3|МРЗ)\\)?"
+                                                                                            options:NSRegularExpressionCaseInsensitive
+                                                                                              error:nil];
+    title = [cyrillicMp3RemoveRegex stringByReplacingMatchesInString:title options:0 range:NSMakeRange(0, title.length)
+                                                        withTemplate:@""];
 
     NSRegularExpression* seasonRemoveRegex = [NSRegularExpression regularExpressionWithPattern:@"\\.?S\\d{1,2}(E\\d+)?\\b"
                                                                                        options:NSRegularExpressionCaseInsensitive
                                                                                          error:nil];
     title = [seasonRemoveRegex stringByReplacingMatchesInString:title options:0 range:NSMakeRange(0, title.length) withTemplate:@""];
+    // Remove year interval (and preceding dot or surrounding parentheses)
+    if (yearInterval)
+    {
+        NSRegularExpression* yearIntervalRemoveRegex = [NSRegularExpression regularExpressionWithPattern:@"\\.?\\(?(?:19|20)\\d{2}\\s*-\\s*(?:19|20)\\d{2}\\)?"
+                                                                                                 options:0
+                                                                                                   error:nil];
+        title = [yearIntervalRemoveRegex stringByReplacingMatchesInString:title options:0 range:NSMakeRange(0, title.length)
+                                                             withTemplate:@""];
+    }
     if (year)
     {
         // Remove year and surrounding parentheses or preceding dot
@@ -509,7 +585,11 @@
     {
         [result appendFormat:@" - %@", season];
     }
-    if (year && !date)
+    if (yearInterval)
+    {
+        [result appendFormat:@" (%@)", yearInterval];
+    }
+    else if (year && !date)
     {
         [result appendFormat:@" (%@)", year];
     }

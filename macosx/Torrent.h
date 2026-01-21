@@ -105,11 +105,20 @@ extern NSString* const kTorrentDidChangeGroupNotification;
 /// Returns YES if torrent has any playable media files on disk.
 @property(nonatomic, readonly) BOOL hasPlayableMedia;
 
+/// Cached height for play buttons view (calculated by TorrentTableView).
+@property(nonatomic) CGFloat cachedPlayButtonsHeight;
+/// Cached width used for play buttons layout (calculated by TorrentTableView).
+@property(nonatomic) CGFloat cachedPlayButtonsWidth;
+
 /// Returns current file progress (0.0-1.0) for a file index.
 - (CGFloat)fileProgressForIndex:(NSUInteger)index;
 
-/// Returns overall consecutive progress for DVD/Blu-ray disc files (0.0-1.0).
-- (CGFloat)discConsecutiveProgress;
+/// Returns consecutive progress for a folder (disc or album).
+- (CGFloat)folderConsecutiveProgress:(NSString*)folder;
+/// Returns consecutive progress for the first media file in a folder.
+- (CGFloat)folderFirstMediaProgress:(NSString*)folder;
+/// Returns file indexes for a folder if cached.
+- (NSIndexSet*)fileIndexesForFolder:(NSString*)folder;
 
 @property(nonatomic, readonly) NSString* name;
 @property(nonatomic, readonly) NSString* displayName;
