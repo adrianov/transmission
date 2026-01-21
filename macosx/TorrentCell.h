@@ -28,6 +28,8 @@
 
 /// Container view for dynamically created play buttons. Created programmatically.
 @property(nonatomic) NSView* fPlayButtonsView;
+/// Height constraint for the play buttons view (updated dynamically)
+@property(nonatomic) NSLayoutConstraint* fPlayButtonsHeightConstraint;
 /// Tracks which playable files array was used to create the buttons (for cache invalidation)
 @property(nonatomic, weak) NSArray* fPlayButtonsSourceFiles;
 /// Tracks the torrent hash to detect when cell is reused for a different torrent

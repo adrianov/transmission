@@ -719,7 +719,6 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
 /// Types: "file" (individual media file), "dvd", "bluray", "album" (folder-based)
 - (NSArray<NSDictionary*>*)playableFiles
 {
-
     [self detectMediaType];
 
     // Check if cache needs clearing based on media type
@@ -730,15 +729,16 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
 
         // Check what type is cached
         NSString* cachedType = self.fPlayableFiles.firstObject[@"type"];
-        BOOL isFolderType = [cachedType isEqualToString:@"dvd"] ||
-                           [cachedType isEqualToString:@"bluray"] ||
-                           [cachedType isEqualToString:@"album"];
+        BOOL isFolderType = [cachedType isEqualToString:@"dvd"] || [cachedType isEqualToString:@"bluray"] ||
+            [cachedType isEqualToString:@"album"];
 
         // Clear cache if type mismatches (e.g., cache has "file" but we need "album")
         if (needsFolderBased != isFolderType)
         {
-            NSLog(@"[Torrent] playableFiles: clearing cache - type mismatch (needsFolderBased: %@, isFolderType: %@)",
-                   needsFolderBased ? @"YES" : @"NO", isFolderType ? @"YES" : @"NO");
+            NSLog(
+                @"[Torrent] playableFiles: clearing cache - type mismatch (needsFolderBased: %@, isFolderType: %@)",
+                needsFolderBased ? @"YES" : @"NO",
+                isFolderType ? @"YES" : @"NO");
             self.fPlayableFiles = nil;
         }
         else
@@ -960,7 +960,8 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
         auto const location = tr_torrentFindFile(self.fHandle, (tr_file_index_t)cueIndex.unsignedIntegerValue);
         NSString* path = !std::empty(location) ? @(location.c_str()) : [self.currentDirectory stringByAppendingPathComponent:cueFileName];
 
-        CGFloat progress = cueProgress[baseName] ? cueProgress[baseName].doubleValue : tr_torrentFileConsecutiveProgress(self.fHandle, cueIndex.unsignedIntegerValue);
+        CGFloat progress = cueProgress[baseName] ? cueProgress[baseName].doubleValue :
+                                                   tr_torrentFileConsecutiveProgress(self.fHandle, cueIndex.unsignedIntegerValue);
         if (progress < 0)
             progress = 0;
 
@@ -1114,9 +1115,9 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
     static NSSet<NSString*>* audioExtensions;
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
-        audioExtensions = [NSSet setWithArray:@[
-            @"mp3", @"flac", @"wav", @"aac", @"ogg", @"wma", @"m4a", @"ape", @"alac", @"aiff", @"opus", @"cue"
-        ]];
+        audioExtensions = [NSSet
+            setWithArray:
+                @[ @"mp3", @"flac", @"wav", @"aac", @"ogg", @"wma", @"m4a", @"ape", @"alac", @"aiff", @"opus", @"cue" ]];
     });
 
     for (NSNumber* fileIndex in fileIndices)

@@ -224,16 +224,12 @@ static CGFloat const kPlayButtonVerticalPadding = 4.0;
         Torrent* torrent = (Torrent*)item;
         CGFloat height = self.rowHeight;
 
-        // Add extra height for play buttons if torrent has playable media
-        BOOL const minimal = [self.fDefaults boolForKey:@"SmallView"];
-        if (!minimal && torrent.hasPlayableMedia)
+        // Adjust height for play buttons if present
+        if (torrent.cachedPlayButtonsHeight > height)
         {
-            // Use cached height if available, otherwise estimate one row
-            CGFloat buttonsHeight = torrent.cachedPlayButtonsHeight;
-            if (buttonsHeight < kPlayButtonRowHeight)
-                buttonsHeight = kPlayButtonRowHeight;
-            height += buttonsHeight + kPlayButtonVerticalPadding;
+            height = torrent.cachedPlayButtonsHeight;
         }
+
         return height;
     }
     return kGroupSeparatorHeight;
@@ -357,8 +353,7 @@ static CGFloat const kPlayButtonVerticalPadding = 4.0;
 
             // Configure play buttons if not yet created or if source changed
             NSArray<NSDictionary*>* playableFiles = torrent.playableFiles;
-            if (playableFiles.count > 0 &&
-                (!torrentCell.fPlayButtonsView || torrentCell.fPlayButtonsSourceFiles != playableFiles))
+            if (playableFiles.count > 0 && (!torrentCell.fPlayButtonsView || torrentCell.fPlayButtonsSourceFiles != playableFiles))
             {
                 [self configurePlayButtonsForCell:torrentCell torrent:torrent];
             }
@@ -935,6 +930,7 @@ static CGFloat const kPlayButtonVerticalPadding = 4.0;
         [cell.fPlayButtonsView removeFromSuperview];
         cell.fPlayButtonsView = nil;
         cell.fPlayButtonsSourceFiles = nil;
+        cell.fPlayButtonsHeightConstraint = nil;
     }
 
     if (!playableFiles || playableFiles.count == 0)
@@ -1004,23 +1000,50 @@ static CGFloat const kPlayButtonVerticalPadding = 4.0;
     cell.fPlayButtonsView = flowView;
     cell.fPlayButtonsSourceFiles = playableFiles;
 
-    // Calculate available width for height calculation (match the trailing constraint)
-    CGFloat leftMargin = 168; // Approximate leading margin
     CGFloat rightMargin = 55; // Space for control buttons
-    CGFloat availableWidth = self.bounds.size.width - leftMargin - rightMargin;
+
+    // Constraints: position below status field
+    cell.fPlayButtonsHeightConstraint = [flowView.heightAnchor constraintEqualToConstant:1.0];
+    [NSLayoutConstraint activateConstraints:@[
+        [flowView.leadingAnchor constraintEqualToAnchor:cell.fTorrentStatusField.leadingAnchor],
+        [flowView.topAnchor constraintEqualToAnchor:cell.fTorrentStatusField.bottomAnchor constant:kPlayButtonVerticalPadding],
+        [flowView.trailingAnchor constraintLessThanOrEqualToAnchor:cell.trailingAnchor constant:-rightMargin],
+        cell.fPlayButtonsHeightConstraint
+    ]];
+
+    [cell layoutSubtreeIfNeeded];
+
+    // Get actual height from flow view using resolved width
+    CGFloat availableWidth = NSWidth(flowView.frame);
+    if (availableWidth <= 0)
+        availableWidth = self.bounds.size.width - 168 - rightMargin;
     if (availableWidth < 200)
         availableWidth = 600;
 
-    // Get actual height from flow view
-    CGFloat height = [flowView heightForWidth:availableWidth];
-    if (height < kPlayButtonRowHeight)
-        height = kPlayButtonRowHeight;
+    if (torrent.cachedPlayButtonsWidth == availableWidth && torrent.cachedPlayButtonsHeight >= self.rowHeight)
+    {
+        CGFloat cachedButtonHeight = torrent.cachedPlayButtonsHeight - self.rowHeight - kPlayButtonVerticalPadding;
+        if (cachedButtonHeight < 0)
+            cachedButtonHeight = 0;
+        cell.fPlayButtonsHeightConstraint.constant = cachedButtonHeight;
+        return;
+    }
+
+    CGFloat buttonHeight = [flowView heightForWidth:availableWidth];
+    BOOL hasVisibleButtons = buttonHeight > 0;
+    if (hasVisibleButtons && buttonHeight < kPlayButtonRowHeight)
+        buttonHeight = kPlayButtonRowHeight;
+
+    cell.fPlayButtonsHeightConstraint.constant = buttonHeight;
+
+    CGFloat totalHeight = self.rowHeight + (hasVisibleButtons ? (buttonHeight + kPlayButtonVerticalPadding) : 0);
 
     // Cache the height and refresh row if it changed
-    if (torrent.cachedPlayButtonsHeight != height)
+    if (torrent.cachedPlayButtonsHeight != totalHeight)
     {
-        torrent.cachedPlayButtonsHeight = height;
-        
+        torrent.cachedPlayButtonsHeight = totalHeight;
+        torrent.cachedPlayButtonsWidth = availableWidth;
+
         // Schedule row height refresh
         NSInteger row = [self rowForItem:torrent];
         if (row != -1)
@@ -1030,14 +1053,6 @@ static CGFloat const kPlayButtonVerticalPadding = 4.0;
             });
         }
     }
-
-    // Constraints: position below status field
-    [NSLayoutConstraint activateConstraints:@[
-        [flowView.leadingAnchor constraintEqualToAnchor:cell.fTorrentStatusField.leadingAnchor],
-        [flowView.topAnchor constraintEqualToAnchor:cell.fTorrentStatusField.bottomAnchor constant:2],
-        [flowView.trailingAnchor constraintLessThanOrEqualToAnchor:cell.trailingAnchor constant:-rightMargin],
-        [flowView.heightAnchor constraintGreaterThanOrEqualToConstant:height]
-    ]];
 }
 
 - (void)updatePlayButtonProgressForCell:(TorrentCell*)cell torrent:(Torrent*)torrent
@@ -1045,6 +1060,7 @@ static CGFloat const kPlayButtonVerticalPadding = 4.0;
     if (!cell.fPlayButtonsView || ![cell.fPlayButtonsView isKindOfClass:[FlowLayoutView class]])
         return;
 
+    BOOL visibilityChanged = NO;
     for (NSView* view in [(FlowLayoutView*)cell.fPlayButtonsView arrangedSubviews])
     {
         if (![view isKindOfClass:[PlayButton class]])
@@ -1072,9 +1088,9 @@ static CGFloat const kPlayButtonVerticalPadding = 4.0;
                     folder = [folder substringFromIndex:1];
             }
 
-            // Albums always show (progress=1.0), discs use folder progress
+            // Albums show when first media file is playable, discs use folder progress
             if ([type isEqualToString:@"album"])
-                progress = 1.0;
+                progress = folder ? [torrent folderFirstMediaProgress:folder] : 0.0;
             else
                 progress = folder ? [torrent folderConsecutiveProgress:folder] : 0.0;
         }
@@ -1086,7 +1102,10 @@ static CGFloat const kPlayButtonVerticalPadding = 4.0;
         // Show/hide based on progress
         BOOL shouldBeVisible = progress > 0;
         if (button.hidden == shouldBeVisible)
+        {
             button.hidden = !shouldBeVisible;
+            visibilityChanged = YES;
+        }
 
         if (shouldBeVisible)
         {
@@ -1102,6 +1121,42 @@ static CGFloat const kPlayButtonVerticalPadding = 4.0;
             }
         }
     }
+
+    if (visibilityChanged)
+    {
+        FlowLayoutView* flowView = (FlowLayoutView*)cell.fPlayButtonsView;
+        [flowView setNeedsLayout:YES];
+        [flowView invalidateIntrinsicContentSize];
+
+        CGFloat availableWidth = NSWidth(flowView.frame);
+        if (availableWidth <= 0)
+            availableWidth = self.bounds.size.width - 168 - 55;
+        if (availableWidth < 200)
+            availableWidth = 600;
+
+        CGFloat buttonHeight = [flowView heightForWidth:availableWidth];
+        BOOL hasVisibleButtons = buttonHeight > 0;
+        if (hasVisibleButtons && buttonHeight < kPlayButtonRowHeight)
+            buttonHeight = kPlayButtonRowHeight;
+
+        if (cell.fPlayButtonsHeightConstraint)
+            cell.fPlayButtonsHeightConstraint.constant = buttonHeight;
+
+        CGFloat totalHeight = self.rowHeight + (hasVisibleButtons ? (buttonHeight + kPlayButtonVerticalPadding) : 0);
+        if (torrent.cachedPlayButtonsHeight != totalHeight)
+        {
+            torrent.cachedPlayButtonsHeight = totalHeight;
+            torrent.cachedPlayButtonsWidth = availableWidth;
+
+            NSInteger row = [self rowForItem:torrent];
+            if (row != -1)
+            {
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    [self noteHeightOfRowsWithIndexesChanged:[NSIndexSet indexSetWithIndex:row]];
+                });
+            }
+        }
+    }
 }
 
 - (IBAction)playMediaFile:(NSButton*)sender
@@ -1111,6 +1166,39 @@ static CGFloat const kPlayButtonVerticalPadding = 4.0;
         return;
 
     NSString* type = sender.accessibilityHelp;
+    Torrent* torrent = [self itemAtRow:[self rowForView:[sender superview]]];
+    if (!torrent)
+        return;
+
+    NSInteger fileIndex = sender.tag;
+    if (fileIndex != NSNotFound)
+    {
+        if ([torrent fileProgressForIndex:fileIndex] < 1.0)
+        {
+            [torrent setFilePriority:TR_PRI_HIGH forIndexes:[NSIndexSet indexSetWithIndex:fileIndex]];
+        }
+    }
+    else
+    {
+        NSString* currentDir = torrent.currentDirectory;
+        NSString* folder = nil;
+        if ([path hasPrefix:currentDir])
+        {
+            folder = [path substringFromIndex:currentDir.length];
+            if ([folder hasPrefix:@"/"])
+                folder = [folder substringFromIndex:1];
+        }
+
+        if (folder)
+        {
+            NSIndexSet* fileIndexes = [torrent fileIndexesForFolder:folder];
+            if (fileIndexes.count > 0 && [torrent folderConsecutiveProgress:folder] < 1.0)
+            {
+                [torrent setFilePriority:TR_PRI_HIGH forIndexes:fileIndexes];
+            }
+        }
+    }
+
     NSURL* fileURL = [NSURL fileURLWithPath:path];
 
     if ([type isEqualToString:@"dvd"] || [type isEqualToString:@"bluray"])
@@ -1130,8 +1218,8 @@ static CGFloat const kPlayButtonVerticalPadding = 4.0;
         if (iinaURL)
         {
             NSWorkspaceOpenConfiguration* config = [NSWorkspaceOpenConfiguration configuration];
-            [NSWorkspace.sharedWorkspace openURLs:@[ fileURL ] withApplicationAtURL:iinaURL
-                                    configuration:config completionHandler:nil];
+            [NSWorkspace.sharedWorkspace openURLs:@[ fileURL ] withApplicationAtURL:iinaURL configuration:config
+                                completionHandler:nil];
             return;
         }
     }
@@ -1143,8 +1231,8 @@ static CGFloat const kPlayButtonVerticalPadding = 4.0;
         if (musicPlayerURL)
         {
             NSWorkspaceOpenConfiguration* config = [NSWorkspaceOpenConfiguration configuration];
-            [NSWorkspace.sharedWorkspace openURLs:@[ fileURL ] withApplicationAtURL:musicPlayerURL
-                                    configuration:config completionHandler:nil];
+            [NSWorkspace.sharedWorkspace openURLs:@[ fileURL ] withApplicationAtURL:musicPlayerURL configuration:config
+                                completionHandler:nil];
             return;
         }
     }
