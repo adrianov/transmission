@@ -307,6 +307,12 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
         torrent.fStat = stats[i];
         torrent.fStatsGeneration++;
 
+        // Clear disk space flag when torrent is no longer stopped
+        if (torrent.fStat->activity != TR_STATUS_STOPPED)
+        {
+            torrent.fPausedForDiskSpace = NO;
+        }
+
         //make sure the "active" filter is updated when transmitting changes
         if (was_transmitting[i] != torrent.transmitting)
         {
@@ -833,24 +839,21 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
     NSMutableArray<NSDictionary*>* playable = [NSMutableArray array];
     NSUInteger const count = self.fileCount;
 
-    // First pass: collect .cue files
+    // First pass: collect .cue files (based on torrent metadata, not disk existence)
     NSMutableSet<NSString*>* cueBaseNames = [NSMutableSet set];
     NSMutableDictionary<NSString*, NSNumber*>* cueFileIndexes = [NSMutableDictionary dictionary];
     NSMutableDictionary<NSString*, NSString*>* cueFileNames = [NSMutableDictionary dictionary];
+    NSMutableDictionary<NSString*, NSNumber*>* cueAudioIndexes = [NSMutableDictionary dictionary]; // companion audio for progress
     for (NSUInteger i = 0; i < count; i++)
     {
         auto const file = tr_torrentFile(self.fHandle, i);
         NSString* fileName = @(file.name);
         if ([fileName.pathExtension.lowercaseString isEqualToString:@"cue"])
         {
-            auto const location = tr_torrentFindFile(self.fHandle, i);
-            if (!std::empty(location))
-            {
-                NSString* baseName = fileName.stringByDeletingPathExtension;
-                [cueBaseNames addObject:baseName];
-                cueFileIndexes[baseName] = @(i);
-                cueFileNames[baseName] = fileName;
-            }
+            NSString* baseName = fileName.stringByDeletingPathExtension;
+            [cueBaseNames addObject:baseName];
+            cueFileIndexes[baseName] = @(i);
+            cueFileNames[baseName] = fileName;
         }
     }
 
@@ -879,16 +882,13 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
         // Skip audio with companion .cue; it will be represented by the cue entry
         if ([cueCompanionExtensions containsObject:ext] && [cueBaseNames containsObject:fileName.stringByDeletingPathExtension])
         {
-            CGFloat cueFileProgress = tr_torrentFileConsecutiveProgress(self.fHandle, i);
-            if (cueFileProgress >= 0)
-            {
-                NSString* baseName = fileName.stringByDeletingPathExtension;
-                NSNumber* existing = cueProgress[baseName];
-                if (!existing || cueFileProgress > existing.doubleValue)
-                {
-                    cueProgress[baseName] = @(cueFileProgress);
-                }
-            }
+            NSString* baseName = fileName.stringByDeletingPathExtension;
+            CGFloat audioProgress = tr_torrentFileConsecutiveProgress(self.fHandle, i);
+            if (audioProgress < 0)
+                audioProgress = 0;
+            cueProgress[baseName] = @(audioProgress);
+            // Store audio file index for progress tracking (CUE is tiny, audio progress matters)
+            cueAudioIndexes[baseName] = @(i);
             continue;
         }
 
@@ -950,11 +950,16 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
         if (!cueIndex || !cueFileName)
             continue;
 
+        // Use CUE file path for playback
         auto const location = tr_torrentFindFile(self.fHandle, (tr_file_index_t)cueIndex.unsignedIntegerValue);
         NSString* path = !std::empty(location) ? @(location.c_str()) : [self.currentDirectory stringByAppendingPathComponent:cueFileName];
 
+        // Use audio file index for progress tracking (CUE is tiny, audio progress matters for playability)
+        NSNumber* audioIndex = cueAudioIndexes[baseName];
+        NSNumber* progressIndex = audioIndex ?: cueIndex;
+
         CGFloat progress = cueProgress[baseName] ? cueProgress[baseName].doubleValue :
-                                                   tr_torrentFileConsecutiveProgress(self.fHandle, cueIndex.unsignedIntegerValue);
+                                                   tr_torrentFileConsecutiveProgress(self.fHandle, progressIndex.unsignedIntegerValue);
         if (progress < 0)
             progress = 0;
 
@@ -964,9 +969,9 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
 
         [playable addObject:@{
             @"type" : @"file",
-            @"index" : cueIndex,
+            @"index" : progressIndex, // Use audio index for progress tracking via button.tag
             @"name" : displayName,
-            @"path" : path,
+            @"path" : path, // CUE path for playback
             @"season" : @0,
             @"episode" : cueIndex,
             @"progress" : @(progress),
@@ -1461,7 +1466,12 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
 {
     if (!self.fDisplayName)
     {
-        self.fDisplayName = self.name.humanReadableTitle;
+        // Cache the human-readable title result
+        if (!self.fCachedHumanReadableTitle)
+        {
+            self.fCachedHumanReadableTitle = self.name.humanReadableTitle;
+        }
+        self.fDisplayName = self.fCachedHumanReadableTitle;
     }
     return self.fDisplayName;
 }
@@ -1932,73 +1942,91 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
 
 - (NSString*)progressString
 {
+    // Return cached string if stats haven't changed
+    if (self.fStatsGeneration == self.fCachedStatsGeneration && self.fCachedProgressString)
+    {
+        return self.fCachedProgressString;
+    }
+
+    NSString* string;
+
     if (self.magnet)
     {
         NSString* progressString = self.fStat->metadataPercentComplete > 0.0 ?
             [NSString stringWithFormat:NSLocalizedString(@"%@ of torrent metadata retrieved", "Torrent -> progress string"),
                                        [NSString percentString:self.fStat->metadataPercentComplete longDecimals:YES]] :
             NSLocalizedString(@"torrent metadata needed", "Torrent -> progress string");
-
-        return [NSString stringWithFormat:@"%@ — %@", NSLocalizedString(@"Magnetized transfer", "Torrent -> progress string"), progressString];
-    }
-
-    NSString* string;
-
-    if (!self.allDownloaded)
-    {
-        CGFloat progress;
-        if (self.folder && [self.fDefaults boolForKey:@"DisplayStatusProgressSelected"])
-        {
-            string = [NSString stringForFilePartialSize:self.haveTotal fullSize:self.totalSizeSelected];
-            progress = self.progressDone;
-        }
-        else
-        {
-            string = [NSString stringForFilePartialSize:self.haveTotal fullSize:self.size];
-            progress = self.progress;
-        }
-
-        string = [string stringByAppendingFormat:@" (%@)", [NSString percentString:progress longDecimals:YES]];
+        string = [NSString stringWithFormat:@"%@ — %@", NSLocalizedString(@"Magnetized transfer", "Torrent -> progress string"), progressString];
     }
     else
     {
-        NSString* downloadString;
-        if (!self.complete) //only multifile possible
+        if (!self.allDownloaded)
         {
-            if ([self.fDefaults boolForKey:@"DisplayStatusProgressSelected"])
+            CGFloat progress;
+            if (self.folder && [self.fDefaults boolForKey:@"DisplayStatusProgressSelected"])
             {
-                downloadString = [NSString stringWithFormat:NSLocalizedString(@"%@ selected", "Torrent -> progress string"),
-                                                            [NSString stringForFileSize:self.haveTotal]];
+                string = [NSString stringForFilePartialSize:self.haveTotal fullSize:self.totalSizeSelected];
+                progress = self.progressDone;
             }
             else
             {
-                downloadString = [NSString stringForFilePartialSize:self.haveTotal fullSize:self.size];
-                downloadString = [downloadString stringByAppendingFormat:@" (%@)", [NSString percentString:self.progress longDecimals:YES]];
+                string = [NSString stringForFilePartialSize:self.haveTotal fullSize:self.size];
+                progress = self.progress;
             }
+
+            string = [string stringByAppendingFormat:@" (%@)", [NSString percentString:progress longDecimals:YES]];
         }
         else
         {
-            downloadString = [NSString stringForFileSize:self.size];
+            NSString* downloadString;
+            if (!self.complete) //only multifile possible
+            {
+                if ([self.fDefaults boolForKey:@"DisplayStatusProgressSelected"])
+                {
+                    downloadString = [NSString stringWithFormat:NSLocalizedString(@"%@ selected", "Torrent -> progress string"),
+                                                                [NSString stringForFileSize:self.haveTotal]];
+                }
+                else
+                {
+                    downloadString = [NSString stringForFilePartialSize:self.haveTotal fullSize:self.size];
+                    downloadString = [downloadString
+                        stringByAppendingFormat:@" (%@)", [NSString percentString:self.progress longDecimals:YES]];
+                }
+            }
+            else
+            {
+                downloadString = [NSString stringForFileSize:self.size];
+            }
+
+            NSString* uploadString = [NSString stringWithFormat:NSLocalizedString(@"uploaded %@ (Ratio: %@)", "Torrent -> progress string"),
+                                                                [NSString stringForFileSize:self.uploadedTotal],
+                                                                [NSString stringForRatio:self.ratio]];
+
+            string = [downloadString stringByAppendingFormat:@", %@", uploadString];
         }
 
-        NSString* uploadString = [NSString stringWithFormat:NSLocalizedString(@"uploaded %@ (Ratio: %@)", "Torrent -> progress string"),
-                                                            [NSString stringForFileSize:self.uploadedTotal],
-                                                            [NSString stringForRatio:self.ratio]];
-
-        string = [downloadString stringByAppendingFormat:@", %@", uploadString];
+        //add time when downloading or seed limit set
+        if (self.shouldShowEta)
+        {
+            string = [string stringByAppendingFormat:@" — %@", self.etaString];
+        }
     }
 
-    //add time when downloading or seed limit set
-    if (self.shouldShowEta)
-    {
-        string = [string stringByAppendingFormat:@" — %@", self.etaString];
-    }
+    // Cache the result
+    self.fCachedProgressString = string;
+    self.fCachedStatsGeneration = self.fStatsGeneration;
 
     return string;
 }
 
 - (NSString*)statusString
 {
+    // Return cached string if stats haven't changed
+    if (self.fStatsGeneration == self.fCachedStatsGeneration && self.fCachedStatusString)
+    {
+        return self.fCachedStatusString;
+    }
+
     NSString* string;
 
     if (self.anyErrorOrWarning)
@@ -2035,7 +2063,7 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
             }
             else if (self.pausedForDiskSpace)
             {
-                string = NSLocalizedString(@"Paused — Not enough disk space", "Torrent -> status string");
+                string = NSLocalizedString(@"Not enough disk space", "Torrent -> status string");
             }
             else
             {
@@ -2101,45 +2129,29 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
             }
             else
             {
-                // TODO: "%lu of 1" vs "%u of 1" disparity
-                // - either change "Downloading from %lu of 1 peer" to "Downloading from %u of 1 peer"
-                // - or change "Seeding to %u of 1 peer" to "Seeding to %lu of 1 peer"
-                // then update Transifex accordingly
-                string = [NSString stringWithFormat:NSLocalizedString(@"Seeding to %u of 1 peer", "Torrent -> status string"),
-                                                    (unsigned int)self.peersGettingFromUs];
+                string = [NSString localizedStringWithFormat:NSLocalizedString(@"Seeding to 1 of %lu peers", "Torrent -> status string"),
+                                                             self.peersGettingFromUs,
+                                                             totalPeersCount];
             }
-        }
-
-        if (self.stalled)
-        {
-            string = [NSLocalizedString(@"Stalled", "Torrent -> status string") stringByAppendingFormat:@", %@", string];
+            break;
         }
     }
 
-    //append even if error
-    if (self.active && !self.checking)
-    {
-        if (self.fStat->activity == TR_STATUS_DOWNLOAD)
-        {
-            string = [string stringByAppendingFormat:@" — %@: %@, %@: %@",
-                                                     NSLocalizedString(@"DL", "Torrent -> status string"),
-                                                     [NSString stringForSpeed:self.downloadRate],
-                                                     NSLocalizedString(@"UL", "Torrent -> status string"),
-                                                     [NSString stringForSpeed:self.uploadRate]];
-        }
-        else
-        {
-            string = [string stringByAppendingFormat:@" — %@: %@",
-                                                     NSLocalizedString(@"UL", "Torrent -> status string"),
-                                                     [NSString stringForSpeed:self.uploadRate]];
-        }
-    }
+    // Cache the result
+    self.fCachedStatusString = string;
+    self.fCachedStatsGeneration = self.fStatsGeneration;
 
     return string;
 }
 
 - (NSString*)shortStatusString
 {
+    // Return cached string if stats haven't changed
+    if (self.fStatsGeneration == self.fCachedStatsGeneration && self.fCachedShortStatusString)
+    {
+        return self.fCachedShortStatusString;
+    }
+
     NSString* string;
 
     switch (self.fStat->activity)
@@ -2187,9 +2199,20 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
                                             [NSString stringForRatio:self.ratio],
                                             NSLocalizedString(@"UL", "Torrent -> status string"),
                                             [NSString stringForSpeed:self.uploadRate]];
+        break;
     }
 
-    return string;
+    // Cache the result
+    self.fCachedShortStatusString = string;
+
+    if (self.shouldShowEta)
+    {
+        return self.etaString;
+    }
+    else
+    {
+        return self.fCachedShortStatusString;
+    }
 }
 
 - (NSString*)remainingTimeString
@@ -3053,8 +3076,14 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
 
 - (NSString*)etaString
 {
+    // Return cached string if stats haven't changed
+    if (self.fStatsGeneration == self.fCachedStatsGeneration && self.fCachedEtaString)
+    {
+        return self.fCachedEtaString;
+    }
+
     time_t eta = self.fStat->eta;
-    // if there's a regular ETA, the torrent isn't idle
+    // if there's a regular ETA, torrent isn't idle
     BOOL fromIdle = NO;
     if (eta < 0)
     {
@@ -3076,7 +3105,7 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
         formatter.collapsesLargestUnit = YES;
         formatter.includesTimeRemainingPhrase = YES;
     });
-    // the duration of months being variable, setting the reference date to now (instead of 00:00:00 UTC on 1 January 2001)
+    // because duration of months being variable, setting reference date to now (instead of 00:00:00 UTC on 1 January 2001)
     formatter.referenceDate = NSDate.date;
     NSString* idleString = [formatter stringFromTimeInterval:eta];
 
@@ -3084,6 +3113,10 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
     {
         idleString = [idleString stringByAppendingFormat:@" (%@)", NSLocalizedString(@"inactive", "Torrent -> eta string")];
     }
+
+    // Cache the result
+    self.fCachedEtaString = idleString;
+    self.fCachedStatsGeneration = self.fStatsGeneration;
 
     return idleString;
 }

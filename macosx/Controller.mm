@@ -1937,6 +1937,17 @@ static NSTimeInterval const kLowPriorityDelay = 15.0;
     [self fullUpdateUI];
 }
 
+- (void)invalidateAllGroupCaches
+{
+    for (TorrentGroup* group in self.fDisplayedTorrents)
+    {
+        if ([group isKindOfClass:[TorrentGroup class]])
+        {
+            [group invalidateCache];
+        }
+    }
+}
+
 - (void)removeTorrents:(NSArray<Torrent*>*)torrents deleteData:(BOOL)deleteData
 {
     if ([self.fDefaults boolForKey:@"CheckRemove"])

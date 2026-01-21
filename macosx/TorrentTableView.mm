@@ -55,6 +55,12 @@ static NSTimeInterval const kToggleProgressSeconds = 0.175;
 @property(nonatomic) NSDictionary* fHoverEventDict;
 @property(nonatomic) CGFloat fLastKnownWidth;
 
+// Cached UserDefaults for faster access
+@property(nonatomic) BOOL fSmallView;
+@property(nonatomic) BOOL fSortByGroup;
+@property(nonatomic) BOOL fDisplaySmallStatusRegular;
+@property(nonatomic) BOOL fDisplayGroupRowRatio;
+
 @end
 
 @implementation TorrentTableView
@@ -98,9 +104,12 @@ static NSTimeInterval const kToggleProgressSeconds = 0.175;
 {
     [super awakeFromNib];
     self.fLastKnownWidth = self.bounds.size.width;
+    [self updateDefaultsCache];
+
     NSNotificationCenter* nc = NSNotificationCenter.defaultCenter;
     [nc addObserver:self selector:@selector(refreshTorrentTable) name:@"RefreshTorrentTable" object:nil];
     [nc addObserver:self selector:@selector(updateVisiblePlayButtons) name:@"UpdateUI" object:nil];
+    [nc addObserver:self selector:@selector(updateDefaultsCache) name:NSUserDefaultsDidChangeNotification object:nil];
 }
 
 - (void)viewDidEndLiveResize
@@ -114,6 +123,14 @@ static NSTimeInterval const kToggleProgressSeconds = 0.175;
     }
 }
 
+- (void)updateDefaultsCache
+{
+    self.fSmallView = [self.fDefaults boolForKey:@"SmallView"];
+    self.fSortByGroup = [self.fDefaults boolForKey:@"SortByGroup"];
+    self.fDisplaySmallStatusRegular = [self.fDefaults boolForKey:@"DisplaySmallStatusRegular"];
+    self.fDisplayGroupRowRatio = [self.fDefaults boolForKey:@"DisplayGroupRowRatio"];
+}
+
 - (void)refreshTorrentTable
 {
     self.needsDisplay = YES;
@@ -122,6 +139,8 @@ static NSTimeInterval const kToggleProgressSeconds = 0.175;
 - (void)updateVisiblePlayButtons
 {
     NSRange visibleRows = [self rowsInRect:self.visibleRect];
+    NSMutableIndexSet* rowsToUpdate = [[NSMutableIndexSet alloc] init];
+
     for (NSUInteger row = visibleRows.location; row < NSMaxRange(visibleRows); row++)
     {
         id item = [self itemAtRow:row];
@@ -134,11 +153,12 @@ static NSTimeInterval const kToggleProgressSeconds = 0.175;
         if (torrent.allDownloaded)
             continue;
 
-        TorrentCell* cell = [self viewAtColumn:0 row:row makeIfNecessary:NO];
-        if (cell && cell.fPlayButtonsView)
-        {
-            [self updatePlayButtonProgressForCell:cell torrent:torrent];
-        }
+        [rowsToUpdate addIndex:row];
+    }
+
+    if (rowsToUpdate.count > 0)
+    {
+        [self reloadDataForRowIndexes:rowsToUpdate columnIndexes:[NSIndexSet indexSetWithIndex:0]];
     }
 }
 
@@ -210,7 +230,7 @@ static NSTimeInterval const kToggleProgressSeconds = 0.175;
 
 - (BOOL)usesAlternatingRowBackgroundColors
 {
-    return ![self.fDefaults boolForKey:@"SmallView"];
+    return !self.fSmallView;
 }
 
 - (BOOL)isGroupCollapsed:(NSInteger)value
@@ -297,9 +317,8 @@ static CGFloat const kPlayButtonVerticalPadding = 4.0;
             }
 
             // Dynamic content - always update
-            torrentCell.fTorrentStatusField.stringValue = [self.fDefaults boolForKey:@"DisplaySmallStatusRegular"] ?
-                torrent.shortStatusString :
-                torrent.remainingTimeString;
+            torrentCell.fTorrentStatusField.stringValue = self.fDisplaySmallStatusRegular ? torrent.shortStatusString :
+                                                                                            torrent.remainingTimeString;
 
             if (self.fHoverEventDict)
             {
@@ -454,7 +473,7 @@ static CGFloat const kPlayButtonVerticalPadding = 4.0;
         groupCell.fGroupDownloadField.toolTip = tooltipDownload;
         groupCell.fGroupDownloadView.toolTip = tooltipDownload;
 
-        BOOL displayGroupRowRatio = [self.fDefaults boolForKey:@"DisplayGroupRowRatio"];
+        BOOL displayGroupRowRatio = self.fDisplayGroupRowRatio;
         groupCell.fGroupDownloadField.hidden = displayGroupRowRatio;
         groupCell.fGroupDownloadView.hidden = displayGroupRowRatio;
 
@@ -753,7 +772,7 @@ static CGFloat const kPlayButtonVerticalPadding = 4.0;
     NSInteger row = [self rowForView:view];
     Torrent* torrent = [self itemAtRow:row];
 
-    BOOL minimal = [self.fDefaults boolForKey:@"SmallView"];
+    BOOL minimal = self.fSmallView;
     if (minimal)
     {
         if ([view isKindOfClass:[SmallTorrentCell class]])
@@ -771,17 +790,17 @@ static CGFloat const kPlayButtonVerticalPadding = 4.0;
         NSString* statusString;
         if ([view isKindOfClass:[TorrentCellRevealButton class]])
         {
-            statusString = NSLocalizedString(@"Show the data file in Finder", "Torrent cell -> button info");
+            statusString = NSLocalizedString(@"Show data file in Finder", "Torrent cell -> button info");
         }
         else if ([view isKindOfClass:[TorrentCellControlButton class]])
         {
             if (torrent.active)
-                statusString = NSLocalizedString(@"Pause the transfer", "Torrent Table -> tooltip");
+                statusString = NSLocalizedString(@"Pause transfer", "Torrent Table -> tooltip");
             else
             {
                 if (NSApp.currentEvent.modifierFlags & NSEventModifierFlagOption)
                 {
-                    statusString = NSLocalizedString(@"Resume the transfer right away", "Torrent cell -> button info");
+                    statusString = NSLocalizedString(@"Resume transfer right away", "Torrent cell -> button info");
                 }
                 else if (torrent.waitingToStart)
                 {
@@ -789,7 +808,7 @@ static CGFloat const kPlayButtonVerticalPadding = 4.0;
                 }
                 else
                 {
-                    statusString = NSLocalizedString(@"Resume the transfer", "Torrent cell -> button info");
+                    statusString = NSLocalizedString(@"Resume transfer", "Torrent cell -> button info");
                 }
             }
         }
@@ -799,7 +818,7 @@ static CGFloat const kPlayButtonVerticalPadding = 4.0;
         }
         else if ([view isKindOfClass:[TorrentCellURLButton class]])
         {
-            statusString = NSLocalizedString(@"Open the torrent's comment URL", "Torrent cell -> button info");
+            statusString = NSLocalizedString(@"Open torrent's comment URL", "Torrent cell -> button info");
         }
 
         if (statusString)
@@ -808,7 +827,8 @@ static CGFloat const kPlayButtonVerticalPadding = 4.0;
         }
     }
 
-    [self reloadVisibleRows];
+    // Only reload the specific row instead of all visible rows
+    [self reloadDataForRowIndexes:[NSIndexSet indexSetWithIndex:row] columnIndexes:[NSIndexSet indexSetWithIndex:0]];
 }
 
 - (void)hoverEventEndedForView:(id)view
@@ -816,7 +836,7 @@ static CGFloat const kPlayButtonVerticalPadding = 4.0;
     NSInteger row = [self rowForView:[view superview]];
 
     BOOL update = YES;
-    BOOL minimal = [self.fDefaults boolForKey:@"SmallView"];
+    BOOL minimal = self.fSmallView;
     if (minimal)
     {
         if (minimal && ![view isKindOfClass:[SmallTorrentCell class]])
@@ -833,14 +853,16 @@ static CGFloat const kPlayButtonVerticalPadding = 4.0;
     if (update)
     {
         self.fHoverEventDict = nil;
+        // Only reload the specific row instead of all visible rows
         [self reloadDataForRowIndexes:[NSIndexSet indexSetWithIndex:row] columnIndexes:[NSIndexSet indexSetWithIndex:0]];
     }
 }
 
 - (void)toggleGroupRowRatio
 {
-    BOOL displayGroupRowRatio = [self.fDefaults boolForKey:@"DisplayGroupRowRatio"];
+    BOOL displayGroupRowRatio = self.fDisplayGroupRowRatio;
     [self.fDefaults setBool:!displayGroupRowRatio forKey:@"DisplayGroupRowRatio"];
+    [self updateDefaultsCache];
     [self reloadVisibleRows];
 }
 
@@ -956,8 +978,9 @@ static CGFloat const kPlayButtonVerticalPadding = 4.0;
     NSArray<NSDictionary*>* playableFiles = torrent.playableFiles;
 
     // Reuse existing buttons if same torrent/files
-    if (cell.fPlayButtonsView && cell.fPlayButtonsSourceFiles == playableFiles)
+    if (cell.fPlayButtonsView && [cell.fPlayButtonsSourceFiles isEqualToArray:playableFiles])
     {
+        // Only update progress for finished torrents that might have just completed
         [self updatePlayButtonProgressForCell:cell torrent:torrent];
         return;
     }

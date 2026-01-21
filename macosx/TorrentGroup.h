@@ -18,4 +18,12 @@
 @property(nonatomic, readonly) CGFloat uploadRate;
 @property(nonatomic, readonly) CGFloat downloadRate;
 
+/// Cached values to avoid recalculating on every draw
+@property(nonatomic) CGFloat cachedRatio;
+@property(nonatomic) CGFloat cachedUploadRate;
+@property(nonatomic) CGFloat cachedDownloadRate;
+@property(nonatomic) BOOL cacheValid;
+
+- (void)invalidateCache;
+
 @end

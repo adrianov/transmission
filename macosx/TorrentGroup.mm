@@ -17,8 +17,34 @@
     {
         _groupIndex = group;
         _torrents = [[NSMutableArray alloc] init];
+        _cacheValid = NO;
     }
     return self;
+}
+
+- (void)invalidateCache
+{
+    _cacheValid = NO;
+}
+
+- (void)updateCache
+{
+    uint64_t uploaded = 0, total_size = 0;
+    CGFloat rate = 0.0;
+    CGFloat downloadRate = 0.0;
+
+    for (Torrent* torrent in self.torrents)
+    {
+        uploaded += torrent.uploadedTotal;
+        total_size += torrent.totalSizeSelected;
+        rate += torrent.uploadRate;
+        downloadRate += torrent.downloadRate;
+    }
+
+    self.cachedRatio = tr_getRatio(uploaded, total_size);
+    self.cachedUploadRate = rate;
+    self.cachedDownloadRate = downloadRate;
+    self.cacheValid = YES;
 }
 
 - (NSString*)description
@@ -33,36 +59,29 @@
 
 - (CGFloat)ratio
 {
-    uint64_t uploaded = 0, total_size = 0;
-    for (Torrent* torrent in self.torrents)
+    if (!self.cacheValid)
     {
-        uploaded += torrent.uploadedTotal;
-        total_size += torrent.totalSizeSelected;
+        [self updateCache];
     }
-
-    return tr_getRatio(uploaded, total_size);
+    return self.cachedRatio;
 }
 
 - (CGFloat)uploadRate
 {
-    CGFloat rate = 0.0;
-    for (Torrent* torrent in self.torrents)
+    if (!self.cacheValid)
     {
-        rate += torrent.uploadRate;
+        [self updateCache];
     }
-
-    return rate;
+    return self.cachedUploadRate;
 }
 
 - (CGFloat)downloadRate
 {
-    CGFloat rate = 0.0;
-    for (Torrent* torrent in self.torrents)
+    if (!self.cacheValid)
     {
-        rate += torrent.downloadRate;
+        [self updateCache];
     }
-
-    return rate;
+    return self.cachedDownloadRate;
 }
 
 @end
