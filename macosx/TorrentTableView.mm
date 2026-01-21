@@ -128,10 +128,16 @@ static NSTimeInterval const kToggleProgressSeconds = 0.175;
         if (![item isKindOfClass:[Torrent class]])
             continue;
 
+        Torrent* torrent = (Torrent*)item;
+
+        // Skip finished torrents - their play buttons never change
+        if (torrent.allDownloaded)
+            continue;
+
         TorrentCell* cell = [self viewAtColumn:0 row:row makeIfNecessary:NO];
         if (cell && cell.fPlayButtonsView)
         {
-            [self updatePlayButtonProgressForCell:cell torrent:(Torrent*)item];
+            [self updatePlayButtonProgressForCell:cell torrent:torrent];
         }
     }
 }
@@ -361,13 +367,14 @@ static CGFloat const kPlayButtonVerticalPadding = 4.0;
 
                 // set URL button visibility
                 torrentCell.fURLButton.hidden = (torrent.commentURL == nil);
-
-                // configure play buttons for media torrents
-                [self configurePlayButtonsForCell:torrentCell torrent:torrent];
             }
 
             // Dynamic content - always update
             torrentCell.fTorrentProgressField.stringValue = torrent.progressString;
+
+            // configure/update play buttons for media torrents
+            // (must be in dynamic section to handle playableFiles becoming available after initial setup)
+            [self configurePlayButtonsForCell:torrentCell torrent:torrent];
 
             // set torrent status
             NSString* status;
@@ -395,23 +402,17 @@ static CGFloat const kPlayButtonVerticalPadding = 4.0;
         torrentCell.fRevealButton.action = @selector(revealTorrentFile:);
         torrentCell.fURLButton.action = @selector(openCommentURL:);
 
-        // Group indicator - may change dynamically
+        // Group indicator - only update if changed
         NSInteger const groupValue = torrent.groupValue;
-        NSImage* groupImage;
-        if (groupValue != -1)
+        NSImage* groupImage = nil;
+        if (groupValue != -1 && ![self.fDefaults boolForKey:@"SortByGroup"])
         {
-            if (![self.fDefaults boolForKey:@"SortByGroup"])
-            {
-                NSColor* groupColor = [GroupsController.groups colorForIndex:groupValue];
-                groupImage = [NSImage discIconWithColor:groupColor insetFactor:0];
-            }
+            groupImage = [GroupsController.groups imageForIndex:groupValue];
         }
-        torrentCell.fGroupIndicatorView.image = groupImage;
-
-        // redraw buttons
-        torrentCell.fControlButton.needsDisplay = YES;
-        torrentCell.fRevealButton.needsDisplay = YES;
-        torrentCell.fURLButton.needsDisplay = YES;
+        if (torrentCell.fGroupIndicatorView.image != groupImage)
+        {
+            torrentCell.fGroupIndicatorView.image = groupImage;
+        }
 
         return torrentCell;
     }
@@ -956,7 +957,10 @@ static CGFloat const kPlayButtonVerticalPadding = 4.0;
 
     // Reuse existing buttons if same torrent/files
     if (cell.fPlayButtonsView && cell.fPlayButtonsSourceFiles == playableFiles)
+    {
+        [self updatePlayButtonProgressForCell:cell torrent:torrent];
         return;
+    }
 
     // Remove existing buttons (cell is being reused for different torrent)
     if (cell.fPlayButtonsView)
@@ -1071,6 +1075,10 @@ static CGFloat const kPlayButtonVerticalPadding = 4.0;
 - (void)updatePlayButtonProgressForCell:(TorrentCell*)cell torrent:(Torrent*)torrent
 {
     if (!cell.fPlayButtonsView || ![cell.fPlayButtonsView isKindOfClass:[FlowLayoutView class]])
+        return;
+
+    // Fast path: finished torrents never need button updates (progress is always 1.0, no % suffix)
+    if (torrent.allDownloaded)
         return;
 
     BOOL visibilityChanged = NO;

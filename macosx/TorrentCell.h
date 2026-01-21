@@ -37,6 +37,12 @@
 
 @property(nonatomic) TorrentTableView* fTorrentTableView;
 
+/// Cached progress bar image to avoid redrawing during scroll
+@property(nonatomic) NSImage* fCachedProgressBarImage;
+/// Cache key to determine when progress bar needs to be redrawn
+@property(nonatomic) NSString* fProgressBarCacheKey;
+
 - (void)configureCollectionView;
+- (void)invalidateProgressBarCache;
 
 @end

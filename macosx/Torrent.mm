@@ -47,6 +47,11 @@ typedef NS_ENUM(NSInteger, TorrentMediaType) { TorrentMediaTypeNone = 0, Torrent
 @property(nonatomic, copy) NSArray<NSString*>* fFolderItems; // Disc or album folders (relative paths)
 @property(nonatomic, copy) NSArray<NSDictionary*>* fPlayableFiles;
 @property(nonatomic, copy) NSDictionary<NSString*, NSArray<NSNumber*>*>* fFolderToFiles; // Cache: folder -> file indices
+@property(nonatomic) NSUInteger fStatsGeneration;
+@property(nonatomic) NSUInteger fProgressCacheGeneration;
+@property(nonatomic) NSMutableDictionary<NSNumber*, NSNumber*>* fFileProgressCache;
+@property(nonatomic) NSMutableDictionary<NSString*, NSNumber*>* fFolderProgressCache;
+@property(nonatomic) NSMutableDictionary<NSString*, NSNumber*>* fFolderFirstMediaProgressCache;
 
 @property(nonatomic, copy) NSArray<FileListNode*>* fileList;
 @property(nonatomic, copy) NSArray<FileListNode*>* flatFileList;
@@ -300,6 +305,7 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
     {
         Torrent* const torrent = torrent_objects[i];
         torrent.fStat = stats[i];
+        torrent.fStatsGeneration++;
 
         //make sure the "active" filter is updated when transmitting changes
         if (was_transmitting[i] != torrent.transmitting)
@@ -887,9 +893,10 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
         }
 
         CGFloat progress = tr_torrentFileConsecutiveProgress(self.fHandle, i);
-
         if (progress < 0)
-            continue;
+        {
+            progress = 0;
+        }
 
         NSString* path;
         auto const location = tr_torrentFindFile(self.fHandle, i);
@@ -1004,7 +1011,33 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
 
 - (CGFloat)fileProgressForIndex:(NSUInteger)index
 {
-    return (CGFloat)tr_torrentFileConsecutiveProgress(self.fHandle, (tr_file_index_t)index);
+    if (self.allDownloaded)
+    {
+        return 1.0;
+    }
+
+    if (self.fProgressCacheGeneration != self.fStatsGeneration)
+    {
+        self.fProgressCacheGeneration = self.fStatsGeneration;
+        self.fFileProgressCache = nil;
+        self.fFolderProgressCache = nil;
+        self.fFolderFirstMediaProgressCache = nil;
+    }
+
+    NSNumber* key = @(index);
+    NSNumber* cached = self.fFileProgressCache[key];
+    if (cached)
+    {
+        return cached.doubleValue;
+    }
+
+    CGFloat progress = (CGFloat)tr_torrentFileConsecutiveProgress(self.fHandle, (tr_file_index_t)index);
+    if (!self.fFileProgressCache)
+    {
+        self.fFileProgressCache = [NSMutableDictionary dictionary];
+    }
+    self.fFileProgressCache[key] = @(progress);
+    return progress;
 }
 
 /// Builds cache mapping folders to their file indices (for fast progress lookups)
@@ -1035,6 +1068,8 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
     }
 
     self.fFolderToFiles = cache;
+    self.fFolderProgressCache = nil;
+    self.fFolderFirstMediaProgressCache = nil;
 }
 
 /// Checks if disc index files for a folder are fully downloaded
@@ -1067,6 +1102,25 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
 /// Calculates download progress for a folder (disc or album)
 - (CGFloat)folderConsecutiveProgress:(NSString*)folder
 {
+    if (self.allDownloaded)
+    {
+        return 1.0;
+    }
+
+    if (self.fProgressCacheGeneration != self.fStatsGeneration)
+    {
+        self.fProgressCacheGeneration = self.fStatsGeneration;
+        self.fFileProgressCache = nil;
+        self.fFolderProgressCache = nil;
+        self.fFolderFirstMediaProgressCache = nil;
+    }
+
+    NSNumber* cached = self.fFolderProgressCache[folder];
+    if (cached)
+    {
+        return cached.doubleValue;
+    }
+
     // For discs, wait for index files
     if ((self.fIsDVD || self.fIsBluRay) && ![self discIndexFilesCompleteForFolder:folder])
         return 0.0;
@@ -1087,12 +1141,37 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
         totalSize += file.length;
     }
 
-    return (totalSize > 0) ? totalProgress / totalSize : 0.0;
+    CGFloat progress = (totalSize > 0) ? totalProgress / totalSize : 0.0;
+    if (!self.fFolderProgressCache)
+    {
+        self.fFolderProgressCache = [NSMutableDictionary dictionary];
+    }
+    self.fFolderProgressCache[folder] = @(progress);
+    return progress;
 }
 
 /// Returns consecutive progress for the first media file in a folder (by file index).
 - (CGFloat)folderFirstMediaProgress:(NSString*)folder
 {
+    if (self.allDownloaded)
+    {
+        return 1.0;
+    }
+
+    if (self.fProgressCacheGeneration != self.fStatsGeneration)
+    {
+        self.fProgressCacheGeneration = self.fStatsGeneration;
+        self.fFileProgressCache = nil;
+        self.fFolderProgressCache = nil;
+        self.fFolderFirstMediaProgressCache = nil;
+    }
+
+    NSNumber* cached = self.fFolderFirstMediaProgressCache[folder];
+    if (cached)
+    {
+        return cached.doubleValue;
+    }
+
     NSArray<NSNumber*>* fileIndices = self.fFolderToFiles[folder];
     if (!fileIndices)
         return 0.0;
@@ -1115,7 +1194,13 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
             continue;
 
         CGFloat progress = tr_torrentFileConsecutiveProgress(self.fHandle, i);
-        return progress > 0 ? progress : 0.0;
+        CGFloat normalized = progress > 0 ? progress : 0.0;
+        if (!self.fFolderFirstMediaProgressCache)
+        {
+            self.fFolderFirstMediaProgressCache = [NSMutableDictionary dictionary];
+        }
+        self.fFolderFirstMediaProgressCache[folder] = @(normalized);
+        return normalized;
     }
 
     return 0.0;
@@ -2855,6 +2940,14 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
     self.fStat = tr_torrentStat(self.fHandle);
 
     [self createFileList];
+
+    // Reset media type detection and playable files cache since we now have metadata
+    self.fMediaTypeDetected = NO;
+    self.fPlayableFiles = nil;
+    self.fFolderToFiles = nil;
+    self.fFileProgressCache = nil;
+    self.fFolderProgressCache = nil;
+    self.fFolderFirstMediaProgressCache = nil;
 
     /* If the torrent is in no group, or the group was automatically determined based on criteria evaluated
      * before we had metadata for this torrent, redetermine the group
