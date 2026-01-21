@@ -18,13 +18,13 @@
 #import "GroupsController.h"
 #import "NSImageAdditions.h"
 #import "TorrentCellActionButton.h"
-#import "FlowLayoutView.h"
 
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 #import "TorrentCellControlButton.h"
 #import "TorrentCellRevealButton.h"
 #import "TorrentCellURLButton.h"
 #import "PlayButton.h"
+#import "FlowLayoutView.h"
 
 CGFloat const kGroupSeparatorHeight = 18.0;
 
@@ -53,6 +53,7 @@ static NSTimeInterval const kToggleProgressSeconds = 0.175;
 @property(nonatomic) NSView* fPositioningView;
 
 @property(nonatomic) NSDictionary* fHoverEventDict;
+@property(nonatomic) CGFloat fLastKnownWidth;
 
 @end
 
@@ -98,6 +99,38 @@ static NSTimeInterval const kToggleProgressSeconds = 0.175;
     [super awakeFromNib];
     [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(refreshTorrentTable) name:@"RefreshTorrentTable"
                                              object:nil];
+    self.fLastKnownWidth = self.bounds.size.width;
+}
+
+- (void)viewDidEndLiveResize
+{
+    [super viewDidEndLiveResize];
+    [self handleWidthChangeIfNeeded];
+}
+
+- (void)setFrameSize:(NSSize)newSize
+{
+    [super setFrameSize:newSize];
+    if (!self.inLiveResize)
+    {
+        [self handleWidthChangeIfNeeded];
+    }
+}
+
+- (void)handleWidthChangeIfNeeded
+{
+    CGFloat currentWidth = self.bounds.size.width;
+    if (fabs(currentWidth - self.fLastKnownWidth) > 1.0)
+    {
+        self.fLastKnownWidth = currentWidth;
+        [self invalidatePlayButtonHeightsAndReload];
+    }
+}
+
+- (void)invalidatePlayButtonHeightsAndReload
+{
+    // Force reload of visible rows - this will reconfigure buttons with new width
+    [self reloadData];
 }
 
 - (void)refreshTorrentTable
@@ -214,6 +247,7 @@ static NSTimeInterval const kToggleProgressSeconds = 0.175;
     return NO;
 }
 
+static CGFloat const kPlayButtonRightMargin = 55.0;
 static CGFloat const kPlayButtonRowHeight = 18.0;
 static CGFloat const kPlayButtonVerticalPadding = 4.0;
 
@@ -351,15 +385,14 @@ static CGFloat const kPlayButtonVerticalPadding = 4.0;
             }
             torrentCell.fTorrentStatusField.stringValue = status ?: torrent.statusString;
 
-            // Configure play buttons if not yet created or if source changed
-            NSArray<NSDictionary*>* playableFiles = torrent.playableFiles;
-            if (playableFiles.count > 0 && (!torrentCell.fPlayButtonsView || torrentCell.fPlayButtonsSourceFiles != playableFiles))
-            {
-                [self configurePlayButtonsForCell:torrentCell torrent:torrent];
-            }
+            // Configure play buttons if needed (handles width changes internally)
+            [self configurePlayButtonsForCell:torrentCell torrent:torrent];
 
             // Update play button progress (only text and visibility, no recreation)
-            [self updatePlayButtonProgressForCell:torrentCell torrent:torrent];
+            if (torrentCell.fPlayButtonsView)
+            {
+                [self updatePlayButtonProgressForCell:torrentCell torrent:torrent];
+            }
         }
 
         torrentCell.fTorrentTableView = self;
@@ -916,13 +949,26 @@ static CGFloat const kPlayButtonVerticalPadding = 4.0;
     return playButton;
 }
 
+- (CGFloat)playButtonsAvailableWidthForCell:(TorrentCell*)cell
+{
+    CGFloat tableWidth = NSWidth(self.bounds);
+    CGFloat leadingX = NSMinX(cell.fTorrentStatusField.frame);
+    CGFloat availableWidth = tableWidth - leadingX - kPlayButtonRightMargin - self.intercellSpacing.width;
+    return MAX((CGFloat)200.0, availableWidth);
+}
+
 - (void)configurePlayButtonsForCell:(TorrentCell*)cell torrent:(Torrent*)torrent
 {
     NSArray<NSDictionary*>* playableFiles = torrent.playableFiles;
 
-    // Check if we can reuse existing buttons
+    // Check if we can reuse existing buttons (same files AND width hasn't changed significantly)
     if (cell.fPlayButtonsView && cell.fPlayButtonsSourceFiles == playableFiles)
-        return;
+    {
+        CGFloat currentWidth = [self playButtonsAvailableWidthForCell:cell];
+        if (fabs(currentWidth - torrent.cachedPlayButtonsWidth) < 10.0)
+            return;
+        // Width changed - need to reconfigure
+    }
 
     // Remove existing buttons
     if (cell.fPlayButtonsView)
@@ -938,6 +984,9 @@ static CGFloat const kPlayButtonVerticalPadding = 4.0;
 
     FlowLayoutView* flowView = [[FlowLayoutView alloc] init];
     flowView.translatesAutoresizingMaskIntoConstraints = NO;
+    flowView.horizontalSpacing = 6;
+    flowView.verticalSpacing = 4;
+    flowView.minimumButtonWidth = 50;
 
     // Single item: show "▶ Play"
     if (playableFiles.count == 1)
@@ -952,7 +1001,8 @@ static CGFloat const kPlayButtonVerticalPadding = 4.0;
         NSMutableDictionary<NSNumber*, NSMutableArray<NSDictionary*>*>* seasonGroups = [NSMutableDictionary dictionary];
         for (NSDictionary* fileInfo in playableFiles)
         {
-            NSNumber* season = fileInfo[@"season"] ?: @0; // Default to 0 for folder items
+            id seasonValue = fileInfo[@"season"];
+            NSNumber* season = (seasonValue && seasonValue != [NSNull null]) ? seasonValue : @0; // Default to 0 for folder items
             if (!seasonGroups[season])
             {
                 seasonGroups[season] = [NSMutableArray array];
@@ -977,6 +1027,7 @@ static CGFloat const kPlayButtonVerticalPadding = 4.0;
             // Add season header only if there are multiple seasons
             if (hasMultipleSeasons && season.integerValue > 0)
             {
+                [flowView addLineBreak];
                 NSTextField* seasonLabel = [NSTextField labelWithString:[NSString stringWithFormat:@"Season %@:", season]];
                 seasonLabel.font = [NSFont boldSystemFontOfSize:11];
                 seasonLabel.textColor = NSColor.secondaryLabelColor;
@@ -1000,35 +1051,21 @@ static CGFloat const kPlayButtonVerticalPadding = 4.0;
     cell.fPlayButtonsView = flowView;
     cell.fPlayButtonsSourceFiles = playableFiles;
 
-    CGFloat rightMargin = 55; // Space for control buttons
+    CGFloat rightMargin = kPlayButtonRightMargin; // Space for control buttons
 
     // Constraints: position below status field
     cell.fPlayButtonsHeightConstraint = [flowView.heightAnchor constraintEqualToConstant:1.0];
     [NSLayoutConstraint activateConstraints:@[
         [flowView.leadingAnchor constraintEqualToAnchor:cell.fTorrentStatusField.leadingAnchor],
         [flowView.topAnchor constraintEqualToAnchor:cell.fTorrentStatusField.bottomAnchor constant:kPlayButtonVerticalPadding],
-        [flowView.trailingAnchor constraintLessThanOrEqualToAnchor:cell.trailingAnchor constant:-rightMargin],
+        [flowView.trailingAnchor constraintEqualToAnchor:cell.trailingAnchor constant:-rightMargin],
         cell.fPlayButtonsHeightConstraint
     ]];
 
-    [cell layoutSubtreeIfNeeded];
-
     // Get actual height from flow view using resolved width
-    CGFloat availableWidth = NSWidth(flowView.frame);
-    if (availableWidth <= 0)
-        availableWidth = self.bounds.size.width - 168 - rightMargin;
-    if (availableWidth < 200)
-        availableWidth = 600;
+    CGFloat availableWidth = [self playButtonsAvailableWidthForCell:cell];
 
-    if (torrent.cachedPlayButtonsWidth == availableWidth && torrent.cachedPlayButtonsHeight >= self.rowHeight)
-    {
-        CGFloat cachedButtonHeight = torrent.cachedPlayButtonsHeight - self.rowHeight - kPlayButtonVerticalPadding;
-        if (cachedButtonHeight < 0)
-            cachedButtonHeight = 0;
-        cell.fPlayButtonsHeightConstraint.constant = cachedButtonHeight;
-        return;
-    }
-
+    // Always recalculate height based on visible buttons
     CGFloat buttonHeight = [flowView heightForWidth:availableWidth];
     BOOL hasVisibleButtons = buttonHeight > 0;
     if (hasVisibleButtons && buttonHeight < kPlayButtonRowHeight)
@@ -1038,8 +1075,8 @@ static CGFloat const kPlayButtonVerticalPadding = 4.0;
 
     CGFloat totalHeight = self.rowHeight + (hasVisibleButtons ? (buttonHeight + kPlayButtonVerticalPadding) : 0);
 
-    // Cache the height and refresh row if it changed
-    if (torrent.cachedPlayButtonsHeight != totalHeight)
+    // Only update cache and refresh row if height or width changed
+    if (torrent.cachedPlayButtonsHeight != totalHeight || torrent.cachedPlayButtonsWidth != availableWidth)
     {
         torrent.cachedPlayButtonsHeight = totalHeight;
         torrent.cachedPlayButtonsWidth = availableWidth;
@@ -1128,11 +1165,7 @@ static CGFloat const kPlayButtonVerticalPadding = 4.0;
         [flowView setNeedsLayout:YES];
         [flowView invalidateIntrinsicContentSize];
 
-        CGFloat availableWidth = NSWidth(flowView.frame);
-        if (availableWidth <= 0)
-            availableWidth = self.bounds.size.width - 168 - 55;
-        if (availableWidth < 200)
-            availableWidth = 600;
+        CGFloat availableWidth = [self playButtonsAvailableWidthForCell:cell];
 
         CGFloat buttonHeight = [flowView heightForWidth:availableWidth];
         BOOL hasVisibleButtons = buttonHeight > 0;
@@ -1225,13 +1258,37 @@ static CGFloat const kPlayButtonVerticalPadding = 4.0;
     }
     else if ([type isEqualToString:@"album"])
     {
-        // Album folder: open with default music player
+        // Album folder: try IINA first, then default music player
+        // IINA can handle cue+flac albums better than most music players
+        NSURL* iinaURL = [NSWorkspace.sharedWorkspace URLForApplicationWithBundleIdentifier:@"com.colliderli.iina"];
+        if (iinaURL)
+        {
+            NSWorkspaceOpenConfiguration* config = [NSWorkspaceOpenConfiguration configuration];
+            [NSWorkspace.sharedWorkspace openURLs:@[ fileURL ] withApplicationAtURL:iinaURL configuration:config
+                                completionHandler:nil];
+            return;
+        }
+
+        // Fallback: open with default music player
         // Find the default app for mp3 files and use it to open the folder
         NSURL* musicPlayerURL = [NSWorkspace.sharedWorkspace URLForApplicationToOpenContentType:UTTypeMP3];
         if (musicPlayerURL)
         {
             NSWorkspaceOpenConfiguration* config = [NSWorkspaceOpenConfiguration configuration];
             [NSWorkspace.sharedWorkspace openURLs:@[ fileURL ] withApplicationAtURL:musicPlayerURL configuration:config
+                                completionHandler:nil];
+            return;
+        }
+    }
+
+    // CUE files: use IINA (handles cue+flac well)
+    if ([path.pathExtension.lowercaseString isEqualToString:@"cue"])
+    {
+        NSURL* iinaURL = [NSWorkspace.sharedWorkspace URLForApplicationWithBundleIdentifier:@"com.colliderli.iina"];
+        if (iinaURL)
+        {
+            NSWorkspaceOpenConfiguration* config = [NSWorkspaceOpenConfiguration configuration];
+            [NSWorkspace.sharedWorkspace openURLs:@[ fileURL ] withApplicationAtURL:iinaURL configuration:config
                                 completionHandler:nil];
             return;
         }
