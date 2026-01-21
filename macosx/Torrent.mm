@@ -762,8 +762,8 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
             NSString* folder = folders[i];
             NSString* fullPath = [self.currentDirectory stringByAppendingPathComponent:folder];
 
-            // Progress: discs use consecutive progress, albums use first media file progress
-            CGFloat progress = isDisc ? [self folderConsecutiveProgress:folder] : [self folderFirstMediaProgress:folder];
+            // Progress: use consecutive progress for all folder-based items
+            CGFloat progress = [self folderConsecutiveProgress:folder];
 
             // Display name
             NSString* name;
@@ -1025,7 +1025,8 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
 
         for (NSString* folder in folders)
         {
-            if ([fileName hasPrefix:folder] || [fileName hasPrefix:[folder stringByAppendingString:@"/"]] || [fileName isEqualToString:folder])
+            // Folder paths already include torrent name prefix (e.g., "TorrentName/Disc A")
+            if ([fileName hasPrefix:folder] && (fileName.length == folder.length || [fileName characterAtIndex:folder.length] == '/'))
             {
                 [cache[folder] addObject:@(i)];
                 break;
@@ -1063,7 +1064,7 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
     return YES;
 }
 
-/// Calculates consecutive progress for a folder (disc or album)
+/// Calculates download progress for a folder (disc or album)
 - (CGFloat)folderConsecutiveProgress:(NSString*)folder
 {
     // For discs, wait for index files
@@ -1071,7 +1072,7 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
         return 0.0;
 
     NSArray<NSNumber*>* fileIndices = self.fFolderToFiles[folder];
-    if (!fileIndices)
+    if (!fileIndices || fileIndices.count == 0)
         return 0.0;
 
     CGFloat totalProgress = 0;
@@ -1081,8 +1082,8 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
     {
         NSUInteger i = fileIndex.unsignedIntegerValue;
         auto const file = tr_torrentFile(self.fHandle, i);
-        CGFloat fileProgress = tr_torrentFileConsecutiveProgress(self.fHandle, i);
-        totalProgress += fileProgress * file.length;
+        // Use actual download progress, not consecutive progress
+        totalProgress += file.progress * file.length;
         totalSize += file.length;
     }
 
