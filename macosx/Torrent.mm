@@ -1051,13 +1051,13 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
         mediaExtensions = [NSSet setWithArray:@[
-            @"mkv",  @"avi",  @"mp4",  @"mov",  @"wmv", @"flv",  @"webm", @"m4v", @"mpg", @"mpeg", @"ts",
-            @"m2ts", @"vob",  @"3gp",  @"ogv",  @"mp3", @"flac", @"wav",  @"aac", @"ogg", @"wma",  @"m4a",
-            @"ape",  @"alac", @"aiff", @"opus", @"cue", @"pdf",  @"epub", @"fb2", @"mobi"
+            @"mkv",  @"avi",  @"mp4",  @"mov",  @"wmv", @"flv",  @"webm", @"m4v",  @"mpg", @"mpeg", @"ts",
+            @"m2ts", @"vob",  @"3gp",  @"ogv",  @"mp3", @"flac", @"wav",  @"aac",  @"ogg", @"wma",  @"m4a",
+            @"ape",  @"alac", @"aiff", @"opus", @"wv",  @"cue",  @"pdf",  @"epub", @"fb2", @"mobi"
         ]];
         documentExtensions = [NSSet setWithArray:@[ @"pdf", @"epub", @"djv", @"djvu", @"fb2", @"mobi" ]];
         documentExternalExtensions = [NSSet setWithArray:@[ @"djv", @"djvu", @"fb2", @"mobi" ]];
-        cueCompanionExtensions = [NSSet setWithArray:@[ @"flac", @"ape", @"wav", @"wma", @"alac", @"aiff" ]];
+        cueCompanionExtensions = [NSSet setWithArray:@[ @"flac", @"ape", @"wav", @"wma", @"alac", @"aiff", @"wv" ]];
     });
 
     NSMutableArray<NSDictionary*>* playable = [NSMutableArray array];
@@ -1561,7 +1561,8 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
             @"ogv"
         ]];
         audioExtensions = [NSSet
-            setWithArray:@[ @"mp3", @"flac", @"wav", @"aac", @"ogg", @"wma", @"m4a", @"ape", @"alac", @"aiff", @"opus" ]];
+            setWithArray:
+                @[ @"mp3", @"flac", @"wav", @"aac", @"ogg", @"wma", @"m4a", @"ape", @"alac", @"aiff", @"opus", @"wv" ]];
         bookExtensions = [NSSet setWithArray:@[ @"pdf", @"epub", @"djv", @"djvu", @"fb2", @"mobi" ]];
     });
 

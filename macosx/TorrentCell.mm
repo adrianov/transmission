@@ -11,6 +11,27 @@
 
 @implementation TorrentCell
 
+- (void)awakeFromNib
+{
+    [super awakeFromNib];
+    // 1. Enable layers for GPU-accelerated scrolling
+    self.wantsLayer = YES;
+    // 2. Flatten subviews to reduce layer count (improves FPS)
+    self.canDrawSubviewsIntoLayer = YES;
+}
+
+- (BOOL)wantsUpdateLayer
+{
+    return YES;
+}
+
+- (void)updateLayer
+{
+    // Background styling: keep clear so the table view controls row backgrounds.
+    self.layer.backgroundColor = NSColor.clearColor.CGColor;
+}
+
+
 - (void)drawRect:(NSRect)dirtyRect
 {
     if (self.fTorrentTableView)
