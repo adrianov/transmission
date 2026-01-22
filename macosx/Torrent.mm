@@ -26,7 +26,7 @@ static int const kETAIdleDisplaySec = 2 * 60;
 static dispatch_queue_t timeMachineExcludeQueue;
 
 /// Media type for folder torrents
-typedef NS_ENUM(NSInteger, TorrentMediaType) { TorrentMediaTypeNone = 0, TorrentMediaTypeVideo, TorrentMediaTypeAudio };
+typedef NS_ENUM(NSInteger, TorrentMediaType) { TorrentMediaTypeNone = 0, TorrentMediaTypeVideo, TorrentMediaTypeAudio, TorrentMediaTypeBooks };
 
 @interface Torrent ()
 
@@ -722,6 +722,8 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
             return [NSString stringWithFormat:@"%lu videos", (unsigned long)self.fMediaFileCount];
         if (self.fMediaType == TorrentMediaTypeAudio)
             return [NSString stringWithFormat:@"%lu audios", (unsigned long)self.fMediaFileCount];
+        if (self.fMediaType == TorrentMediaTypeBooks)
+            return [NSString stringWithFormat:@"%lu books", (unsigned long)self.fMediaFileCount];
     }
     return nil;
 }
@@ -826,13 +828,18 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
 - (NSArray<NSDictionary*>*)buildIndividualFilePlayables
 {
     static NSSet<NSString*>* mediaExtensions;
+    static NSSet<NSString*>* documentExtensions;
+    static NSSet<NSString*>* documentExternalExtensions;
     static NSSet<NSString*>* cueCompanionExtensions;
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
         mediaExtensions = [NSSet setWithArray:@[
             @"mkv", @"avi", @"mp4",  @"mov", @"wmv", @"flv", @"webm", @"m4v", @"mpg", @"mpeg", @"ts",   @"m2ts", @"vob", @"3gp",
-            @"ogv", @"mp3", @"flac", @"wav", @"aac", @"ogg", @"wma",  @"m4a", @"ape", @"alac", @"aiff", @"opus", @"cue"
+            @"ogv", @"mp3", @"flac", @"wav", @"aac", @"ogg", @"wma",  @"m4a", @"ape", @"alac", @"aiff", @"opus", @"cue",
+            @"pdf", @"epub"
         ]];
+        documentExtensions = [NSSet setWithArray:@[ @"pdf", @"epub", @"djv", @"djvu" ]];
+        documentExternalExtensions = [NSSet setWithArray:@[ @"djv", @"djvu" ]];
         cueCompanionExtensions = [NSSet setWithArray:@[ @"flac", @"ape", @"wav", @"wma", @"alac", @"aiff" ]];
     });
 
@@ -902,26 +909,45 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
         auto const location = tr_torrentFindFile(self.fHandle, i);
         path = !std::empty(location) ? @(location.c_str()) : [self.currentDirectory stringByAppendingPathComponent:fileName];
 
-        NSArray<NSNumber*>* episodeNumbers = fileName.episodeNumbers;
+        BOOL const isDocument = [documentExtensions containsObject:ext];
+        if (isDocument && [documentExternalExtensions containsObject:ext])
+        {
+            NSURL* checkURL = [NSURL fileURLWithPath:[self.currentDirectory stringByAppendingPathComponent:fileName]];
+            NSURL* appURL = [NSWorkspace.sharedWorkspace URLForApplicationToOpenURL:checkURL];
+            if (!appURL)
+            {
+                continue;
+            }
+        }
+        NSArray<NSNumber*>* episodeNumbers = isDocument ? nil : fileName.episodeNumbers;
         NSNumber* season = episodeNumbers ? episodeNumbers[0] : @0;
         NSNumber* episode = episodeNumbers ? episodeNumbers[1] : @(i);
 
-        NSString* displayName = fileName.lastPathComponent.humanReadableEpisodeName;
-        if (!displayName)
+        NSString* displayName = nil;
+        if (isDocument)
         {
             displayName = fileName.lastPathComponent.stringByDeletingPathExtension.humanReadableTitle;
         }
-        // Strip resolution from button titles
-        displayName = [displayName stringByReplacingOccurrencesOfString:@"#2160p" withString:@"" options:NSCaseInsensitiveSearch
-                                                                  range:NSMakeRange(0, displayName.length)];
-        displayName = [displayName stringByReplacingOccurrencesOfString:@"#1080p" withString:@"" options:NSCaseInsensitiveSearch
-                                                                  range:NSMakeRange(0, displayName.length)];
-        displayName = [displayName stringByReplacingOccurrencesOfString:@"#720p" withString:@"" options:NSCaseInsensitiveSearch
-                                                                  range:NSMakeRange(0, displayName.length)];
-        displayName = [displayName stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet];
+        else
+        {
+            displayName = fileName.lastPathComponent.humanReadableEpisodeName;
+            if (!displayName)
+            {
+                displayName = fileName.lastPathComponent.stringByDeletingPathExtension.humanReadableTitle;
+            }
+            // Strip resolution from button titles
+            displayName = [displayName stringByReplacingOccurrencesOfString:@"#2160p" withString:@"" options:NSCaseInsensitiveSearch
+                                                                      range:NSMakeRange(0, displayName.length)];
+            displayName = [displayName stringByReplacingOccurrencesOfString:@"#1080p" withString:@"" options:NSCaseInsensitiveSearch
+                                                                      range:NSMakeRange(0, displayName.length)];
+            displayName = [displayName stringByReplacingOccurrencesOfString:@"#720p" withString:@"" options:NSCaseInsensitiveSearch
+                                                                      range:NSMakeRange(0, displayName.length)];
+            displayName = [displayName stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet];
+        }
 
+        BOOL const opensInBooks = isDocument && ![documentExternalExtensions containsObject:ext];
         [playable addObject:@{
-            @"type" : @"file",
+            @"type" : isDocument ? (opensInBooks ? @"document-books" : @"document") : @"file",
             @"index" : @(i),
             @"name" : displayName,
             @"path" : path,
@@ -997,7 +1023,11 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
     for (NSDictionary* fileInfo in playable)
     {
         NSString* baseTitle;
-        if (hasSeasonInfo && [fileInfo[@"season"] integerValue] > 0)
+        if ([fileInfo[@"type"] isEqualToString:@"document"])
+        {
+            baseTitle = fileInfo[@"name"];
+        }
+        else if (hasSeasonInfo && [fileInfo[@"season"] integerValue] > 0)
         {
             baseTitle = [NSString stringWithFormat:@"▶ E%@", fileInfo[@"episode"]];
         }
@@ -1016,11 +1046,6 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
 
 - (CGFloat)fileProgressForIndex:(NSUInteger)index
 {
-    if (self.allDownloaded)
-    {
-        return 1.0;
-    }
-
     if (self.fProgressCacheGeneration != self.fStatsGeneration)
     {
         self.fProgressCacheGeneration = self.fStatsGeneration;
@@ -1107,11 +1132,6 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
 /// Calculates download progress for a folder (disc or album)
 - (CGFloat)folderConsecutiveProgress:(NSString*)folder
 {
-    if (self.allDownloaded)
-    {
-        return 1.0;
-    }
-
     if (self.fProgressCacheGeneration != self.fStatsGeneration)
     {
         self.fProgressCacheGeneration = self.fStatsGeneration;
@@ -1158,11 +1178,6 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
 /// Returns consecutive progress for the first media file in a folder (by file index).
 - (CGFloat)folderFirstMediaProgress:(NSString*)folder
 {
-    if (self.allDownloaded)
-    {
-        return 1.0;
-    }
-
     if (self.fProgressCacheGeneration != self.fStatsGeneration)
     {
         self.fProgressCacheGeneration = self.fStatsGeneration;
@@ -1269,6 +1284,7 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
 
     static NSSet<NSString*>* videoExtensions;
     static NSSet<NSString*>* audioExtensions;
+    static NSSet<NSString*>* bookExtensions;
     static dispatch_once_t onceToken2;
     dispatch_once(&onceToken2, ^{
         videoExtensions = [NSSet setWithArray:@[
@@ -1290,10 +1306,12 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
         ]];
         audioExtensions = [NSSet
             setWithArray:@[ @"mp3", @"flac", @"wav", @"aac", @"ogg", @"wma", @"m4a", @"ape", @"alac", @"aiff", @"opus" ]];
+        bookExtensions = [NSSet setWithArray:@[ @"pdf", @"epub", @"djv", @"djvu" ]];
     });
 
     NSMutableDictionary<NSString*, NSNumber*>* videoExtCounts = [NSMutableDictionary dictionary];
     NSMutableDictionary<NSString*, NSNumber*>* audioExtCounts = [NSMutableDictionary dictionary];
+    NSMutableDictionary<NSString*, NSNumber*>* bookExtCounts = [NSMutableDictionary dictionary];
     NSMutableSet<NSString*>* dvdDiscFolders = [NSMutableSet set]; // Parent folders containing VIDEO_TS.IFO
     NSMutableSet<NSString*>* blurayDiscFolders = [NSMutableSet set]; // Parent folders containing index.bdmv
 
@@ -1362,6 +1380,10 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
         {
             audioExtCounts[ext] = @(audioExtCounts[ext].unsignedIntegerValue + 1);
         }
+        else if ([bookExtensions containsObject:ext])
+        {
+            bookExtCounts[ext] = @(bookExtCounts[ext].unsignedIntegerValue + 1);
+        }
     }
 
     // Detect album folders for audio collections
@@ -1408,9 +1430,9 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
     }
 
     // Count video/audio files
-    NSUInteger videoCount = 0, audioCount = 0;
-    NSString *dominantVideoExt = nil, *dominantAudioExt = nil;
-    NSUInteger dominantVideoCount = 0, dominantAudioCount = 0;
+    NSUInteger videoCount = 0, audioCount = 0, bookCount = 0;
+    NSString *dominantVideoExt = nil, *dominantAudioExt = nil, *dominantBookExt = nil;
+    NSUInteger dominantVideoCount = 0, dominantAudioCount = 0, dominantBookCount = 0;
 
     for (NSString* ext in videoExtCounts)
     {
@@ -1430,6 +1452,16 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
         {
             dominantAudioCount = c;
             dominantAudioExt = ext;
+        }
+    }
+    for (NSString* ext in bookExtCounts)
+    {
+        NSUInteger c = bookExtCounts[ext].unsignedIntegerValue;
+        bookCount += c;
+        if (c > dominantBookCount)
+        {
+            dominantBookCount = c;
+            dominantBookExt = ext;
         }
     }
 
@@ -1454,6 +1486,12 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
             self.fFolderItems = albumFolders.allObjects;
             [self buildFolderToFilesCache:albumFolders];
         }
+    }
+    else if (bookCount >= 1)
+    {
+        self.fMediaType = TorrentMediaTypeBooks;
+        self.fMediaFileCount = bookCount;
+        self.fMediaExtension = dominantBookExt;
     }
 }
 

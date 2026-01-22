@@ -931,7 +931,9 @@ static CGFloat const kPlayButtonVerticalPadding = 4.0;
 
     // Build button title with progress
     NSString* title;
-    if (progress > 0 && progress < 1.0)
+    if ([type isEqualToString:@"document"])
+        title = baseTitle;
+    else if (progress > 0 && progress < 1.0)
         title = [NSString stringWithFormat:@"%@ (%d%%)", baseTitle, (int)floor(progress * 100)];
     else
         title = baseTitle;
@@ -955,12 +957,30 @@ static CGFloat const kPlayButtonVerticalPadding = 4.0;
     playButton.accessibilityHelp = type;
     playButton.accessibilityLabel = baseTitle;
 
+    if ([type hasPrefix:@"document"])
+    {
+        NSImage* bookImage = nil;
+        if (@available(macOS 11.0, *))
+        {
+            bookImage = [NSImage imageWithSystemSymbolName:@"book" accessibilityDescription:nil];
+        }
+        if (!bookImage)
+            bookImage = [NSImage imageNamed:NSImageNameBookmarksTemplate];
+        bookImage = [bookImage copy];
+        bookImage.size = NSMakeSize(12.0, 12.0);
+        playButton.image = bookImage;
+        playButton.imagePosition = NSImageLeft;
+    }
+
     // For files, store index for progress updates; folders use NSNotFound
     NSNumber* index = item[@"index"];
     playButton.tag = index ? index.integerValue : NSNotFound;
 
-    // Hide until download starts (folders with progress=1.0 always show)
-    playButton.hidden = (progress <= 0);
+    // Hide until download starts (or completion for documents)
+    if ([type isEqualToString:@"document"])
+        playButton.hidden = (progress < 1.0);
+    else
+        playButton.hidden = (progress <= 0);
 
     return playButton;
 }
@@ -1007,7 +1027,10 @@ static CGFloat const kPlayButtonVerticalPadding = 4.0;
     if (playableFiles.count == 1)
     {
         NSMutableDictionary* item = [playableFiles[0] mutableCopy];
-        item[@"baseTitle"] = @"▶ Play";
+        if ([item[@"type"] hasPrefix:@"document"])
+            item[@"baseTitle"] = @"Read";
+        else
+            item[@"baseTitle"] = @"▶ Play";
         [flowView addArrangedSubview:[self createPlayButtonFromItem:item]];
     }
     else
@@ -1080,6 +1103,9 @@ static CGFloat const kPlayButtonVerticalPadding = 4.0;
     // Get actual height from flow view using resolved width
     CGFloat availableWidth = [self playButtonsAvailableWidthForCell:cell];
 
+    // Update button progress/visibility with fresh values (cached playableFiles may have stale progress)
+    [self updatePlayButtonProgressForCell:cell torrent:torrent];
+
     // Always recalculate height based on visible buttons
     CGFloat buttonHeight = [flowView heightForWidth:availableWidth];
     BOOL hasVisibleButtons = buttonHeight > 0;
@@ -1089,10 +1115,22 @@ static CGFloat const kPlayButtonVerticalPadding = 4.0;
     cell.fPlayButtonsHeightConstraint.constant = buttonHeight;
 
     CGFloat totalHeight = self.rowHeight + (hasVisibleButtons ? (buttonHeight + kPlayButtonVerticalPadding) : 0);
-
-    // Update cache (heartbeat will handle row height updates)
+    CGFloat oldHeight = torrent.cachedPlayButtonsHeight;
     torrent.cachedPlayButtonsHeight = totalHeight;
     torrent.cachedPlayButtonsWidth = availableWidth;
+
+    // Notify table if height changed (dispatch to avoid layout issues during cell configuration)
+    if (fabs(totalHeight - oldHeight) > 1.0)
+    {
+        NSInteger row = [self rowForItem:torrent];
+        if (row >= 0)
+        {
+            NSIndexSet* indexSet = [NSIndexSet indexSetWithIndex:row];
+            dispatch_async(dispatch_get_main_queue(), ^{
+                [self noteHeightOfRowsWithIndexesChanged:indexSet];
+            });
+        }
+    }
 }
 
 - (void)updatePlayButtonProgressForCell:(TorrentCell*)cell torrent:(Torrent*)torrent
@@ -1100,11 +1138,7 @@ static CGFloat const kPlayButtonVerticalPadding = 4.0;
     if (!cell.fPlayButtonsView || ![cell.fPlayButtonsView isKindOfClass:[FlowLayoutView class]])
         return;
 
-    // Fast path: finished torrents never need button updates (progress is always 1.0, no % suffix)
-    if (torrent.allDownloaded)
-        return;
-
-    BOOL visibilityChanged = NO;
+    BOOL layoutNeeded = NO;
     for (NSView* view in [(FlowLayoutView*)cell.fPlayButtonsView arrangedSubviews])
     {
         if (![view isKindOfClass:[PlayButton class]])
@@ -1140,15 +1174,16 @@ static CGFloat const kPlayButtonVerticalPadding = 4.0;
             progress = [torrent fileProgressForIndex:fileIndex];
         }
 
-        // Show/hide based on progress
-        BOOL shouldBeVisible = progress > 0;
+        // Show/hide based on progress (documents need 100% to open)
+        BOOL shouldBeVisible = [type hasPrefix:@"document"] ? (progress >= 1.0) : (progress > 0);
         if (button.hidden == shouldBeVisible)
         {
             button.hidden = !shouldBeVisible;
-            visibilityChanged = YES;
+            layoutNeeded = YES;
         }
 
-        if (shouldBeVisible)
+        // Update title with current progress
+        if (shouldBeVisible && ![type hasPrefix:@"document"])
         {
             int progressPct = (int)floor(progress * 100);
             NSString* newTitle = (progress < 1.0 && progressPct < 100) ?
@@ -1160,12 +1195,12 @@ static CGFloat const kPlayButtonVerticalPadding = 4.0;
                 button.title = newTitle;
                 [button invalidateIntrinsicContentSize];
                 [(FlowLayoutView*)cell.fPlayButtonsView invalidateSizeForView:button];
-                visibilityChanged = YES; // Trigger relayout
+                layoutNeeded = YES;
             }
         }
     }
 
-    if (visibilityChanged)
+    if (layoutNeeded)
     {
         FlowLayoutView* flowView = (FlowLayoutView*)cell.fPlayButtonsView;
         [flowView setNeedsLayout:YES];
@@ -1253,7 +1288,23 @@ static CGFloat const kPlayButtonVerticalPadding = 4.0;
 
     NSURL* fileURL = [NSURL fileURLWithPath:path];
 
-    if ([type isEqualToString:@"dvd"] || [type isEqualToString:@"bluray"])
+    if ([type isEqualToString:@"document-books"])
+    {
+        NSURL* booksURL = [NSWorkspace.sharedWorkspace URLForApplicationWithBundleIdentifier:@"com.apple.Books"];
+        if (booksURL)
+        {
+            NSWorkspaceOpenConfiguration* config = [NSWorkspaceOpenConfiguration configuration];
+            [NSWorkspace.sharedWorkspace openURLs:@[ fileURL ] withApplicationAtURL:booksURL configuration:config
+                                completionHandler:nil];
+            return;
+        }
+    }
+    else if ([type isEqualToString:@"document"])
+    {
+        [NSWorkspace.sharedWorkspace openURL:fileURL];
+        return;
+    }
+    else if ([type isEqualToString:@"dvd"] || [type isEqualToString:@"bluray"])
     {
         // DVD/Blu-ray: try VLC first, then IINA, then default
         NSURL* vlcURL = [NSWorkspace.sharedWorkspace URLForApplicationWithBundleIdentifier:@"org.videolan.vlc"];

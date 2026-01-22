@@ -192,67 +192,13 @@
         }
     }
 
-    // Extract year and format from square bracket metadata like [2006, Documentary, DVD5]
-    // Keep content descriptors (Documentary, etc.), only extract year and disc format
-    NSString* bracketYear = nil;
-    NSString* bracketFormat = nil;
-    NSRegularExpression* bracketRegex = [NSRegularExpression regularExpressionWithPattern:@"\\[([^\\]]+)\\]" options:0 error:nil];
-    NSTextCheckingResult* bracketMatch = [bracketRegex firstMatchInString:title options:0 range:NSMakeRange(0, title.length)];
-    if (bracketMatch && bracketMatch.numberOfRanges > 1)
-    {
-        NSString* bracketContent = [title substringWithRange:[bracketMatch rangeAtIndex:1]];
-
-        // Extract year from brackets
-        NSRegularExpression* yearInBracketRegex = [NSRegularExpression regularExpressionWithPattern:@"\\b(19\\d{2}|20\\d{2})\\b"
-                                                                                            options:0
-                                                                                              error:nil];
-        NSTextCheckingResult* yearInBracketMatch = [yearInBracketRegex firstMatchInString:bracketContent options:0
-                                                                                    range:NSMakeRange(0, bracketContent.length)];
-        if (yearInBracketMatch)
-        {
-            bracketYear = [bracketContent substringWithRange:yearInBracketMatch.range];
-        }
-
-        // Extract disc format, legacy codec, or audio format from brackets
-        NSRegularExpression* formatInBracketRegex = [NSRegularExpression
-            regularExpressionWithPattern:@"\\b(DVD5|DVD9|DVD|BD25|BD50|BD66|BD100|XviD|DivX|MP3|FLAC|OGG|AAC|WAV|APE|ALAC|WMA|OPUS|M4A)\\b"
-                                 options:NSRegularExpressionCaseInsensitive
-                                   error:nil];
-        NSTextCheckingResult* formatInBracketMatch = [formatInBracketRegex firstMatchInString:bracketContent options:0
-                                                                                        range:NSMakeRange(0, bracketContent.length)];
-        if (formatInBracketMatch)
-        {
-            NSString* fmt = [bracketContent substringWithRange:formatInBracketMatch.range];
-            // Disc formats (DVD/BD) uppercase, legacy codecs and audio formats lowercase
-            NSSet* discFormats = [NSSet setWithArray:@[ @"dvd", @"dvd5", @"dvd9", @"bd25", @"bd50", @"bd66", @"bd100" ]];
-            bracketFormat = [discFormats containsObject:fmt.lowercaseString] ? fmt.uppercaseString : fmt.lowercaseString;
-        }
-
-        // Remove only year and disc format from bracket content, keep the rest
-        NSString* cleanedBracket = bracketContent;
-        cleanedBracket = [yearInBracketRegex stringByReplacingMatchesInString:cleanedBracket options:0
-                                                                        range:NSMakeRange(0, cleanedBracket.length)
-                                                                 withTemplate:@""];
-        cleanedBracket = [formatInBracketRegex stringByReplacingMatchesInString:cleanedBracket options:0
-                                                                          range:NSMakeRange(0, cleanedBracket.length)
-                                                                   withTemplate:@""];
-        // Clean up commas and whitespace
-        cleanedBracket = [cleanedBracket stringByReplacingOccurrencesOfString:@"  " withString:@" "];
-        cleanedBracket = [cleanedBracket stringByTrimmingCharactersInSet:[NSCharacterSet characterSetWithCharactersInString:@", "]];
-
-        // If bracket still has content, keep it; otherwise remove brackets entirely
-        if (cleanedBracket.length > 0)
-        {
-            title = [title
-                stringByReplacingOccurrencesOfString:bracketMatch.range.length > 0 ? [title substringWithRange:bracketMatch.range] : @""
-                                          withString:[NSString stringWithFormat:@"[%@]", cleanedBracket]];
-        }
-        else
-        {
-            title = [bracketRegex stringByReplacingMatchesInString:title options:0 range:NSMakeRange(0, title.length)
-                                                      withTemplate:@" "];
-        }
-    }
+    // Normalize bracketed metadata early to simplify parsing
+    title = [title stringByReplacingOccurrencesOfString:@"[" withString:@" "];
+    title = [title stringByReplacingOccurrencesOfString:@"]" withString:@" "];
+    NSRegularExpression* bracketSpaceRegex = [NSRegularExpression regularExpressionWithPattern:@"\\s{2,}" options:0 error:nil];
+    title = [bracketSpaceRegex stringByReplacingMatchesInString:title options:0 range:NSMakeRange(0, title.length) withTemplate:@" "];
+    NSRegularExpression* doubleDashRegex = [NSRegularExpression regularExpressionWithPattern:@"\\s-\\s-\\s" options:0 error:nil];
+    title = [doubleDashRegex stringByReplacingMatchesInString:title options:0 range:NSMakeRange(0, title.length) withTemplate:@" - "];
 
     // Handle merged resolution patterns like "BDRip1080p" -> "BDRip 1080p"
     NSRegularExpression* mergedResRegex = [NSRegularExpression regularExpressionWithPattern:@"(BDRip|HDRip|DVDRip|WEBRip)(1080p|720p|2160p|480p)"
@@ -339,11 +285,6 @@
         }
     }
 
-    // Use format extracted from brackets if no other resolution found
-    if (!resolution && bracketFormat)
-    {
-        resolution = bracketFormat;
-    }
 
     // Extract season (S01, S02, etc.)
     NSRegularExpression* seasonRegex = [NSRegularExpression regularExpressionWithPattern:@"\\bS(\\d{1,2})(?:E\\d+)?\\b"
@@ -359,13 +300,13 @@
 
     // Extract date pattern DD.MM.YYYY (e.g., 25.10.2021) - check BEFORE year to avoid partial match
     // Also match dates wrapped in parentheses like (25.10.2021)
-    NSRegularExpression* fullDateRegex = [NSRegularExpression regularExpressionWithPattern:@"\\(?(\\d{2}\\.\\d{2}\\.\\d{4})\\)?"
+    NSRegularExpression* fullDateRegex = [NSRegularExpression regularExpressionWithPattern:@"[\\[(]?(\\d{2}\\.\\d{2}\\.\\d{4})[\\])]?"
                                                                                    options:0
                                                                                      error:nil];
     NSTextCheckingResult* fullDateMatch = [fullDateRegex firstMatchInString:title options:0 range:NSMakeRange(0, title.length)];
 
     // Extract date pattern YY.MM.DD (e.g., 25.04.14)
-    NSRegularExpression* shortDateRegex = [NSRegularExpression regularExpressionWithPattern:@"\\(?(\\d{2}\\.\\d{2}\\.\\d{2})\\)?"
+    NSRegularExpression* shortDateRegex = [NSRegularExpression regularExpressionWithPattern:@"[\\[(]?(\\d{2}\\.\\d{2}\\.\\d{2})[\\])]?"
                                                                                     options:0
                                                                                       error:nil];
     NSTextCheckingResult* shortDateMatch = [shortDateRegex firstMatchInString:title options:0 range:NSMakeRange(0, title.length)];
@@ -374,11 +315,9 @@
     // Extract just the date part (group 1), not the parentheses
     NSTextCheckingResult* dateMatch = fullDateMatch ?: shortDateMatch;
     NSString* date = nil;
-    NSUInteger dateIndex = NSNotFound;
     if (dateMatch && dateMatch.numberOfRanges > 1)
     {
         date = [title substringWithRange:[dateMatch rangeAtIndex:1]];
-        dateIndex = dateMatch.range.location;
     }
 
     // Year interval pattern (e.g., "2000 - 2003" or "2000-2003")
@@ -404,10 +343,6 @@
                                                                                      error:nil];
         NSTextCheckingResult* yearMatch = [yearRegex firstMatchInString:title options:0 range:NSMakeRange(0, title.length)];
         year = yearMatch ? [title substringWithRange:yearMatch.range] : nil;
-    }
-    if (!year && bracketYear)
-    {
-        year = bracketYear;
     }
 
     // Technical tags to remove

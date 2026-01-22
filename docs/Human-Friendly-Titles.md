@@ -164,7 +164,14 @@ Media torrents display Play buttons below the status line for quick access to do
 ### Features
 
 - **Single file torrents:** Show `▶ Play` button
-- **Multi-file torrents:** Show buttons for each downloaded media file
+- **Multi-file torrents:** Show buttons for each media file that has started downloading
+- **Progress-based visibility:** Buttons only appear when file progress > 0% (can't play unstarted files)
+- **Progress display:** Downloading files show percentage (e.g., `▶ E5 (45%)`), completed files show no percentage
+- **Documents:** PDF/EPUB files show Read buttons with a book icon, opened in Books
+- **Books in folders:** PDF/EPUB/DJV/DJVU collections show `N books` subtitle and use a book file icon
+- **DJVU/DJV:** Read button appears only when a default app is registered; opens in that app
+- **Single document:** The button label is `Read`
+- **Document readiness:** Read buttons appear only when the file is 100% downloaded
 - **Episode detection:** Files with `S01E05` or `1x05` patterns show as `▶ E1`, `▶ E2`, etc.
 - **Season grouping:** Multiple seasons show headers (`Season 1:`, `Season 2:`) followed by episode buttons
 - **Single season:** No header shown, just episode buttons (`▶ E1`, `▶ E2`, ...)
@@ -183,6 +190,7 @@ Button titles for individual files follow these rules:
    - Resolution suffixes (`#2160p`, `#1080p`, etc.) are removed from button titles
    - All technical tags (codecs, sources, etc.) are removed
    - Example: `Artist.Track.2160p.FLAC.flac` → `▶ Artist Track`
+3. **Bracketed dates** (`[25.12.2025]`): Parsed as dates and shown as `(... )` in the title
 
 ### DVD/Blu-ray Disc Support
 
@@ -207,7 +215,8 @@ Torrents containing DVD or Blu-ray disc structures receive special handling:
 **Progress display:**
 - VOB files (DVD) and M2TS files (Blu-ray) are not counted as separate videos
 - Progress is calculated per-disc based on consecutive download progress
-- Play buttons only appear after index files (IFO/BUP for DVD, index.bdmv for Blu-ray) are fully downloaded
+- Play buttons only appear when progress > 0% (after downloading starts)
+- Buttons show percentage while downloading (e.g., `▶ Disk.1 (45%)`), no percentage when complete
 
 **Download priority:**
 - Disc index files are prioritized for download before video content
@@ -218,6 +227,8 @@ Torrents containing DVD or Blu-ray disc structures receive special handling:
 **Video:** mkv, avi, mp4, mov, wmv, flv, webm, m4v, mpg, mpeg, ts, m2ts, vob, 3gp, ogv
 
 **Audio:** mp3, flac, wav, aac, ogg, wma, m4a, ape, alac, aiff, opus, cue
+
+**Documents:** pdf, epub, djv, djvu
 
 ### Episode Name Humanization
 
