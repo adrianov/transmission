@@ -41,7 +41,6 @@
 @property(nonatomic) NSImage* fCachedProgressBarImage;
 /// Cache key to determine when progress bar needs to be redrawn
 @property(nonatomic) NSString* fProgressBarCacheKey;
-- (void)configureCollectionView;
 - (void)invalidateProgressBarCache;
 
 @end

@@ -8,4 +8,8 @@ app_path="${build_dir}/macosx/Transmission.app"
 cmake -B "${build_dir}" -G Ninja -DCMAKE_BUILD_TYPE=Release
 cmake --build "${build_dir}" -t transmission-mac -j"$(sysctl -n hw.ncpu)"
 
-open -R "${app_path}"
+if [[ -d "${app_path}" ]]; then
+    open -R "${app_path}"
+else
+    open "${build_dir}/macosx"
+fi
