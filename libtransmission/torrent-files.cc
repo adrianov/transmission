@@ -233,8 +233,12 @@ bool tr_torrent_files::move(
  * 2. If there are nontorrent files, don't delete them...
  * 3. ...unless the other files are "junk", such as .DS_Store
  */
-void tr_torrent_files::remove(std::string_view parent_in, std::string_view tmpdir_prefix, FileFunc const& func, tr_error* error)
-    const
+void tr_torrent_files::remove(
+    std::string_view parent_in,
+    std::string_view tmpdir_prefix,
+    FileFunc const& func,
+    tr_error* error,
+    KeepFunc keep) const
 {
     auto const parent = tr_pathbuf{ parent_in };
 
@@ -257,6 +261,11 @@ void tr_torrent_files::remove(std::string_view parent_in, std::string_view tmpdi
     {
         if (auto const found = find(idx, std::data(paths), std::size(paths)); found)
         {
+            if (keep && keep(found->filename().sv()))
+            {
+                continue;
+            }
+
             // if moving a file fails, give up and let the error propagate
             if (!tr_file_move(found->filename(), tr_pathbuf{ tmpdir, '/', found->subpath() }, false, error))
             {

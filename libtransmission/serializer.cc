@@ -463,6 +463,24 @@ tr_variant from_verify_added_mode(tr_verify_added_mode const& val)
 {
     return from_enum_or_integral_with_lookup(VerifyModeKeys, val);
 }
+
+// ---
+
+auto constexpr SequentialModeKeys = LookupTable<tr_sequential_mode_t, 3U>{ {
+    { "off", TR_SEQUENTIAL_OFF },
+    { "piece", TR_SEQUENTIAL_BY_PIECE },
+    { "file", TR_SEQUENTIAL_BY_FILE },
+} };
+
+bool to_sequential_download_mode(tr_variant const& src, tr_sequential_mode_t* tgt)
+{
+    return to_enum_or_integral_with_lookup(SequentialModeKeys, src, tgt);
+}
+
+tr_variant from_sequential_download_mode(tr_sequential_mode_t const& val)
+{
+    return from_enum_or_integral_with_lookup(SequentialModeKeys, val);
+}
 } // unnamed namespace
 
 void Converters::ensure_default_converters()
@@ -487,6 +505,7 @@ void Converters::ensure_default_converters()
             Converters::add(to_string, from_string);
             Converters::add(to_uint64, from_uint64);
             Converters::add(to_verify_added_mode, from_verify_added_mode);
+            Converters::add(to_sequential_download_mode, from_sequential_download_mode);
         });
 }
 

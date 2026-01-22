@@ -2,6 +2,7 @@
 // It may be used under the MIT (SPDX: MIT) license.
 // License text can be found in the licenses/ folder.
 
+#include <algorithm>
 #include <optional>
 #include <vector>
 
@@ -12,6 +13,8 @@
 #include <libtransmission/error.h>
 #include <libtransmission/log.h>
 #include <libtransmission/utils.h>
+
+#import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 
 #import "Torrent.h"
 #import "GroupsController.h"
@@ -82,6 +85,110 @@ typedef NS_ENUM(NSInteger, TorrentMediaType) {
 @property(nonatomic, readonly) NSString* etaString;
 
 @end
+
+static NSImage* iconForBookExtension(NSString* ext)
+{
+    if (ext.length == 0)
+    {
+        return nil;
+    }
+
+    NSImage* icon = nil;
+    if (@available(macOS 11.0, *))
+    {
+        UTType* type = [UTType typeWithFilenameExtension:ext];
+        if (type != nil)
+        {
+            icon = [NSWorkspace.sharedWorkspace iconForContentType:type];
+        }
+    }
+
+    if (!icon)
+    {
+        icon = [NSWorkspace.sharedWorkspace iconForFileType:ext];
+    }
+
+    if (!icon)
+    {
+        if (@available(macOS 11.0, *))
+        {
+            icon = [NSImage imageWithSystemSymbolName:@"book" accessibilityDescription:nil];
+        }
+        if (!icon)
+        {
+            icon = [NSImage imageNamed:NSImageNameBookmarksTemplate];
+        }
+    }
+
+    return icon;
+}
+
+static NSImage* iconForBookPathOrExtension(NSString* path, NSString* ext)
+{
+    if (path.length > 0)
+    {
+        NSImage* fileIcon = [NSWorkspace.sharedWorkspace iconForFile:path];
+        if (fileIcon != nil)
+        {
+            return fileIcon;
+        }
+    }
+
+    return iconForBookExtension(ext);
+}
+
+static NSString* firstRegisteredBookPath(Torrent* torrent)
+{
+    static NSSet<NSString*>* bookExtensions;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        bookExtensions = [NSSet setWithArray:@[ @"pdf", @"epub", @"djv", @"djvu", @"fb2", @"mobi" ]];
+    });
+
+    NSUInteger const count = torrent.fileCount;
+    for (NSUInteger i = 0; i < count; i++)
+    {
+        auto const file = tr_torrentFile(torrent.fHandle, i);
+        NSString* fileName = @(file.name);
+        NSString* ext = fileName.pathExtension.lowercaseString;
+        if (![bookExtensions containsObject:ext])
+        {
+            continue;
+        }
+        if (@available(macOS 11.0, *))
+        {
+            if ([UTType typeWithFilenameExtension:ext] == nil)
+            {
+                continue;
+            }
+        }
+
+        auto const location = tr_torrentFindFile(torrent.fHandle, i);
+        if (!std::empty(location))
+        {
+            return @(location.c_str());
+        }
+        return [torrent.currentDirectory stringByAppendingPathComponent:fileName];
+    }
+
+    return nil;
+}
+
+static NSDateComponentsFormatter* etaFormatter()
+{
+    static NSDateComponentsFormatter* formatter;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        formatter = [NSDateComponentsFormatter new];
+        formatter.unitsStyle = NSDateComponentsFormatterUnitsStyleShort;
+        formatter.maximumUnitCount = 2;
+        formatter.collapsesLargestUnit = YES;
+        formatter.includesTimeRemainingPhrase = YES;
+    });
+    // Because duration of months being variable, setting reference date to now.
+    formatter.referenceDate = NSDate.date;
+    return formatter;
+}
 
 void renameCallback(tr_torrent* /*torrent*/, char const* oldPathCharString, char const* newNameCharString, int error, void* contextInfo)
 {
@@ -686,7 +793,15 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
             [self detectMediaType];
             if (self.fMediaType != TorrentMediaTypeNone && self.fMediaExtension)
             {
-                baseIcon = [NSWorkspace.sharedWorkspace iconForFileType:self.fMediaExtension];
+                if (self.fMediaType == TorrentMediaTypeBooks)
+                {
+                    NSString* bookPath = firstRegisteredBookPath(self);
+                    baseIcon = iconForBookPathOrExtension(bookPath, self.fMediaExtension);
+                }
+                else
+                {
+                    baseIcon = [NSWorkspace.sharedWorkspace iconForFileType:self.fMediaExtension];
+                }
             }
             else
             {
@@ -695,7 +810,23 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
         }
         else
         {
-            baseIcon = [NSWorkspace.sharedWorkspace iconForFileType:self.name.pathExtension];
+            NSString* ext = self.name.pathExtension.lowercaseString;
+            static NSSet<NSString*>* bookExtensions;
+            static dispatch_once_t onceToken;
+            dispatch_once(&onceToken, ^{
+                bookExtensions = [NSSet setWithArray:@[ @"pdf", @"epub", @"djv", @"djvu", @"fb2", @"mobi" ]];
+            });
+            if (ext.length > 0 && [bookExtensions containsObject:ext])
+            {
+                auto const location = tr_torrentFindFile(self.fHandle, 0);
+                NSString* filePath = !std::empty(location) ? @(location.c_str()) :
+                                                             [self.currentDirectory stringByAppendingPathComponent:self.name];
+                baseIcon = iconForBookPathOrExtension(filePath, ext);
+            }
+            else
+            {
+                baseIcon = [NSWorkspace.sharedWorkspace iconForFileType:ext];
+            }
         }
         self.fIcon = [Torrent iconWithShadow:baseIcon];
     }
@@ -852,6 +983,80 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
 /// Builds playable entries for individual media files
 - (NSArray<NSDictionary*>*)buildIndividualFilePlayables
 {
+    static NSRegularExpression* nonWordRegex;
+    static NSArray<NSString*>* codecTokens;
+    static NSArray<NSRegularExpression*>* codecRegexes;
+    static dispatch_once_t codecOnceToken;
+    dispatch_once(&codecOnceToken, ^{
+        nonWordRegex = [NSRegularExpression regularExpressionWithPattern:@"[^\\p{L}\\p{N}]" options:0 error:nil];
+        codecTokens = @[ @"flac", @"wav", @"mp3", @"ape", @"alac", @"aiff", @"wma", @"m4a", @"ogg", @"opus" ];
+        NSMutableArray<NSRegularExpression*>* regexes = [NSMutableArray arrayWithCapacity:codecTokens.count];
+        for (NSString* token in codecTokens)
+        {
+            NSString* pattern = [NSString stringWithFormat:@"(^|[^\\p{L}\\p{N}])%@(\\b|[^\\p{L}\\p{N}])", token];
+            NSRegularExpression* regex = [NSRegularExpression regularExpressionWithPattern:pattern options:0 error:nil];
+            [regexes addObject:regex];
+        }
+        codecRegexes = [regexes copy];
+    });
+
+    NSMutableDictionary<NSString*, NSString*>* normalizedCache = [NSMutableDictionary dictionary];
+    NSMutableDictionary<NSString*, NSString*>* codecCache = [NSMutableDictionary dictionary];
+
+    NSString* (^normalizedMediaKey)(NSString*) = ^NSString*(NSString* value) {
+        if (value.length == 0)
+            return @"";
+        NSString* cached = normalizedCache[value];
+        if (cached)
+            return cached;
+        NSString* lowercase = value.lowercaseString;
+        NSString* normalized = [nonWordRegex stringByReplacingMatchesInString:lowercase options:0
+                                                                        range:NSMakeRange(0, lowercase.length)
+                                                                 withTemplate:@""];
+        normalizedCache[value] = normalized;
+        return normalized;
+    };
+    NSString* (^normalizedMediaKeyWithoutCodec)(NSString*) = ^NSString*(NSString* value) {
+        if (value.length == 0)
+            return @"";
+        NSString* cacheKey = [@"__nocodec__" stringByAppendingString:value];
+        NSString* cached = normalizedCache[cacheKey];
+        if (cached)
+            return cached;
+        NSString* lowercase = value.lowercaseString;
+        for (NSRegularExpression* regex in codecRegexes)
+        {
+            lowercase = [regex stringByReplacingMatchesInString:lowercase options:0 range:NSMakeRange(0, lowercase.length)
+                                                   withTemplate:@""];
+        }
+        NSString* normalized = [nonWordRegex stringByReplacingMatchesInString:lowercase options:0
+                                                                        range:NSMakeRange(0, lowercase.length)
+                                                                 withTemplate:@""];
+        normalizedCache[cacheKey] = normalized;
+        return normalized;
+    };
+    NSString* (^extractCodecToken)(NSString*) = ^NSString*(NSString* value) {
+        if (value.length == 0)
+            return @"";
+        NSString* cached = codecCache[value];
+        if (cached)
+            return cached;
+        NSString* lowercase = value.lowercaseString;
+        NSUInteger index = 0;
+        for (NSRegularExpression* regex in codecRegexes)
+        {
+            if ([regex firstMatchInString:lowercase options:0 range:NSMakeRange(0, lowercase.length)] != nil)
+            {
+                NSString* token = codecTokens[index];
+                codecCache[value] = token;
+                return token;
+            }
+            index++;
+        }
+        codecCache[value] = @"";
+        return @"";
+    };
+
     static NSSet<NSString*>* mediaExtensions;
     static NSSet<NSString*>* documentExtensions;
     static NSSet<NSString*>* documentExternalExtensions;
@@ -859,12 +1064,12 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
         mediaExtensions = [NSSet setWithArray:@[
-            @"mkv", @"avi",  @"mp4", @"mov",  @"wmv",  @"flv",  @"webm", @"m4v", @"mpg", @"mpeg",
-            @"ts",  @"m2ts", @"vob", @"3gp",  @"ogv",  @"mp3",  @"flac", @"wav", @"aac", @"ogg",
-            @"wma", @"m4a",  @"ape", @"alac", @"aiff", @"opus", @"cue",  @"pdf", @"epub"
+            @"mkv",  @"avi",  @"mp4",  @"mov",  @"wmv", @"flv",  @"webm", @"m4v", @"mpg", @"mpeg", @"ts",
+            @"m2ts", @"vob",  @"3gp",  @"ogv",  @"mp3", @"flac", @"wav",  @"aac", @"ogg", @"wma",  @"m4a",
+            @"ape",  @"alac", @"aiff", @"opus", @"cue", @"pdf",  @"epub", @"fb2", @"mobi"
         ]];
-        documentExtensions = [NSSet setWithArray:@[ @"pdf", @"epub", @"djv", @"djvu" ]];
-        documentExternalExtensions = [NSSet setWithArray:@[ @"djv", @"djvu" ]];
+        documentExtensions = [NSSet setWithArray:@[ @"pdf", @"epub", @"djv", @"djvu", @"fb2", @"mobi" ]];
+        documentExternalExtensions = [NSSet setWithArray:@[ @"djv", @"djvu", @"fb2", @"mobi" ]];
         cueCompanionExtensions = [NSSet setWithArray:@[ @"flac", @"ape", @"wav", @"wma", @"alac", @"aiff" ]];
     });
 
@@ -875,6 +1080,9 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
     NSMutableSet<NSString*>* cueBaseNames = [NSMutableSet set];
     NSMutableDictionary<NSString*, NSNumber*>* cueFileIndexes = [NSMutableDictionary dictionary];
     NSMutableDictionary<NSString*, NSString*>* cueFileNames = [NSMutableDictionary dictionary];
+    NSMutableDictionary<NSString*, NSString*>* cueBaseNormalized = [NSMutableDictionary dictionary];
+    NSMutableDictionary<NSString*, NSString*>* cueBaseCodec = [NSMutableDictionary dictionary];
+    NSMutableDictionary<NSString*, NSMutableArray<NSString*>*>* cueByNormalized = [NSMutableDictionary dictionary];
     NSMutableDictionary<NSString*, NSNumber*>* cueAudioIndexes = [NSMutableDictionary dictionary]; // companion audio for progress
     for (NSUInteger i = 0; i < count; i++)
     {
@@ -886,6 +1094,23 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
             [cueBaseNames addObject:baseName];
             cueFileIndexes[baseName] = @(i);
             cueFileNames[baseName] = fileName;
+            NSString* normalized = normalizedMediaKeyWithoutCodec(baseName);
+            if (normalized.length > 0)
+            {
+                cueBaseNormalized[baseName] = normalized;
+                NSString* token = extractCodecToken(baseName);
+                if (token.length > 0)
+                {
+                    cueBaseCodec[baseName] = token;
+                }
+                NSMutableArray<NSString*>* entries = cueByNormalized[normalized];
+                if (!entries)
+                {
+                    entries = [NSMutableArray array];
+                    cueByNormalized[normalized] = entries;
+                }
+                [entries addObject:baseName];
+            }
         }
     }
 
@@ -912,16 +1137,30 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
             continue;
 
         // Skip audio with companion .cue; it will be represented by the cue entry
-        if ([cueCompanionExtensions containsObject:ext] && [cueBaseNames containsObject:fileName.stringByDeletingPathExtension])
+        if ([cueCompanionExtensions containsObject:ext])
         {
-            NSString* baseName = fileName.stringByDeletingPathExtension;
-            CGFloat audioProgress = tr_torrentFileConsecutiveProgress(self.fHandle, i);
-            if (audioProgress < 0)
-                audioProgress = 0;
-            cueProgress[baseName] = @(audioProgress);
-            // Store audio file index for progress tracking (CUE is tiny, audio progress matters)
-            cueAudioIndexes[baseName] = @(i);
-            continue;
+            NSString* audioBaseName = fileName.stringByDeletingPathExtension;
+            NSString* normalized = normalizedMediaKeyWithoutCodec(audioBaseName);
+            NSArray<NSString*>* candidateCues = normalized.length > 0 ? cueByNormalized[normalized] : nil;
+            NSString* matchedCue = nil;
+            for (NSString* cueBaseName in candidateCues)
+            {
+                NSString* cueCodec = cueBaseCodec[cueBaseName] ?: @"";
+                if (cueCodec.length > 0 && ![cueCodec isEqualToString:ext])
+                    continue;
+                matchedCue = cueBaseName;
+                break;
+            }
+            if (matchedCue)
+            {
+                CGFloat audioProgress = tr_torrentFileConsecutiveProgress(self.fHandle, i);
+                if (audioProgress < 0)
+                    audioProgress = 0;
+                cueProgress[matchedCue] = @(audioProgress);
+                // Store audio file index for progress tracking (CUE is tiny, audio progress matters)
+                cueAudioIndexes[matchedCue] = @(i);
+                continue;
+            }
         }
 
         CGFloat progress = tr_torrentFileConsecutiveProgress(self.fHandle, i);
@@ -1010,6 +1249,8 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
 
         // Use audio file index for progress tracking (CUE is tiny, audio progress matters for playability)
         NSNumber* audioIndex = cueAudioIndexes[baseName];
+        if (!audioIndex)
+            continue;
         NSNumber* progressIndex = audioIndex ?: cueIndex;
 
         CGFloat progress = cueProgress[baseName] ? cueProgress[baseName].doubleValue :
@@ -1051,7 +1292,7 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
     for (NSDictionary* fileInfo in playable)
     {
         NSString* baseTitle;
-        if ([fileInfo[@"type"] isEqualToString:@"document"])
+        if ([fileInfo[@"type"] hasPrefix:@"document"])
         {
             baseTitle = fileInfo[@"name"];
         }
@@ -1334,7 +1575,7 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
         ]];
         audioExtensions = [NSSet
             setWithArray:@[ @"mp3", @"flac", @"wav", @"aac", @"ogg", @"wma", @"m4a", @"ape", @"alac", @"aiff", @"opus" ]];
-        bookExtensions = [NSSet setWithArray:@[ @"pdf", @"epub", @"djv", @"djvu" ]];
+        bookExtensions = [NSSet setWithArray:@[ @"pdf", @"epub", @"djv", @"djvu", @"fb2", @"mobi" ]];
     });
 
     NSMutableDictionary<NSString*, NSNumber*>* videoExtCounts = [NSMutableDictionary dictionary];
@@ -1460,7 +1701,9 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
     // Count video/audio files
     NSUInteger videoCount = 0, audioCount = 0, bookCount = 0;
     NSString *dominantVideoExt = nil, *dominantAudioExt = nil, *dominantBookExt = nil;
+    NSString* dominantRegisteredBookExt = nil;
     NSUInteger dominantVideoCount = 0, dominantAudioCount = 0, dominantBookCount = 0;
+    NSUInteger dominantRegisteredBookCount = 0;
 
     for (NSString* ext in videoExtCounts)
     {
@@ -1491,6 +1734,15 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
             dominantBookCount = c;
             dominantBookExt = ext;
         }
+        if ([UTType typeWithFilenameExtension:ext] != nil && c > dominantRegisteredBookCount)
+        {
+            dominantRegisteredBookCount = c;
+            dominantRegisteredBookExt = ext;
+        }
+    }
+    if (dominantRegisteredBookExt != nil)
+    {
+        dominantBookExt = dominantRegisteredBookExt;
     }
 
     // Determine dominant type
@@ -2008,12 +2260,6 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
 
 - (NSString*)progressString
 {
-    // Return cached string if stats haven't changed
-    if (self.fStatsGeneration == self.fCachedStatsGeneration && self.fCachedProgressString)
-    {
-        return self.fCachedProgressString;
-    }
-
     NSString* string;
 
     if (self.magnet)
@@ -2078,21 +2324,11 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
         }
     }
 
-    // Cache the result
-    self.fCachedProgressString = string;
-    self.fCachedStatsGeneration = self.fStatsGeneration;
-
     return string;
 }
 
 - (NSString*)statusString
 {
-    // Return cached string if stats haven't changed
-    if (self.fStatsGeneration == self.fCachedStatsGeneration && self.fCachedStatusString)
-    {
-        return self.fCachedStatusString;
-    }
-
     NSString* string;
 
     if (self.anyErrorOrWarning)
@@ -2156,16 +2392,19 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
             break;
 
         case TR_STATUS_DOWNLOAD:
-            if (NSUInteger const totalPeersCount = self.totalPeersConnected; totalPeersCount != 1)
             {
-                string = [NSString localizedStringWithFormat:NSLocalizedString(@"Downloading from %lu of %lu peers", "Torrent -> status string"),
-                                                             self.peersSendingToUs,
-                                                             totalPeersCount];
-            }
-            else
-            {
-                string = [NSString stringWithFormat:NSLocalizedString(@"Downloading from %lu of 1 peer", "Torrent -> status string"),
-                                                    self.peersSendingToUs];
+                NSUInteger const totalPeersCount = std::max<NSUInteger>(self.totalPeersConnected, self.peersSendingToUs);
+                if (totalPeersCount != 1)
+                {
+                    string = [NSString localizedStringWithFormat:NSLocalizedString(@"Downloading from %lu of %lu peers", "Torrent -> status string"),
+                                                                 self.peersSendingToUs,
+                                                                 totalPeersCount];
+                }
+                else
+                {
+                    string = [NSString stringWithFormat:NSLocalizedString(@"Downloading from %lu of 1 peer", "Torrent -> status string"),
+                                                        self.peersSendingToUs];
+                }
             }
 
             if (NSUInteger const webSeedCount = self.fStat->webseedsSendingToUs; webSeedCount > 0)
@@ -2187,37 +2426,30 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
             break;
 
         case TR_STATUS_SEED:
-            if (NSUInteger const totalPeersCount = self.totalPeersConnected; totalPeersCount != 1)
             {
-                string = [NSString localizedStringWithFormat:NSLocalizedString(@"Seeding to %1$lu of %2$lu peers", "Torrent -> status string"),
-                                                             self.peersGettingFromUs,
-                                                             totalPeersCount];
-            }
-            else
-            {
-                string = [NSString localizedStringWithFormat:NSLocalizedString(@"Seeding to 1 of %lu peers", "Torrent -> status string"),
-                                                             self.peersGettingFromUs,
-                                                             totalPeersCount];
+                NSUInteger const totalPeersCount = std::max<NSUInteger>(self.totalPeersConnected, self.peersGettingFromUs);
+                if (totalPeersCount != 1)
+                {
+                    string = [NSString localizedStringWithFormat:NSLocalizedString(@"Seeding to %1$lu of %2$lu peers", "Torrent -> status string"),
+                                                                 self.peersGettingFromUs,
+                                                                 totalPeersCount];
+                }
+                else
+                {
+                    string = [NSString localizedStringWithFormat:NSLocalizedString(@"Seeding to 1 of %lu peers", "Torrent -> status string"),
+                                                                 self.peersGettingFromUs,
+                                                                 totalPeersCount];
+                }
             }
             break;
         }
     }
-
-    // Cache the result
-    self.fCachedStatusString = string;
-    self.fCachedStatsGeneration = self.fStatsGeneration;
 
     return string;
 }
 
 - (NSString*)shortStatusString
 {
-    // Return cached string if stats haven't changed
-    if (self.fStatsGeneration == self.fCachedStatsGeneration && self.fCachedShortStatusString)
-    {
-        return self.fCachedShortStatusString;
-    }
-
     NSString* string;
 
     switch (self.fStat->activity)
@@ -2268,16 +2500,13 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
         break;
     }
 
-    // Cache the result
-    self.fCachedShortStatusString = string;
-
     if (self.shouldShowEta)
     {
         return self.etaString;
     }
     else
     {
-        return self.fCachedShortStatusString;
+        return string;
     }
 }
 
@@ -3142,12 +3371,6 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
 
 - (NSString*)etaString
 {
-    // Return cached string if stats haven't changed
-    if (self.fStatsGeneration == self.fCachedStatsGeneration && self.fCachedEtaString)
-    {
-        return self.fCachedEtaString;
-    }
-
     time_t eta = self.fStat->eta;
     // if there's a regular ETA, torrent isn't idle
     BOOL fromIdle = NO;
@@ -3159,30 +3382,24 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
     // Foundation undocumented behavior: values above INT32_MAX (68 years) are interpreted as negative values by `stringFromTimeInterval` (#3451)
     if (eta < 0 || eta > INT32_MAX || (fromIdle && eta >= kETAIdleDisplaySec))
     {
+        if (self.downloading && self.downloadRate > 0.0 && self.sizeLeft > 0)
+        {
+            double const eta_seconds = static_cast<double>(self.sizeLeft) / (self.downloadRate * 1024.0);
+            if (eta_seconds > 0.0 && eta_seconds <= INT32_MAX)
+            {
+                return [etaFormatter() stringFromTimeInterval:eta_seconds];
+            }
+        }
+
         return NSLocalizedString(@"remaining time unknown", "Torrent -> eta string");
     }
 
-    static NSDateComponentsFormatter* formatter;
-    static dispatch_once_t onceToken;
-    dispatch_once(&onceToken, ^{
-        formatter = [NSDateComponentsFormatter new];
-        formatter.unitsStyle = NSDateComponentsFormatterUnitsStyleShort;
-        formatter.maximumUnitCount = 2;
-        formatter.collapsesLargestUnit = YES;
-        formatter.includesTimeRemainingPhrase = YES;
-    });
-    // because duration of months being variable, setting reference date to now (instead of 00:00:00 UTC on 1 January 2001)
-    formatter.referenceDate = NSDate.date;
-    NSString* idleString = [formatter stringFromTimeInterval:eta];
+    NSString* idleString = [etaFormatter() stringFromTimeInterval:eta];
 
     if (fromIdle)
     {
         idleString = [idleString stringByAppendingFormat:@" (%@)", NSLocalizedString(@"inactive", "Torrent -> eta string")];
     }
-
-    // Cache the result
-    self.fCachedEtaString = idleString;
-    self.fCachedStatsGeneration = self.fStatsGeneration;
 
     return idleString;
 }

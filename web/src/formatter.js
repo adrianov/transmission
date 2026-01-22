@@ -112,6 +112,9 @@ const techTagsVR = [
   'VRCA220',
 ];
 
+const escapeRegex = (value) =>
+  value.replaceAll(/[.*+?^${}()|[\]\\]/g, String.raw`\$&`);
+
 /**
  * Converts a technical torrent name to a human-friendly title.
  *
@@ -126,6 +129,13 @@ function formatHumanTitle(name) {
     return 'Unknown';
   }
 
+  // Shortcut: if title already looks clean (contains only letters, numbers,
+  // whitespace, and basic punctuation), return as-is.
+  // Using \w with 'u' flag for Unicode support (matches letters, numbers, and more).
+  // Underscores are excluded since they get replaced with spaces.
+  if (/^[\w\s,()[\]{}\-:;]+$/u.test(name) && !name.includes('_')) {
+    return name;
+  }
   // Remove file extension
   let title = name.replace(
     /\.(mkv|avi|mp4|mov|wmv|flv|webm|m4v|torrent)$/i,
@@ -218,7 +228,8 @@ function formatHumanTitle(name) {
     ...techTagsVR,
   ];
   for (const tag of allTags) {
-    title = title.replaceAll(new RegExp(`\\.?${tag}\\b`, 'gi'), '');
+    const escapedTag = escapeRegex(tag);
+    title = title.replaceAll(new RegExp(`\\b${escapedTag}\\b`, 'gi'), '');
   }
 
   // Remove resolution, season markers, year, date (and preceding dot if used as separator)
@@ -227,7 +238,7 @@ function formatHumanTitle(name) {
     .replaceAll(/\.?\(?(2160p|1080p|720p|480p|8K|4K|UHD)\)?/gi, '')
     .replaceAll(/\.?\(?(DVD5|DVD9|DVD|BD25|BD50|BD66|BD100)\)?/gi, '')
     .replaceAll(
-      /\.?\(?(XviD|DivX|MP3|FLAC|OGG|AAC|WAV|APE|ALAC|WMA|OPUS|M4A)\)?/gi,
+      /\.?\(?\b(XviD|DivX|MP3|FLAC|OGG|AAC|WAV|APE|ALAC|WMA|OPUS|M4A)\b\)?/gi,
       '',
     )
     .replaceAll(/\(?\(?(МР3|МРЗ)\)?/gi, '')

@@ -79,6 +79,16 @@ protected:
             return piece_priority_[piece];
         }
 
+        [[nodiscard]] bool is_piece_in_file_tail(tr_piece_index_t /*piece*/) const override
+        {
+            return false;
+        }
+
+        [[nodiscard]] bool is_piece_in_priority_file(tr_piece_index_t /*piece*/) const override
+        {
+            return false;
+        }
+
         [[nodiscard]] libtransmission::ObserverTag observe_files_wanted_changed(
             libtransmission::SimpleObservable<tr_torrent*, tr_file_index_t const*, tr_file_index_t, bool>::Observer observer)
             override

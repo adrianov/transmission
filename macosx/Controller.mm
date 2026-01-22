@@ -336,6 +336,7 @@ static void removeKeRangerRansomware()
 @property(nonatomic) BOOL fSoundPlaying;
 @property(nonatomic) BOOL fWindowMiniaturized;
 @property(nonatomic) NSTimer* fLowPriorityTimer;
+@property(nonatomic) BOOL fUsingBackgroundPriority;
 @property(nonatomic) BOOL fUpdatingUI;
 
 @end
@@ -971,6 +972,7 @@ void onTorrentCompletenessChanged(tr_torrent* tor, tr_completeness status, bool 
     if (!mainWindow || !mainWindow.visible)
     {
         [self.fWindow makeKeyAndOrderFront:nil];
+        [self scheduleProcessPriorityUpdate];
     }
 
     return NO;
@@ -1036,8 +1038,7 @@ void onTorrentCompletenessChanged(tr_torrent* tor, tr_completeness status, bool 
     self.fQuitting = YES;
 
     // Switch to normal priority for faster shutdown
-    setpriority(PRIO_DARWIN_PROCESS, 0, 0);
-    setiopolicy_np(IOPOL_TYPE_DISK, IOPOL_SCOPE_PROCESS, IOPOL_DEFAULT);
+    [self applyNormalPriority];
 
     [PowerManager.shared stop];
 
@@ -1178,17 +1179,36 @@ static NSTimeInterval const kLowPriorityDelay = 15.0;
     }
 }
 
+- (void)restorePriorityForUserInteraction
+{
+    [self.fLowPriorityTimer invalidate];
+    self.fLowPriorityTimer = nil;
+    [self applyNormalPriority];
+}
+
 - (void)applyLowPriority
 {
     self.fLowPriorityTimer = nil;
+    if (self.fUsingBackgroundPriority)
+    {
+        return;
+    }
+
     setpriority(PRIO_DARWIN_PROCESS, 0, PRIO_DARWIN_BG);
     setiopolicy_np(IOPOL_TYPE_DISK, IOPOL_SCOPE_PROCESS, IOPOL_THROTTLE);
+    self.fUsingBackgroundPriority = YES;
 }
 
 - (void)applyNormalPriority
 {
+    if (!self.fUsingBackgroundPriority)
+    {
+        return;
+    }
+
     setpriority(PRIO_DARWIN_PROCESS, 0, 0);
     setiopolicy_np(IOPOL_TYPE_DISK, IOPOL_SCOPE_PROCESS, IOPOL_DEFAULT);
+    self.fUsingBackgroundPriority = NO;
 }
 
 - (tr_session*)sessionHandle

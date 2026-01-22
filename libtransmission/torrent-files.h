@@ -117,8 +117,13 @@ public:
         tr_error* error = nullptr) const;
 
     using FileFunc = std::function<void(char const* filename)>;
-    void remove(std::string_view parent_in, std::string_view tmpdir_prefix, FileFunc const& func, tr_error* error = nullptr)
-        const;
+    using KeepFunc = std::function<bool(std::string_view filename)>;
+    void remove(
+        std::string_view parent_in,
+        std::string_view tmpdir_prefix,
+        FileFunc const& func,
+        tr_error* error = nullptr,
+        KeepFunc keep = {}) const;
 
     struct FoundFile : public tr_sys_path_info
     {

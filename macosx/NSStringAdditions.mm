@@ -178,6 +178,15 @@
         return @"Unknown";
     }
 
+    // Shortcut: if title already looks clean, return as-is
+    NSRegularExpression* cleanTitleRegex = [NSRegularExpression regularExpressionWithPattern:@"^[\\p{L}\\p{N}\\s,\\[\\]\\(\\)\\{\\}\\-:;]+$"
+                                                                                     options:0
+                                                                                       error:nil];
+    if ([cleanTitleRegex firstMatchInString:self options:0 range:NSMakeRange(0, self.length)])
+    {
+        return self;
+    }
+
     NSString* title = self;
 
     // Remove file extension
@@ -414,10 +423,10 @@
         @"VRCA220"
     ];
 
-    // Remove tech tags (and preceding dot if used as separator)
+    // Remove tech tags
     for (NSString* tag in techTags)
     {
-        NSString* pattern = [NSString stringWithFormat:@"\\.?%@\\b", tag];
+        NSString* pattern = [NSString stringWithFormat:@"\\b%@\\b", tag];
         NSRegularExpression* tagRegex = [NSRegularExpression regularExpressionWithPattern:pattern
                                                                                   options:NSRegularExpressionCaseInsensitive
                                                                                     error:nil];
@@ -431,7 +440,7 @@
     title = [resRemoveRegex stringByReplacingMatchesInString:title options:0 range:NSMakeRange(0, title.length) withTemplate:@""];
 
     NSRegularExpression* uhdRemoveRegex = [NSRegularExpression
-        regularExpressionWithPattern:@"\\.?\\(?(8K|4K|UHD|DVD5|DVD9|DVD|BD25|BD50|BD66|BD100|XviD|DivX|MP3|FLAC|OGG|AAC|WAV|APE|ALAC|WMA|OPUS|M4A)\\)?"
+        regularExpressionWithPattern:@"\\.?\\(?(\\b(?:8K|4K|UHD|DVD5|DVD9|DVD|BD25|BD50|BD66|BD100|XviD|DivX|MP3|FLAC|OGG|AAC|WAV|APE|ALAC|WMA|OPUS|M4A)\\b)\\)?"
                              options:NSRegularExpressionCaseInsensitive
                                error:nil];
     title = [uhdRemoveRegex stringByReplacingMatchesInString:title options:0 range:NSMakeRange(0, title.length) withTemplate:@""];
@@ -476,11 +485,14 @@
         title = [title stringByReplacingOccurrencesOfString:@"." withString:@" "];
     }
 
-    // Normalize separators, preserve existing " - "
-    title = [title stringByReplacingOccurrencesOfString:@" - " withString:@"\u0000"];
+    // Normalize separators, preserve single dash separators as " - "
+    NSString* dashPlaceholder = @"\u0000";
     title = [title stringByReplacingOccurrencesOfString:@"_" withString:@" "];
+    NSRegularExpression* dashGroupRegex = [NSRegularExpression regularExpressionWithPattern:@"(?:\\s*-\\s*)+" options:0 error:nil];
+    title = [dashGroupRegex stringByReplacingMatchesInString:title options:0 range:NSMakeRange(0, title.length)
+                                                withTemplate:dashPlaceholder];
     title = [title stringByReplacingOccurrencesOfString:@"-" withString:@" "];
-    title = [title stringByReplacingOccurrencesOfString:@"\u0000" withString:@" - "];
+    title = [title stringByReplacingOccurrencesOfString:dashPlaceholder withString:@" - "];
 
     // Collapse multiple spaces
     NSRegularExpression* spaceRegex = [NSRegularExpression regularExpressionWithPattern:@"\\s+" options:0 error:nil];

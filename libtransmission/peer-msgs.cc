@@ -2055,7 +2055,13 @@ void tr_peerMsgsImpl::check_request_timeout(time_t const now)
 
         if (!ok)
         {
-            tor_.error().set_local_error(fmt::format("Please Verify Local Data! Piece #{:d} is corrupt.", req.index));
+            auto const status = tor_.activity();
+            if (status != TR_STATUS_CHECK && status != TR_STATUS_CHECK_WAIT)
+            {
+                tr_logAddWarnTor(&tor_, fmt::format("Local data corrupt; rechecking from piece #{:d}", req.index));
+                tr_torrentVerify(&tor_);
+                tr_torrentStartNow(&tor_);
+            }
         }
     }
 

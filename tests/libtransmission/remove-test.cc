@@ -307,6 +307,27 @@ TEST_F(RemoveTest, LeavesNonJunkAlone)
     EXPECT_EQ(expected_tree, getSubtreeContents(parent));
 }
 
+TEST_F(RemoveTest, KeepsSharedFiles)
+{
+    auto const parent = sandboxDir();
+    auto expected_tree = std::set<std::string>{ parent };
+    EXPECT_EQ(expected_tree, getSubtreeContents(parent));
+
+    auto const files = ubuntuFiles();
+    expected_tree = createFiles(files, parent.c_str());
+    EXPECT_EQ(expected_tree, getSubtreeContents(parent));
+
+    auto const keep_file = tr_pathbuf{ parent, '/', files.path(0) };
+    auto const keep = [&keep_file](std::string_view filename)
+    {
+        return filename == keep_file.sv();
+    };
+
+    files.remove(parent, "tmpdir_prefix"sv, sysPathRemove, nullptr, keep);
+    expected_tree = { parent, keep_file.c_str() };
+    EXPECT_EQ(expected_tree, getSubtreeContents(parent));
+}
+
 TEST_F(RemoveTest, PreservesDirectoryHierarchyIfPossible)
 {
     auto const parent = sandboxDir();

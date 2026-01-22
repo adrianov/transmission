@@ -170,6 +170,7 @@ typedef NS_ENUM(NSUInteger, AddType) { //
 @property(nonatomic, readonly) CGFloat mainWindowComponentHeight;
 @property(nonatomic, readonly) CGFloat scrollViewHeight;
 @property(nonatomic, getter=isFullScreen, readonly) BOOL fullScreen;
+- (void)restorePriorityForUserInteraction;
 
 - (void)updateForExpandCollapse;
 

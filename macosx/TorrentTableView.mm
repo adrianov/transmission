@@ -20,6 +20,7 @@
 #import "TorrentCellActionButton.h"
 
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
+#import <objc/runtime.h>
 #import "TorrentCellControlButton.h"
 #import "TorrentCellRevealButton.h"
 #import "TorrentCellURLButton.h"
@@ -389,7 +390,11 @@ static CGFloat const kPlayButtonVerticalPadding = 4.0;
             }
 
             // Dynamic content - always update
-            torrentCell.fTorrentProgressField.stringValue = torrent.progressString;
+            NSString* progressString = torrent.progressString;
+            if (![torrentCell.fTorrentProgressField.stringValue isEqualToString:progressString])
+            {
+                torrentCell.fTorrentProgressField.stringValue = progressString;
+            }
 
             // configure/update play buttons for media torrents
             // (must be in dynamic section to handle playableFiles becoming available after initial setup)
@@ -407,7 +412,11 @@ static CGFloat const kPlayButtonVerticalPadding = 4.0;
                     status = self.fHoverEventDict[@"string"];
                 }
             }
-            torrentCell.fTorrentStatusField.stringValue = status ?: torrent.statusString;
+            NSString* statusString = status ?: torrent.statusString;
+            if (![torrentCell.fTorrentStatusField.stringValue isEqualToString:statusString])
+            {
+                torrentCell.fTorrentStatusField.stringValue = statusString;
+            }
         }
 
         torrentCell.fTorrentTableView = self;
@@ -603,6 +612,12 @@ static CGFloat const kPlayButtonVerticalPadding = 4.0;
         //as using floating group rows causes all sorts of weirdness...
         [self toggleGroupRowRatio];
     }
+}
+
+- (void)scrollWheel:(NSEvent*)event
+{
+    [self.fController restorePriorityForUserInteraction];
+    [super scrollWheel:event];
 }
 
 - (NSArray<Torrent*>*)selectedTorrents
@@ -931,7 +946,7 @@ static CGFloat const kPlayButtonVerticalPadding = 4.0;
 
     // Build button title with progress
     NSString* title;
-    if ([type isEqualToString:@"document"])
+    if ([type hasPrefix:@"document"])
         title = baseTitle;
     else if (progress > 0 && progress < 1.0)
         title = [NSString stringWithFormat:@"%@ (%d%%)", baseTitle, (int)floor(progress * 100)];
@@ -975,14 +990,69 @@ static CGFloat const kPlayButtonVerticalPadding = 4.0;
     // For files, store index for progress updates; folders use NSNotFound
     NSNumber* index = item[@"index"];
     playButton.tag = index ? index.integerValue : NSNotFound;
+    NSString* folder = item[@"folder"];
+    if (folder.length > 0)
+    {
+        objc_setAssociatedObject(playButton, @selector(folderForPlayButton:), folder, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    }
 
     // Hide until download starts (or completion for documents)
-    if ([type isEqualToString:@"document"])
+    if ([type hasPrefix:@"document"])
         playButton.hidden = (progress < 1.0);
     else
         playButton.hidden = (progress <= 0);
 
     return playButton;
+}
+
+static id playButtonFolderCache(NSButton* sender)
+{
+    return objc_getAssociatedObject(sender, @selector(folderForPlayButton:));
+}
+
+static void setPlayButtonFolderCache(NSButton* sender, id value)
+{
+    objc_setAssociatedObject(sender, @selector(folderForPlayButton:), value, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+}
+
+static NSString* folderForPlayButton(NSButton* sender, Torrent* torrent)
+{
+    id cached = playButtonFolderCache(sender);
+    if ([cached isKindOfClass:[NSString class]])
+    {
+        return (NSString*)cached;
+    }
+    if (cached == [NSNull null])
+    {
+        return nil;
+    }
+
+    NSString* path = sender.identifier;
+    if (!path)
+    {
+        setPlayButtonFolderCache(sender, [NSNull null]);
+        return nil;
+    }
+
+    NSString* currentDir = torrent.currentDirectory;
+    if (![path hasPrefix:currentDir])
+    {
+        setPlayButtonFolderCache(sender, [NSNull null]);
+        return nil;
+    }
+
+    NSString* folder = [path substringFromIndex:currentDir.length];
+    if ([folder hasPrefix:@"/"])
+        folder = [folder substringFromIndex:1];
+
+    if (folder.length == 0)
+    {
+        setPlayButtonFolderCache(sender, [NSNull null]);
+        return nil;
+    }
+
+    setPlayButtonFolderCache(sender, folder);
+    return folder;
 }
 
 - (CGFloat)playButtonsAvailableWidthForCell:(TorrentCell*)cell
@@ -1156,18 +1226,8 @@ static CGFloat const kPlayButtonVerticalPadding = 4.0;
         if (fileIndex == NSNotFound)
         {
             // Folder-based item: extract relative folder path and get progress
-            NSString* fullPath = button.identifier;
-            NSString* currentDir = torrent.currentDirectory;
-            NSString* folder = nil;
-            if ([fullPath hasPrefix:currentDir])
-            {
-                folder = [fullPath substringFromIndex:currentDir.length];
-                if ([folder hasPrefix:@"/"])
-                    folder = [folder substringFromIndex:1];
-            }
-
-            // Use consecutive progress for all folder-based items (albums, discs)
-            progress = folder ? [torrent folderConsecutiveProgress:folder] : 0.0;
+            NSString* folder = folderForPlayButton(button, torrent);
+            progress = folder.length > 0 ? [torrent folderConsecutiveProgress:folder] : 0.0;
         }
         else
         {
@@ -1236,44 +1296,69 @@ static CGFloat const kPlayButtonVerticalPadding = 4.0;
     }
 }
 
+- (NSIndexSet*)targetFileIndexesForPlayButton:(NSButton*)sender torrent:(Torrent*)torrent isComplete:(BOOL*)isComplete
+{
+    NSInteger fileIndex = sender.tag;
+    if (fileIndex != NSNotFound)
+    {
+        if (isComplete != NULL)
+            *isComplete = ([torrent fileProgressForIndex:fileIndex] >= 1.0);
+        return [NSIndexSet indexSetWithIndex:fileIndex];
+    }
+
+    NSString* folder = folderForPlayButton(sender, torrent);
+    NSIndexSet* fileIndexes = folder.length > 0 ? [torrent fileIndexesForFolder:folder] : nil;
+    if (isComplete != NULL)
+        *isComplete = (fileIndexes.count == 0) || (folder.length == 0) || ([torrent folderConsecutiveProgress:folder] >= 1.0);
+
+    return fileIndexes;
+}
+
+- (NSIndexSet*)fileIndexesWithPriority:(tr_priority_t)priority torrent:(Torrent*)torrent
+{
+    NSUInteger fileCount = torrent.fileCount;
+    NSMutableIndexSet* indexes = [[NSMutableIndexSet alloc] init];
+    tr_torrent* handle = torrent.torrentStruct;
+
+    for (tr_file_index_t i = 0; i < fileCount; ++i)
+    {
+        if (![torrent canChangeDownloadCheckForFile:i] || [torrent fileProgressForIndex:i] >= 1.0)
+            continue;
+        if (tr_torrentFile(handle, i).priority == priority)
+            [indexes addIndex:i];
+    }
+
+    return indexes;
+}
+
+- (NSIndexSet*)otherHighPriorityIndexesForTorrent:(Torrent*)torrent excluding:(NSIndexSet*)excluded
+{
+    NSMutableIndexSet* highIndexes = [[self fileIndexesWithPriority:TR_PRI_HIGH torrent:torrent] mutableCopy];
+    [highIndexes removeIndexes:excluded];
+    return highIndexes;
+}
+
 - (void)setHighPriorityForButton:(NSButton*)sender
 {
-    NSString* path = sender.identifier;
-    if (!path)
-        return;
-
     Torrent* torrent = [self itemAtRow:[self rowForView:[sender superview]]];
     if (!torrent)
         return;
 
-    NSInteger fileIndex = sender.tag;
-    if (fileIndex != NSNotFound)
-    {
-        if ([torrent fileProgressForIndex:fileIndex] < 1.0)
-        {
-            [torrent setFilePriority:TR_PRI_HIGH forIndexes:[NSIndexSet indexSetWithIndex:fileIndex]];
-        }
-    }
-    else
-    {
-        NSString* currentDir = torrent.currentDirectory;
-        NSString* folder = nil;
-        if ([path hasPrefix:currentDir])
-        {
-            folder = [path substringFromIndex:currentDir.length];
-            if ([folder hasPrefix:@"/"])
-                folder = [folder substringFromIndex:1];
-        }
+    BOOL isComplete = NO;
+    NSIndexSet* targetIndexes = [self targetFileIndexesForPlayButton:sender torrent:torrent isComplete:&isComplete];
+    if (isComplete || targetIndexes.count == 0)
+        return;
 
-        if (folder)
-        {
-            NSIndexSet* fileIndexes = [torrent fileIndexesForFolder:folder];
-            if (fileIndexes.count > 0 && [torrent folderConsecutiveProgress:folder] < 1.0)
-            {
-                [torrent setFilePriority:TR_PRI_HIGH forIndexes:fileIndexes];
-            }
-        }
+    NSIndexSet* otherHighIndexes = [self otherHighPriorityIndexesForTorrent:torrent excluding:targetIndexes];
+    if (otherHighIndexes.count > 0)
+    {
+        NSIndexSet* normalIndexes = [self fileIndexesWithPriority:TR_PRI_NORMAL torrent:torrent];
+        if (normalIndexes.count > 0)
+            [torrent setFilePriority:TR_PRI_LOW forIndexes:normalIndexes];
+        [torrent setFilePriority:TR_PRI_NORMAL forIndexes:otherHighIndexes];
     }
+
+    [torrent setFilePriority:TR_PRI_HIGH forIndexes:targetIndexes];
 }
 
 - (IBAction)playMediaFile:(NSButton*)sender

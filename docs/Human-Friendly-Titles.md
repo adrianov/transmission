@@ -191,6 +191,7 @@ Button titles for individual files follow these rules:
    - All technical tags (codecs, sources, etc.) are removed
    - Example: `Artist.Track.2160p.FLAC.flac` → `▶ Artist Track`
 3. **Bracketed dates** (`[25.12.2025]`): Parsed as dates and shown as `(... )` in the title
+4. **Clean titles shortcut:** If a name contains only letters/digits, spaces, commas, brackets `[]`, parentheses `()`, braces `{}`, hyphens `-`, colons `:`, and semicolons `;`, it is used as-is (no humanizing).
 
 ### DVD/Blu-ray Disc Support
 

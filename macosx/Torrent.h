@@ -187,14 +187,7 @@ extern NSString* const kTorrentDidChangeGroupNotification;
 @property(nonatomic, readonly) NSString* shortStatusString;
 @property(nonatomic, readonly) NSString* remainingTimeString;
 
-/// Cached display strings to avoid recalculating on every draw cycle
-@property(nonatomic) NSString* fCachedProgressString;
-@property(nonatomic) NSString* fCachedStatusString;
-@property(nonatomic) NSString* fCachedShortStatusString;
-@property(nonatomic) NSString* fCachedRemainingTimeString;
-@property(nonatomic) NSString* fCachedEtaString;
 @property(nonatomic) NSString* fCachedHumanReadableTitle;
-@property(nonatomic) NSUInteger fCachedStatsGeneration;
 
 @property(nonatomic, readonly) NSString* stateString;
 @property(nonatomic, readonly) NSUInteger totalPeersConnected;

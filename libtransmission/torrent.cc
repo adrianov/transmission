@@ -14,6 +14,7 @@
 #include <sstream>
 #include <string>
 #include <string_view>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -541,6 +542,45 @@ bool removeTorrentFile(char const* filename, void* /*user_data*/, tr_error* erro
     return tr_sys_path_remove(filename, error);
 }
 
+[[nodiscard]] auto build_keep_paths(tr_torrent const* tor)
+{
+    // Keep paths for wanted files in other torrents to avoid deleting shared data.
+    auto keep_paths = std::unordered_set<std::string>{};
+    auto const* const session = tor->session;
+    auto const torrents = session->torrents().get_all();
+
+    for (auto const* const other : torrents)
+    {
+        if (other == tor || !other->has_metainfo())
+        {
+            continue;
+        }
+
+        auto const base = other->current_dir();
+        if (std::empty(base))
+        {
+            continue;
+        }
+
+        for (tr_file_index_t i = 0, n = other->file_count(); i < n; ++i)
+        {
+            if (!other->file_is_wanted(i))
+            {
+                continue;
+            }
+
+            auto const file_path = tr_pathbuf{ base, '/', other->file_subpath(i) };
+            keep_paths.emplace(std::string{ file_path.sv() });
+            if (session->isIncompleteFileNamingEnabled() && !other->has_file(i))
+            {
+                keep_paths.emplace(std::string{ tr_pathbuf{ file_path, tr_torrent_files::PartialFileSuffix } });
+            }
+        }
+    }
+
+    return keep_paths;
+}
+
 void freeTorrent(tr_torrent* tor)
 {
     auto const lock = tor->unique_lock();
@@ -716,8 +756,18 @@ void tr_torrentRemoveInSessionThread(
             delete_func(filename, delete_user_data, nullptr);
         };
 
+        auto const keep_paths = start_stop_helpers::build_keep_paths(tor);
+        auto keep = tr_torrent_files::KeepFunc{};
+        if (!std::empty(keep_paths))
+        {
+            keep = [&keep_paths](std::string_view filename)
+            {
+                return keep_paths.find(std::string{ filename }) != std::end(keep_paths);
+            };
+        }
+
         tr_error error;
-        tor->files().remove(tor->current_dir(), tor->name(), delete_func_wrapper, &error);
+        tor->files().remove(tor->current_dir(), tor->name(), delete_func_wrapper, &error, keep);
         if (error)
         {
             ok = false;

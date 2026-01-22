@@ -2537,6 +2537,17 @@ using SessionAccessors = std::pair<SessionGetter, SessionSetter>;
             }
         });
 
+    map.try_emplace(
+        TR_KEY_sequential_download_mode,
+        [](tr_session const& src) -> tr_variant { return static_cast<int64_t>(src.sequential_download_mode()); },
+        [](tr_session& tgt, tr_variant const& src, ErrorInfo& /*err*/)
+        {
+            if (auto const val = src.value_if<int64_t>())
+            {
+                tgt.set_sequential_download_mode(static_cast<tr_sequential_mode_t>(*val));
+            }
+        });
+
     map.try_emplace(TR_KEY_session_id, [](tr_session const& src) -> tr_variant { return src.sessionId(); }, nullptr);
 
     map.try_emplace(
