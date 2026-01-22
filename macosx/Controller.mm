@@ -1453,7 +1453,7 @@ static NSTimeInterval const kLowPriorityDelay = 15.0;
             }
 
             [torrent update];
-            [self.fTorrents addObject:torrent];
+            [self insertTorrentAtTop:torrent];
 
             if (!self.fAddingTransfers)
             {
@@ -1466,16 +1466,24 @@ static NSTimeInterval const kLowPriorityDelay = 15.0;
     [self fullUpdateUI];
 }
 
+- (void)insertTorrentAtTop:(Torrent*)torrent
+{
+    [self.fTorrents insertObject:torrent atIndex:0];
+    NSUInteger queuePosition = 0;
+    for (Torrent* existing in self.fTorrents)
+    {
+        existing.queuePosition = queuePosition++;
+    }
+}
+
 - (void)askOpenConfirmed:(AddWindowController*)addController add:(BOOL)add
 {
     Torrent* torrent = addController.torrent;
 
     if (add)
     {
-        torrent.queuePosition = self.fTorrents.count;
-
         [torrent update];
-        [self.fTorrents addObject:torrent];
+        [self insertTorrentAtTop:torrent];
 
         if (!self.fAddingTransfers)
         {
@@ -1548,7 +1556,7 @@ static NSTimeInterval const kLowPriorityDelay = 15.0;
         }
 
         [torrent update];
-        [self.fTorrents addObject:torrent];
+        [self insertTorrentAtTop:torrent];
 
         if (!self.fAddingTransfers)
         {
@@ -1566,10 +1574,8 @@ static NSTimeInterval const kLowPriorityDelay = 15.0;
 
     if (add)
     {
-        torrent.queuePosition = self.fTorrents.count;
-
         [torrent update];
-        [self.fTorrents addObject:torrent];
+        [self insertTorrentAtTop:torrent];
 
         if (!self.fAddingTransfers)
         {
@@ -5705,7 +5711,7 @@ static NSTimeInterval const kLowPriorityDelay = 15.0;
     }
 
     [torrent update];
-    [self.fTorrents addObject:torrent];
+    [self insertTorrentAtTop:torrent];
 
     if (!self.fAddingTransfers)
     {
