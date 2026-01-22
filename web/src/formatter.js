@@ -132,55 +132,10 @@ function formatHumanTitle(name) {
     '',
   );
 
-  // Extract year and format from square bracket metadata like [2006, Documentary, DVD5]
-  // Keep content descriptors (Documentary, etc.), only extract year and disc format
-  /* eslint-disable sonarjs/slow-regex -- simple patterns on short strings */
-  const bracketMatch = title.match(/\[([^\]]+)\]/);
-  let bracketYear = null;
-  let bracketFormat = null;
-  if (bracketMatch) {
-    const [, bracketContent] = bracketMatch;
-    const bracketYearMatch = bracketContent.match(/\b(19\d{2}|20\d{2})\b/);
-    if (bracketYearMatch) {
-      [, bracketYear] = bracketYearMatch;
-    }
-    // Extract disc format, legacy codec, or audio format from brackets
-    const bracketFormatMatch = bracketContent.match(
-      /\b(DVD5|DVD9|DVD|BD25|BD50|BD66|BD100|XviD|DivX|MP3|FLAC|OGG|AAC|WAV|APE|ALAC|WMA|OPUS|M4A)\b/i,
-    );
-    if (bracketFormatMatch) {
-      const [, fmt] = bracketFormatMatch;
-      // Disc formats (DVD/BD) uppercase, legacy codecs and audio formats lowercase
-      const discFormats = [
-        'dvd',
-        'dvd5',
-        'dvd9',
-        'bd25',
-        'bd50',
-        'bd66',
-        'bd100',
-      ];
-      bracketFormat = discFormats.includes(fmt.toLowerCase())
-        ? fmt.toUpperCase()
-        : fmt.toLowerCase();
-    }
-    // Remove only year and format tags from bracket content, keep the rest
-    const cleanedBracket = bracketContent
-      .replaceAll(/\b(19\d{2}|20\d{2})\b/g, '')
-      .replaceAll(
-        /\b(?:DVD5|DVD9|DVD|BD25|BD50|BD66|BD100|XviD|DivX|MP3|FLAC|OGG|AAC|WAV|APE|ALAC|WMA|OPUS|M4A)\b/gi,
-        '',
-      )
-      .replaceAll(/,\s*,/g, ',')
-      .replaceAll(/^[\s,]+/g, '')
-      .replaceAll(/[\s,]+$/g, '')
-      .trim();
-    // If bracket still has content, keep it; otherwise remove brackets entirely
-    title = cleanedBracket
-      ? title.replace(/\[([^\]]+)\]/, `[${cleanedBracket}]`)
-      : title.replaceAll(/\s*\[([^\]]+)\]\s*/g, ' ');
-  }
-  /* eslint-enable sonarjs/slow-regex */
+  // Normalize bracketed metadata early to simplify parsing
+  title = title.replaceAll('[', ' ').replaceAll(']', ' ');
+  title = title.replaceAll(/\s{2,}/g, ' ').trim();
+  title = title.replaceAll(/\s-\s-\s+/g, ' - ');
 
   // Handle merged resolution patterns like "BDRip1080p" -> "BDRip 1080p"
   title = title.replaceAll(
@@ -220,10 +175,6 @@ function formatHumanTitle(name) {
       resolution = fmt === 'мр3' || fmt === 'мрз' ? 'mp3' : fmt;
     }
   }
-  // Use format extracted from brackets if no other resolution found
-  if (!resolution && bracketFormat) {
-    resolution = bracketFormat;
-  }
 
   // Season pattern (S01, Season 1, etc.)
   const seasonMatch = title.match(/\bS(\d{1,2})(?:E\d+)?\b/i);
@@ -251,14 +202,10 @@ function formatHumanTitle(name) {
     : null;
 
   // Year pattern (standalone 4-digit year between 1900-2099) - but not if it's part of a date or interval
-  // Also use year extracted from bracket metadata if no other year found
-  let year =
+  const year =
     fullDateMatch || yearInterval
       ? null
       : title.match(/\b(19\d{2}|20\d{2})\b/)?.[1] || null;
-  if (!year && bracketYear) {
-    year = bracketYear;
-  }
 
   // Remove tech tags
   const allTags = [
