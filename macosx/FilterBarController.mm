@@ -258,6 +258,16 @@ typedef NS_ENUM(NSInteger, FilterTypeTag) {
     [NSNotificationCenter.defaultCenter postNotificationName:@"ApplyFilter" object:nil];
 }
 
+- (void)updateSearchText:(NSString*)searchText
+{
+    NSString* normalized = searchText ?: @"";
+    if (![self.fSearchField.stringValue isEqualToString:normalized])
+    {
+        self.fSearchField.stringValue = normalized;
+    }
+    [self setSearchText:self.fSearchField];
+}
+
 - (void)focusSearchField
 {
     [self.view.window makeFirstResponder:self.fSearchField];
