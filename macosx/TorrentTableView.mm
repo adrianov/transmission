@@ -20,6 +20,7 @@
 #import "TorrentCellActionButton.h"
 
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
+#include <cmath>
 #import <objc/runtime.h>
 #import "TorrentCellControlButton.h"
 #import "TorrentCellRevealButton.h"
@@ -1103,7 +1104,6 @@ static NSString* folderForPlayButton(NSButton* sender, Torrent* torrent)
         return nil;
     }
 
-    BOOL isCompleteTransfer = torrent.isComplete && (torrent.isSeeding || !torrent.isActive);
     BOOL isSameSource = [torrent.cachedPlayButtonSource isEqualToArray:playableFiles];
     if (!isSameSource)
     {
@@ -1162,7 +1162,7 @@ static NSString* folderForPlayButton(NSButton* sender, Torrent* torrent)
             NSString* folder = entry[@"folder"];
             newProgress = folder.length > 0 ? [torrent folderConsecutiveProgress:folder] : 0.0;
         }
-        if (newProgress != progress)
+        if (std::fabs(newProgress - progress) > 0.000001)
         {
             progress = newProgress;
             entry[@"progress"] = @(progress);
@@ -1565,7 +1565,11 @@ static NSString* folderForPlayButton(NSButton* sender, Torrent* torrent)
 
         // Fallback: open with default music player
         // Find the default app for mp3 files and use it to open the folder
-        NSURL* musicPlayerURL = [NSWorkspace.sharedWorkspace URLForApplicationToOpenContentType:UTTypeMP3];
+        NSURL* musicPlayerURL = nil;
+        if (@available(macOS 12.0, *))
+        {
+            musicPlayerURL = [NSWorkspace.sharedWorkspace URLForApplicationToOpenContentType:UTTypeMP3];
+        }
         if (musicPlayerURL)
         {
             NSWorkspaceOpenConfiguration* config = [NSWorkspaceOpenConfiguration configuration];
