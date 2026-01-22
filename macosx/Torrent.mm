@@ -1958,6 +1958,24 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
     }
 }
 
+- (BOOL)allFilesMissing
+{
+    if (self.magnet || self.fileCount == 0)
+    {
+        return NO;
+    }
+
+    for (NSUInteger i = 0; i < self.fileCount; ++i)
+    {
+        if (!std::empty(tr_torrentFindFile(self.fHandle, i)))
+        {
+            return NO;
+        }
+    }
+
+    return YES;
+}
+
 - (NSString*)lastKnownDataLocation
 {
     if (self.magnet)
@@ -2424,7 +2442,7 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
                 }
                 else
                 {
-                    string = [NSString localizedStringWithFormat:NSLocalizedString(@"Seeding to 1 of %lu peers", "Torrent -> status string"),
+                    string = [NSString localizedStringWithFormat:NSLocalizedString(@"Seeding to %1$lu of %2$lu peer", "Torrent -> status string"),
                                                                  self.peersGettingFromUs,
                                                                  totalPeersCount];
                 }

@@ -313,6 +313,7 @@ static void removeKeRangerRansomware()
 @property(nonatomic) StatusBarController* fStatusBar;
 
 @property(nonatomic) FilterBarController* fFilterBar;
+@property(nonatomic) NSSearchField* fToolbarSearchField;
 
 @property(nonatomic) QLPreviewPanel* fPreviewPanel;
 @property(nonatomic) BOOL fQuitting;
@@ -621,6 +622,37 @@ void onTorrentCompletenessChanged(tr_torrent* tor, tr_completeness status, bool 
     return self;
 }
 
+- (void)removeMissingDataTorrentsOnLaunch
+{
+    if (self.fTorrents.count == 0)
+    {
+        return;
+    }
+
+    [Torrent updateTorrents:self.fTorrents];
+
+    NSMutableArray<Torrent*>* toRemove = [NSMutableArray array];
+    for (Torrent* torrent in self.fTorrents)
+    {
+        if (torrent.error && torrent.allFilesMissing)
+        {
+            [toRemove addObject:torrent];
+        }
+    }
+
+    if (toRemove.count == 0)
+    {
+        return;
+    }
+
+    for (Torrent* torrent in toRemove)
+    {
+        [self.fTorrentHashes removeObjectForKey:torrent.hashString];
+    }
+
+    [self confirmRemoveTorrents:toRemove deleteData:NO];
+}
+
 - (void)awakeFromNib
 {
     [super awakeFromNib];
@@ -738,6 +770,8 @@ void onTorrentCompletenessChanged(tr_torrent* tor, tr_completeness status, bool 
         [self.fTorrents addObject:torrent];
         self.fTorrentHashes[torrent.hashString] = torrent;
     }
+
+    [self removeMissingDataTorrentsOnLaunch];
 
     //update previous transfers state by recreating a torrent from history
     //and comparing to torrents already loaded via tr_sessionLoadTorrents
@@ -1473,6 +1507,12 @@ static NSTimeInterval const kLowPriorityDelay = 15.0;
     for (Torrent* existing in self.fTorrents)
     {
         existing.queuePosition = queuePosition++;
+    }
+
+    // Keep on-screen order in sync when sorting by queue
+    if ([[self.fDefaults stringForKey:@"Sort"] isEqualToString:SortTypeOrder])
+    {
+        [self sortTorrentsCallUpdates:YES includeQueueOrder:YES];
     }
 }
 
@@ -3326,22 +3366,12 @@ static NSTimeInterval const kLowPriorityDelay = 15.0;
 
                     [addIndexes removeIndexes:newAddIndexes];
 
-                    [self.fDisplayedTorrents addObjectsFromArray:[allTorrents objectsAtIndexes:newAddIndexes]];
-                    [self.fTableView insertItemsAtIndexes:[NSIndexSet indexSetWithIndexesInRange:NSMakeRange(
-                                                                                                     self.fDisplayedTorrents.count -
-                                                                                                         newAddIndexes.count,
-                                                                                                     newAddIndexes.count)]
-                                                 inParent:nil
-                                            withAnimation:NSTableViewAnimationSlideLeft];
+                    [self.fDisplayedTorrents insertObjects:[allTorrents objectsAtIndexes:newAddIndexes] atIndexes:newAddIndexes];
+                    [self.fTableView insertItemsAtIndexes:newAddIndexes inParent:nil withAnimation:NSTableViewAnimationSlideLeft];
                 }
 
-                [self.fDisplayedTorrents addObjectsFromArray:[allTorrents objectsAtIndexes:addIndexes]];
-                [self.fTableView
-                    insertItemsAtIndexes:[NSIndexSet indexSetWithIndexesInRange:NSMakeRange(
-                                                                                    self.fDisplayedTorrents.count - addIndexes.count,
-                                                                                    addIndexes.count)]
-                                inParent:nil
-                           withAnimation:NSTableViewAnimationSlideDown];
+                [self.fDisplayedTorrents insertObjects:[allTorrents objectsAtIndexes:addIndexes] atIndexes:addIndexes];
+                [self.fTableView insertItemsAtIndexes:addIndexes inParent:nil withAnimation:NSTableViewAnimationSlideDown];
             }
         }
     }
@@ -3434,8 +3464,8 @@ static NSTimeInterval const kLowPriorityDelay = 15.0;
         }
 
         //add remaining new torrents
-        for (Torrent* torrent in [allTorrents objectsAtIndexes:unusedAllTorrentsIndexes])
-        {
+        [unusedAllTorrentsIndexes enumerateIndexesUsingBlock:^(NSUInteger allIndex, BOOL* /*stop*/) {
+            Torrent* torrent = allTorrents[allIndex];
             NSInteger const groupValue = torrent.groupValue;
             TorrentGroup* group = groupsByIndex[@(groupValue)];
             if (!group)
@@ -3449,12 +3479,25 @@ static NSTimeInterval const kLowPriorityDelay = 15.0;
                 [self.fTableView isGroupCollapsed:groupValue] ? [self.fTableView collapseItem:group] : [self.fTableView expandItem:group];
             }
 
-            [group.torrents addObject:torrent];
+            NSUInteger insertIndex = [group.torrents indexOfObjectPassingTest:^BOOL(Torrent* existing, NSUInteger /*idx*/, BOOL* stop) {
+                NSUInteger existingIndex = [allTorrents indexOfObject:existing];
+                if (existingIndex != NSNotFound && existingIndex > allIndex)
+                {
+                    *stop = YES;
+                    return YES;
+                }
+                return NO;
+            }];
+            if (insertIndex == NSNotFound)
+            {
+                insertIndex = group.torrents.count;
+            }
+            [group.torrents insertObject:torrent atIndex:insertIndex];
 
             BOOL const newTorrent = [self.fAddingTransfers containsObject:torrent];
-            [self.fTableView insertItemsAtIndexes:[NSIndexSet indexSetWithIndex:group.torrents.count - 1] inParent:group
+            [self.fTableView insertItemsAtIndexes:[NSIndexSet indexSetWithIndex:insertIndex] inParent:group
                                     withAnimation:newTorrent ? NSTableViewAnimationSlideLeft : NSTableViewAnimationSlideDown];
-        }
+        }];
 
         //remove empty groups
         NSIndexSet* removeGroupIndexes = [self.fDisplayedTorrents
@@ -4591,6 +4634,7 @@ static NSTimeInterval const kLowPriorityDelay = 15.0;
         NSSearchToolbarItem* item = [[NSSearchToolbarItem alloc] initWithItemIdentifier:ident];
         item.searchField.placeholderString = NSLocalizedString(@"Search torrents...", "Search toolbar item -> placeholder");
         item.searchField.delegate = self;
+        self.fToolbarSearchField = item.searchField;
         item.label = NSLocalizedString(@"Search", "Search toolbar item -> label");
         item.paletteLabel = NSLocalizedString(@"Search Torrents", "Search toolbar item -> palette label");
         item.toolTip = NSLocalizedString(@"Search for torrents on the internet", "Search toolbar item -> tooltip");
@@ -5558,6 +5602,11 @@ static NSTimeInterval const kLowPriorityDelay = 15.0;
     NSSearchField* searchField = notification.object;
     if ([searchField isKindOfClass:[NSSearchField class]])
     {
+        if (searchField == self.fToolbarSearchField)
+        {
+            [self.fFilterBar updateSearchText:searchField.stringValue];
+        }
+
         // Check if the user pressed Enter (Return key)
         NSNumber* textMovement = notification.userInfo[@"NSTextMovement"];
         if (textMovement.integerValue == NSReturnTextMovement)
@@ -5566,8 +5615,34 @@ static NSTimeInterval const kLowPriorityDelay = 15.0;
             if (query.length > 0)
             {
                 [self searchTorrentsWithQuery:query];
+                [self resetSearchFilterIfNeededForSearchField:searchField];
             }
         }
+    }
+}
+
+- (void)resetSearchFilterIfNeededForSearchField:(NSSearchField*)searchField
+{
+    if (searchField != self.fToolbarSearchField || searchField.stringValue.length == 0)
+    {
+        return;
+    }
+
+    if (self.fTableView.numberOfRows != 0)
+    {
+        return;
+    }
+
+    searchField.stringValue = @"";
+    [self.fFilterBar updateSearchText:@""];
+}
+
+- (void)controlTextDidChange:(NSNotification*)notification
+{
+    NSSearchField* searchField = notification.object;
+    if ([searchField isKindOfClass:[NSSearchField class]] && searchField == self.fToolbarSearchField)
+    {
+        [self.fFilterBar updateSearchText:searchField.stringValue];
     }
 }
 

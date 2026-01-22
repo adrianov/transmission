@@ -151,6 +151,8 @@ extern NSString* const kTorrentDidChangeGroupNotification;
 
 @property(nonatomic, readonly) NSString* torrentLocation;
 @property(nonatomic, readonly) NSString* dataLocation;
+/// Returns YES when none of the torrent's files exist on disk.
+@property(nonatomic, readonly) BOOL allFilesMissing;
 @property(nonatomic, readonly) NSString* lastKnownDataLocation;
 - (NSString*)fileLocation:(FileListNode*)node;
 
