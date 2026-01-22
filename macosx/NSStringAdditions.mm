@@ -285,7 +285,6 @@
         }
     }
 
-
     // Extract season (S01, S02, etc.)
     NSRegularExpression* seasonRegex = [NSRegularExpression regularExpressionWithPattern:@"\\bS(\\d{1,2})(?:E\\d+)?\\b"
                                                                                  options:NSRegularExpressionCaseInsensitive
