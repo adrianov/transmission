@@ -1141,11 +1141,6 @@ static NSString* folderForPlayButton(NSButton* sender, Torrent* torrent)
         torrent.cachedPlayButtonState = state;
     }
 
-    if (isCompleteTransfer && isSameSource)
-    {
-        return state;
-    }
-
     NSUInteger statsGeneration = torrent.statsGeneration;
     if (torrent.cachedPlayButtonProgressGeneration == statsGeneration)
     {
