@@ -5,6 +5,8 @@
 #include <libtransmission/transmission.h>
 #include <libtransmission/log.h>
 
+@import UniformTypeIdentifiers;
+
 #import "MessageWindowController.h"
 #import "Controller.h"
 #import "NSImageAdditions.h"
@@ -445,7 +447,7 @@ static NSTimeInterval const kUpdateSeconds = 0.75;
 - (void)writeToFile:(id)sender
 {
     NSSavePanel* panel = [NSSavePanel savePanel];
-    panel.allowedFileTypes = @[ @"txt" ];
+    panel.allowedContentTypes = @[ UTTypePlainText ];
     panel.canSelectHiddenExtension = YES;
 
     panel.nameFieldStringValue = NSLocalizedString(@"untitled", "Save log panel -> default file name");

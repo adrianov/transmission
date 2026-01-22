@@ -15,6 +15,8 @@
 #include <libtransmission/utils.h>
 #include <libtransmission/web-utils.h> // tr_urlIsValidTracker()
 
+@import UniformTypeIdentifiers;
+
 #import "CreatorWindowController.h"
 #import "Controller.h"
 #import "NSStringAdditions.h"
@@ -173,8 +175,12 @@ static NSMutableSet* creatorWindowControllerSet;
 
     auto const is_folder = self.fBuilder->file_count() > 1 || tr_strv_contains(self.fBuilder->path(0), '/');
 
-    NSImage* icon = [NSWorkspace.sharedWorkspace
-        iconForFileType:is_folder ? NSFileTypeForHFSTypeCode(kGenericFolderIcon) : self.fPath.pathExtension];
+    UTType* contentType = is_folder ? UTTypeFolder : [UTType typeWithFilenameExtension:self.fPath.pathExtension];
+    NSImage* icon = contentType ? [NSWorkspace.sharedWorkspace iconForContentType:contentType] : nil;
+    if (!icon)
+    {
+        icon = [NSWorkspace.sharedWorkspace iconForContentType:UTTypeData];
+    }
     icon.size = self.fIconView.frame.size;
     self.fIconView.image = icon;
 
@@ -276,7 +282,7 @@ static NSMutableSet* creatorWindowControllerSet;
     panel.prompt = NSLocalizedString(@"Select", "Create torrent -> location sheet -> button");
     panel.message = NSLocalizedString(@"Select the name and location for the torrent file.", "Create torrent -> location sheet -> message");
 
-    panel.allowedFileTypes = @[ @"org.bittorrent.torrent", @"torrent" ];
+    panel.allowedContentTypes = @[ [UTType typeWithIdentifier:@"org.bittorrent.torrent"] ?: UTTypeData, UTTypeData ];
     panel.canSelectHiddenExtension = YES;
 
     panel.directoryURL = self.fLocation.URLByDeletingLastPathComponent;

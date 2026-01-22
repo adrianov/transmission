@@ -4,6 +4,7 @@
 
 @import Carbon;
 @import UserNotifications;
+@import UniformTypeIdentifiers;
 
 @import Sparkle;
 
@@ -56,6 +57,7 @@
 #import "ExpandedPathToIconTransformer.h"
 #import "VersionComparator.h"
 #import "PowerManager.h"
+#import "DjvuConverter.h"
 
 typedef NSString* ToolbarItemIdentifier NS_TYPED_EXTENSIBLE_ENUM;
 
@@ -860,6 +862,15 @@ void onTorrentCompletenessChanged(tr_torrent* tor, tr_completeness status, bool 
 
     [self updateMainWindow];
 
+    // Check all torrents for DJVU files that need conversion on startup
+    if ([self.fDefaults boolForKey:@"AutoConvertDjvu"])
+    {
+        for (Torrent* torrent in self.fTorrents)
+        {
+            [DjvuConverter checkAndConvertCompletedFiles:torrent];
+        }
+    }
+
     //timer to update the interface every second
     self.fTimer = [NSTimer scheduledTimerWithTimeInterval:kUpdateUISeconds target:self selector:@selector(updateUI) userInfo:nil
                                                   repeats:YES];
@@ -1663,7 +1674,8 @@ static NSTimeInterval const kLowPriorityDelay = 15.0;
     panel.canChooseFiles = YES;
     panel.canChooseDirectories = NO;
 
-    panel.allowedFileTypes = @[ @"org.bittorrent.torrent", @"torrent" ];
+    UTType* torrentType = [UTType typeWithIdentifier:@"org.bittorrent.torrent"];
+    panel.allowedContentTypes = torrentType ? @[ torrentType, UTTypeData ] : @[ UTTypeData ];
 
     [panel beginSheetModalForWindow:self.fWindow completionHandler:^(NSInteger result) {
         if (result == NSModalResponseOK)
@@ -2349,7 +2361,8 @@ static NSTimeInterval const kLowPriorityDelay = 15.0;
     if (!torrent.magnet && [NSFileManager.defaultManager fileExistsAtPath:torrent.torrentLocation])
     {
         NSSavePanel* panel = [NSSavePanel savePanel];
-        panel.allowedFileTypes = @[ @"org.bittorrent.torrent", @"torrent" ];
+        UTType* torrentType = [UTType typeWithIdentifier:@"org.bittorrent.torrent"];
+        panel.allowedContentTypes = torrentType ? @[ torrentType, UTTypeData ] : @[ UTTypeData ];
         panel.extensionHidden = NO;
 
         panel.nameFieldStringValue = torrent.name;
@@ -2563,6 +2576,8 @@ static NSTimeInterval const kLowPriorityDelay = 15.0;
             BOOL anyCompleted = NO;
             BOOL anyActive = NO;
 
+            BOOL autoConvertDjvu = [self.fDefaults boolForKey:@"AutoConvertDjvu"];
+
             for (Torrent* torrent in torrents)
             {
                 //pull the upload and download speeds - most consistent by using current stats
@@ -2571,6 +2586,12 @@ static NSTimeInterval const kLowPriorityDelay = 15.0;
 
                 anyCompleted |= torrent.finishedSeeding;
                 anyActive |= torrent.active && !torrent.stalled && !torrent.error;
+
+                // Check for completed DJVU files to convert
+                if (autoConvertDjvu && torrent.downloading)
+                {
+                    [DjvuConverter checkAndConvertCompletedFiles:torrent];
+                }
             }
 
             PowerManager.shared.shouldPreventSleep = anyActive && [self.fDefaults boolForKey:@"SleepPrevent"];
@@ -2811,6 +2832,12 @@ static NSTimeInterval const kLowPriorityDelay = 15.0;
         //bounce download stack
         [NSDistributedNotificationCenter.defaultCenter postNotificationName:@"com.apple.DownloadFileFinished"
                                                                      object:torrent.dataLocation];
+    }
+
+    // Convert any remaining DJVU files to PDF (catches files completed during this session)
+    if ([self.fDefaults boolForKey:@"AutoConvertDjvu"])
+    {
+        [DjvuConverter checkAndConvertCompletedFiles:torrent];
     }
 
     [self fullUpdateUI];
@@ -3366,8 +3393,15 @@ static NSTimeInterval const kLowPriorityDelay = 15.0;
 
                     [addIndexes removeIndexes:newAddIndexes];
 
-                    [self.fDisplayedTorrents insertObjects:[allTorrents objectsAtIndexes:newAddIndexes] atIndexes:newAddIndexes];
-                    [self.fTableView insertItemsAtIndexes:newAddIndexes inParent:nil withAnimation:NSTableViewAnimationSlideLeft];
+                    // Insert new transfers at the top (index 0) regardless of sort order
+                    // Insert in reverse order so newest (first in fTorrents) appears at top
+                    NSArray* newTorrents = [allTorrents objectsAtIndexes:newAddIndexes];
+                    for (NSInteger i = newTorrents.count - 1; i >= 0; i--)
+                    {
+                        [self.fDisplayedTorrents insertObject:newTorrents[i] atIndex:0];
+                        [self.fTableView insertItemsAtIndexes:[NSIndexSet indexSetWithIndex:0] inParent:nil
+                                                withAnimation:NSTableViewAnimationSlideLeft];
+                    }
                 }
 
                 [self.fDisplayedTorrents insertObjects:[allTorrents objectsAtIndexes:addIndexes] atIndexes:addIndexes];
@@ -3479,22 +3513,32 @@ static NSTimeInterval const kLowPriorityDelay = 15.0;
                 [self.fTableView isGroupCollapsed:groupValue] ? [self.fTableView collapseItem:group] : [self.fTableView expandItem:group];
             }
 
-            NSUInteger insertIndex = [group.torrents indexOfObjectPassingTest:^BOOL(Torrent* existing, NSUInteger /*idx*/, BOOL* stop) {
-                NSUInteger existingIndex = [allTorrents indexOfObject:existing];
-                if (existingIndex != NSNotFound && existingIndex > allIndex)
-                {
-                    *stop = YES;
-                    return YES;
-                }
-                return NO;
-            }];
-            if (insertIndex == NSNotFound)
+            BOOL const newTorrent = [self.fAddingTransfers containsObject:torrent];
+            NSUInteger insertIndex;
+
+            // Insert new torrents at the top of their group
+            if (newTorrent)
             {
-                insertIndex = group.torrents.count;
+                insertIndex = 0;
+            }
+            else
+            {
+                insertIndex = [group.torrents indexOfObjectPassingTest:^BOOL(Torrent* existing, NSUInteger /*idx*/, BOOL* stop) {
+                    NSUInteger existingIndex = [allTorrents indexOfObject:existing];
+                    if (existingIndex != NSNotFound && existingIndex > allIndex)
+                    {
+                        *stop = YES;
+                        return YES;
+                    }
+                    return NO;
+                }];
+                if (insertIndex == NSNotFound)
+                {
+                    insertIndex = group.torrents.count;
+                }
             }
             [group.torrents insertObject:torrent atIndex:insertIndex];
 
-            BOOL const newTorrent = [self.fAddingTransfers containsObject:torrent];
             [self.fTableView insertItemsAtIndexes:[NSIndexSet indexSetWithIndex:insertIndex] inParent:group
                                     withAnimation:newTorrent ? NSTableViewAnimationSlideLeft : NSTableViewAnimationSlideDown];
         }];
@@ -3575,7 +3619,13 @@ static NSTimeInterval const kLowPriorityDelay = 15.0;
     }
 
     //sort the torrents (won't sort the groups, though)
-    [self sortTorrentsCallUpdates:!beganUpdates includeQueueOrder:YES];
+    // Skip sorting if there are new transfers being added,
+    // so new transfers stay at the top instead of being moved to their sorted position
+    BOOL skipSorting = self.fAddingTransfers && self.fAddingTransfers.count > 0;
+    if (!skipSorting)
+    {
+        [self sortTorrentsCallUpdates:!beganUpdates includeQueueOrder:YES];
+    }
 
     if (beganUpdates)
     {
@@ -3594,7 +3644,22 @@ static NSTimeInterval const kLowPriorityDelay = 15.0;
 
     if (self.fAddingTransfers)
     {
+        // Scroll to show the first newly added torrent
+        // Dispatch to next run loop to ensure table layout is complete
+        Torrent* firstNew = self.fAddingTransfers.anyObject;
         self.fAddingTransfers = nil;
+
+        if (firstNew)
+        {
+            dispatch_async(dispatch_get_main_queue(), ^{
+                NSInteger row = [self.fTableView rowForItem:firstNew];
+                if (row >= 0)
+                {
+                    [self.fTableView selectRowIndexes:[NSIndexSet indexSetWithIndex:row] byExtendingSelection:NO];
+                    [self.fTableView scrollRowToVisible:row];
+                }
+            });
+        }
     }
 }
 
@@ -3800,9 +3865,11 @@ static NSTimeInterval const kLowPriorityDelay = 15.0;
         }
 
         NSString* fullFile = [path stringByAppendingPathComponent:file];
+        NSURL* fileURL = [NSURL fileURLWithPath:fullFile];
+        NSString* contentType = nil;
+        [fileURL getResourceValue:&contentType forKey:NSURLContentTypeKey error:NULL];
 
-        if (!([[NSWorkspace.sharedWorkspace typeOfFile:fullFile error:NULL] isEqualToString:@"org.bittorrent.torrent"] ||
-              [fullFile.pathExtension caseInsensitiveCompare:@"torrent"] == NSOrderedSame))
+        if (!([contentType isEqualToString:@"org.bittorrent.torrent"] || [fullFile.pathExtension caseInsensitiveCompare:@"torrent"] == NSOrderedSame))
         {
             continue;
         }
@@ -4079,7 +4146,9 @@ static NSTimeInterval const kLowPriorityDelay = 15.0;
                                                            options:@{ NSPasteboardURLReadingFileURLsOnlyKey : @YES }];
         for (NSURL* fileToParse in files)
         {
-            if ([[NSWorkspace.sharedWorkspace typeOfFile:fileToParse.path error:NULL] isEqualToString:@"org.bittorrent.torrent"] ||
+            NSString* contentType = nil;
+            [fileToParse getResourceValue:&contentType forKey:NSURLContentTypeKey error:NULL];
+            if ([contentType isEqualToString:@"org.bittorrent.torrent"] ||
                 [fileToParse.pathExtension caseInsensitiveCompare:@"torrent"] == NSOrderedSame)
             {
                 torrent = YES;
@@ -4154,8 +4223,9 @@ static NSTimeInterval const kLowPriorityDelay = 15.0;
         NSMutableArray<NSString*>* filesToOpen = [NSMutableArray arrayWithCapacity:files.count];
         for (NSURL* file in files)
         {
-            if ([[NSWorkspace.sharedWorkspace typeOfFile:file.path error:NULL] isEqualToString:@"org.bittorrent.torrent"] ||
-                [file.pathExtension caseInsensitiveCompare:@"torrent"] == NSOrderedSame)
+            NSString* contentType = nil;
+            [file getResourceValue:&contentType forKey:NSURLContentTypeKey error:NULL];
+            if ([contentType isEqualToString:@"org.bittorrent.torrent"] || [file.pathExtension caseInsensitiveCompare:@"torrent"] == NSOrderedSame)
             {
                 torrent = YES;
                 auto metainfo = tr_torrent_metainfo{};

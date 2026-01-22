@@ -3,6 +3,7 @@
 // License text can be found in the licenses/ folder.
 
 @import AppKit;
+@import UniformTypeIdentifiers;
 
 #import "ExpandedPathToIconTransformer.h"
 
@@ -30,7 +31,7 @@
     //show a folder icon if the folder doesn't exist
     if ([path.pathExtension isEqualToString:@""] && ![NSFileManager.defaultManager fileExistsAtPath:path])
     {
-        icon = [NSWorkspace.sharedWorkspace iconForFileType:NSFileTypeForHFSTypeCode(kGenericFolderIcon)];
+        icon = [NSWorkspace.sharedWorkspace iconForContentType:UTTypeFolder];
     }
     else
     {

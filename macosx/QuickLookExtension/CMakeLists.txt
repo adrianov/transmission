@@ -76,7 +76,7 @@ set_target_properties(
         BUNDLE ON
         BUNDLE_EXTENSION appex
         INSTALL_RPATH "@loader_path/../../../../MacOS;@loader_path/../../../../Frameworks"
-        XCODE_ATTRIBUTE_MACOSX_DEPLOYMENT_TARGET "12.0"
+        XCODE_ATTRIBUTE_MACOSX_DEPLOYMENT_TARGET "15.0"
         MACOSX_BUNDLE ON
         MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_SOURCE_DIR}/Info.plist.in"
         OUTPUT_NAME ${MAC_QL_BUNDLE_NAME})
@@ -84,12 +84,12 @@ set_target_properties(
 target_compile_options(
     ${TR_NAME}-mac-qlappex
     PUBLIC
-        "-mmacosx-version-min=12.0")
+        "-mmacosx-version-min=15.0")
 
 target_link_options(
     ${TR_NAME}-mac-qlappex
     PUBLIC
-        "-mmacosx-version-min=12.0")
+        "-mmacosx-version-min=15.0")
 
 target_include_directories(${TR_NAME}-mac-qlappex
     PRIVATE

@@ -1128,6 +1128,11 @@ static NSString* folderForPlayButton(NSButton* sender, Torrent* torrent)
                 else
                     entry[@"baseTitle"] = @"▶ Play";
             }
+            else
+            {
+                // Multiple items: use display name from file info
+                entry[@"baseTitle"] = entry[@"name"] ?: @"";
+            }
             if ([entry[@"type"] hasPrefix:@"document"])
             {
                 entry[@"icon"] = bookIcon();

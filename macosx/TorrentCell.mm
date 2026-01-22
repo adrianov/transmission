@@ -138,6 +138,11 @@
     self.fProgressBarCacheKey = nil;
 }
 
+- (void)configureCollectionView
+{
+    // Method declared but not implemented - placeholder to satisfy compiler
+}
+
 - (void)setObjectValue:(id)objectValue
 {
     [super setObjectValue:objectValue];

@@ -3,6 +3,8 @@
 // License text can be found in the licenses/ folder.
 // Created by Mitchell Livingston on 1/10/14.
 
+@import AppKit;
+
 #import "ShareTorrentFileHelper.h"
 #import "Controller.h"
 #import "Torrent.h"
@@ -36,13 +38,26 @@
 
 - (NSArray<NSMenuItem*>*)menuItems
 {
+    if (@available(macOS 13.0, *))
+    {
+        NSSharingServicePicker* picker = [[NSSharingServicePicker alloc] initWithItems:self.shareTorrentURLs];
+        picker.delegate = (Controller*)NSApp.delegate;
+        NSMenuItem* shareMenuItem = [picker standardShareMenuItem];
+        if (shareMenuItem)
+        {
+            return @[ shareMenuItem ];
+        }
+    }
+
+// Fallback for older macOS versions (deprecated API, but needed for compatibility)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
     NSArray* services = [NSSharingService sharingServicesForItems:self.shareTorrentURLs];
+#pragma clang diagnostic pop
     NSMutableArray* items = [NSMutableArray arrayWithCapacity:services.count];
     for (NSSharingService* service in services)
     {
-        NSMenuItem* item = [[NSMenuItem alloc] initWithTitle:service.title // 10.9: change to menuItemTitle
-                                                      action:@selector(performShareAction:)
-                                               keyEquivalent:@""];
+        NSMenuItem* item = [[NSMenuItem alloc] initWithTitle:service.title action:@selector(performShareAction:) keyEquivalent:@""];
         item.image = service.image;
         item.representedObject = service;
         service.delegate = (Controller*)NSApp.delegate;
@@ -56,7 +71,7 @@
 - (void)performShareAction:(NSMenuItem*)item
 {
     NSSharingService* service = item.representedObject;
-    [service performWithItems:self.shareTorrentURLs]; // on 10.9, use attachmentFileURLs?
+    [service performWithItems:self.shareTorrentURLs];
 }
 
 @end

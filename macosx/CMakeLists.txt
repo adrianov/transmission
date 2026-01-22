@@ -1,3 +1,5 @@
+set(CMAKE_OSX_DEPLOYMENT_TARGET 15.0)
+
 # minimum macOS target support
 if(CMAKE_OSX_DEPLOYMENT_TARGET VERSION_LESS MACOS_SUPPORT_MINIMUM)
     message(FATAL_ERROR "Targeting macOS versions before ${MACOS_SUPPORT_MINIMUM} is not supported for the macOS project, please adjust CMAKE_OSX_DEPLOYMENT_TARGET (${CMAKE_OSX_DEPLOYMENT_TARGET})")
@@ -203,7 +205,9 @@ target_sources(${TR_NAME}-mac
         VersionComparator.h
         VersionComparator.mm
         WebSeedTableView.h
-        WebSeedTableView.mm)
+        WebSeedTableView.mm
+        DjvuConverter.h
+        DjvuConverter.mm)
 
 set(XIB_FILES
     AboutWindow.xib
@@ -412,11 +416,16 @@ find_library(SPARKLE_FRAMEWORK Sparkle
     PATHS ${CMAKE_CURRENT_SOURCE_DIR}
     NO_DEFAULT_PATHS)
 
+target_include_directories(${TR_NAME}-mac
+    PRIVATE
+        ${TR_THIRD_PARTY_SOURCE_DIR}/djvulibre/libdjvu)
+
 target_link_libraries(${TR_NAME}-mac
     PRIVATE
         ${TR_NAME}
         fmt::fmt-header-only
         vdkqueue
+        djvulibre
         ${SPARKLE_FRAMEWORK}
         "-framework AppKit"
         "-framework Carbon"

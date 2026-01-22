@@ -107,7 +107,7 @@ Wishlist::Impl::Impl(Mediator& mediator_in)
                                                    { rebuild_candidates(); }),
           mediator_in.observe_peer_disconnect([this](tr_torrent*, tr_bitfield const&, tr_bitfield const& requests)
                                               { requested_.unset_from(requests); }),
-          mediator_in.observe_got_bad_piece([this](tr_torrent*, tr_piece_index_t) {}),
+          mediator_in.observe_got_bad_piece([](tr_torrent*, tr_piece_index_t) {}),
           mediator_in.observe_got_block([this](tr_torrent*, tr_block_index_t b) { requested_.unset(b); }),
           mediator_in.observe_got_choke([this](tr_torrent*, tr_bitfield const& requests) { requested_.unset_from(requests); }),
           mediator_in.observe_got_reject([this](tr_torrent*, tr_peer*, tr_block_index_t b) { requested_.unset(b); }),

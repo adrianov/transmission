@@ -105,6 +105,10 @@ extern NSString* const kTorrentDidChangeGroupNotification;
 /// Returns YES if torrent has any playable media files on disk.
 @property(nonatomic, readonly) BOOL hasPlayableMedia;
 
+/// Returns detected media category: "video", "audio", "books", or nil if none detected.
+/// Used for auto-assigning torrents to groups based on content type.
+@property(nonatomic, readonly) NSString* detectedMediaCategory;
+
 /// Cached height for play buttons view (calculated by TorrentTableView).
 @property(nonatomic) CGFloat cachedPlayButtonsHeight;
 /// Cached width used for play buttons layout (calculated by TorrentTableView).

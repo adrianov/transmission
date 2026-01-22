@@ -2,6 +2,8 @@
 // It may be used under the MIT (SPDX: MIT) license.
 // License text can be found in the licenses/ folder.
 
+#include <cmath>
+
 #import "FlowLayoutView.h"
 
 @interface FlowLineBreak : NSView
@@ -115,7 +117,7 @@
 {
     if (availableWidth <= 0)
         return;
-    if (!_layoutDirty && availableWidth == _lastLayoutWidth)
+    if (!_layoutDirty && std::fabs(availableWidth - _lastLayoutWidth) < 0.001)
         return;
 
     CGFloat x = 0;
@@ -157,7 +159,7 @@
 {
     if (availableWidth <= 0)
         return 0;
-    if (!_layoutDirty && availableWidth == _lastLayoutWidth)
+    if (!_layoutDirty && std::fabs(availableWidth - _lastLayoutWidth) < 0.001)
         return _lastLayoutHeight;
 
     CGFloat x = 0;

@@ -64,3 +64,6 @@
 [submodule "third-party/crc32c"]
 	path = third-party/crc32c
 	url = https://github.com/google/crc32c.git
+[submodule "third-party/djvulibre"]
+	path = third-party/djvulibre
+	url = https://github.com/acmepjz/djvulibre.git

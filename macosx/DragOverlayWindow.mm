@@ -2,6 +2,8 @@
 // It may be used under the MIT (SPDX: MIT) license.
 // License text can be found in the licenses/ folder.
 
+@import UniformTypeIdentifiers;
+
 #import "DragOverlayWindow.h"
 #import "DragOverlayView.h"
 #import "NSStringAdditions.h"
@@ -60,8 +62,10 @@
 
     for (NSString* file in files)
     {
-        if ([[NSWorkspace.sharedWorkspace typeOfFile:file error:NULL] isEqualToString:@"org.bittorrent.torrent"] ||
-            [file.pathExtension caseInsensitiveCompare:@"torrent"] == NSOrderedSame)
+        NSURL* fileURL = [NSURL fileURLWithPath:file];
+        NSString* contentType = nil;
+        [fileURL getResourceValue:&contentType forKey:NSURLContentTypeKey error:NULL];
+        if ([contentType isEqualToString:@"org.bittorrent.torrent"] || [file.pathExtension caseInsensitiveCompare:@"torrent"] == NSOrderedSame)
         {
             auto metainfo = tr_torrent_metainfo{};
             if (metainfo.parse_torrent_file(file.UTF8String))
@@ -112,8 +116,12 @@
     NSImage* icon;
     if (count == 1)
     {
-        icon = [NSWorkspace.sharedWorkspace
-            iconForFileType:fileCount <= 1 ? name.pathExtension : NSFileTypeForHFSTypeCode(kGenericFolderIcon)];
+        UTType* contentType = fileCount <= 1 ? [UTType typeWithFilenameExtension:name.pathExtension] : UTTypeFolder;
+        icon = contentType ? [NSWorkspace.sharedWorkspace iconForContentType:contentType] : nil;
+        if (!icon)
+        {
+            icon = [NSWorkspace.sharedWorkspace iconForContentType:UTTypeData];
+        }
     }
     else
     {

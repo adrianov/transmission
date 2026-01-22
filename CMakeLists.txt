@@ -7,7 +7,7 @@ if(POLICY CMP0114)
 endif()
 
 # Value should follow latest stable Xcode's RECOMMENDED_MACOSX_DEPLOYMENT_TARGET
-set(MACOS_SUPPORT_MINIMUM 11.0)
+set(MACOS_SUPPORT_MINIMUM 15.0)
 
 # The value of this variable should be set prior to the first project() command invocation.
 # See: https://cmake.org/cmake/help/latest/variable/CMAKE_OSX_DEPLOYMENT_TARGET.html
@@ -550,6 +550,15 @@ endif()
 unset(TR_MINIUPNPC_LIBNAME)
 
 add_subdirectory(${TR_THIRD_PARTY_SOURCE_DIR}/wildmat)
+
+# DjVuLibre for DJVU to PDF conversion (macOS only)
+if(ENABLE_MAC)
+    set(BUILD_TOOLS OFF CACHE BOOL "" FORCE)
+    set(BUILD_XMLTOOLS OFF CACHE BOOL "" FORCE)
+    set(BUILD_MINIDJVU OFF CACHE BOOL "" FORCE)
+    set(BUILD_TSV2DSED OFF CACHE BOOL "" FORCE)
+    add_subdirectory(${TR_THIRD_PARTY_SOURCE_DIR}/djvulibre)
+endif()
 
 tr_add_external_auto_library(DHT dht dht
     TARGET dht::dht)

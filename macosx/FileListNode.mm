@@ -3,6 +3,7 @@
 // License text can be found in the licenses/ folder.
 
 @import AppKit;
+@import UniformTypeIdentifiers;
 
 #import "FileListNode.h"
 
@@ -78,8 +79,20 @@
 {
     if (!_iconInternal)
     {
-        NSImage* baseIcon = [NSWorkspace.sharedWorkspace
-            iconForFileType:_isFolder ? NSFileTypeForHFSTypeCode(kGenericFolderIcon) : _name.pathExtension];
+        NSString* ext = _name.pathExtension.lowercaseString;
+
+        // Use PDF icon for DJVU files (book format without system icon)
+        BOOL isDjvu = [ext isEqualToString:@"djvu"] || [ext isEqualToString:@"djv"];
+        UTType* contentType = _isFolder ? UTTypeFolder : (isDjvu ? UTTypePDF : [UTType typeWithFilenameExtension:ext]);
+
+        NSImage* baseIcon = contentType ? [NSWorkspace.sharedWorkspace iconForContentType:contentType] : nil;
+        if (!baseIcon)
+        {
+            // Fallback: create UTType from extension
+            UTType* fallbackType = _isFolder ? UTTypeFolder : [UTType typeWithFilenameExtension:_name.pathExtension];
+            baseIcon = fallbackType ? [NSWorkspace.sharedWorkspace iconForContentType:fallbackType] :
+                                      [NSWorkspace.sharedWorkspace iconForContentType:UTTypeData];
+        }
         _iconInternal = [FileListNode iconWithShadow:baseIcon];
     }
     return _iconInternal;

@@ -21,6 +21,7 @@
 #import "FileListNode.h"
 #import "NSStringAdditions.h"
 #import "TrackerNode.h"
+#import "DjvuConverter.h"
 
 NSString* const kTorrentDidChangeGroupNotification = @"TorrentDidChangeGroup";
 
@@ -93,20 +94,11 @@ static NSImage* iconForBookExtension(NSString* ext)
         return nil;
     }
 
-    NSImage* icon = nil;
-    if (@available(macOS 11.0, *))
-    {
-        UTType* type = [UTType typeWithFilenameExtension:ext];
-        if (type != nil)
-        {
-            icon = [NSWorkspace.sharedWorkspace iconForContentType:type];
-        }
-    }
+    // Use PDF icon for DJVU files (book format without good system icon)
+    BOOL isDjvu = [ext isEqualToString:@"djvu"] || [ext isEqualToString:@"djv"];
+    UTType* contentType = isDjvu ? UTTypePDF : [UTType typeWithFilenameExtension:ext];
 
-    if (!icon)
-    {
-        icon = [NSWorkspace.sharedWorkspace iconForFileType:ext];
-    }
+    NSImage* icon = contentType ? [NSWorkspace.sharedWorkspace iconForContentType:contentType] : nil;
 
     if (!icon)
     {
@@ -123,9 +115,18 @@ static NSImage* iconForBookExtension(NSString* ext)
     return icon;
 }
 
-static NSImage* iconForBookPathOrExtension(NSString* path, NSString* ext)
+static NSImage* iconForBookPathOrExtension(NSString* path, NSString* ext, BOOL isComplete)
 {
-    if (path.length > 0)
+    // DJVU files don't have good system icons, use PDF icon instead
+    BOOL isDjvu = [ext.lowercaseString isEqualToString:@"djvu"] || [ext.lowercaseString isEqualToString:@"djv"];
+    if (isDjvu)
+    {
+        return iconForBookExtension(ext);
+    }
+
+    // Only use file-based icon if file exists AND torrent is complete
+    // (iconForFile: returns generic icon for non-existent or partial files)
+    if (isComplete && path.length > 0 && [NSFileManager.defaultManager fileExistsAtPath:path])
     {
         NSImage* fileIcon = [NSWorkspace.sharedWorkspace iconForFile:path];
         if (fileIcon != nil)
@@ -323,6 +324,9 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
 {
     //allow the file to be indexed by Time Machine
     [self setTimeMachineExclude:NO];
+
+    // Clear DJVU conversion tracking
+    [DjvuConverter clearTrackingForTorrent:self];
 
     tr_torrentRemove(self.fHandle, trashFiles, trashDataFile, nullptr, nullptr, nullptr);
 }
@@ -796,11 +800,20 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
                 if (self.fMediaType == TorrentMediaTypeBooks)
                 {
                     NSString* bookPath = firstRegisteredBookPath(self);
-                    baseIcon = iconForBookPathOrExtension(bookPath, self.fMediaExtension);
+                    baseIcon = iconForBookPathOrExtension(bookPath, self.fMediaExtension, self.allDownloaded);
                 }
                 else
                 {
-                    baseIcon = [NSWorkspace.sharedWorkspace iconForFileType:self.fMediaExtension];
+                    UTType* contentType = [UTType typeWithFilenameExtension:self.fMediaExtension];
+                    baseIcon = contentType ? [NSWorkspace.sharedWorkspace iconForContentType:contentType] : nil;
+                    if (!baseIcon)
+                    {
+// Fallback for extensions that don't have a UTType (deprecated API, but needed for compatibility)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+                        baseIcon = [NSWorkspace.sharedWorkspace iconForFileType:self.fMediaExtension];
+#pragma clang diagnostic pop
+                    }
                 }
             }
             else
@@ -821,13 +834,29 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
                 auto const location = tr_torrentFindFile(self.fHandle, 0);
                 NSString* filePath = !std::empty(location) ? @(location.c_str()) :
                                                              [self.currentDirectory stringByAppendingPathComponent:self.name];
-                baseIcon = iconForBookPathOrExtension(filePath, ext);
+                baseIcon = iconForBookPathOrExtension(filePath, ext, self.allDownloaded);
             }
             else
             {
-                baseIcon = [NSWorkspace.sharedWorkspace iconForFileType:ext];
+                UTType* contentType = [UTType typeWithFilenameExtension:ext];
+                baseIcon = contentType ? [NSWorkspace.sharedWorkspace iconForContentType:contentType] : nil;
+                if (!baseIcon)
+                {
+// Fallback for extensions that don't have a UTType (deprecated API, but needed for compatibility)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+                    baseIcon = [NSWorkspace.sharedWorkspace iconForFileType:ext];
+#pragma clang diagnostic pop
+                }
             }
         }
+
+        // Final fallback to generic document icon
+        if (!baseIcon)
+        {
+            baseIcon = [NSImage imageNamed:NSImageNameMultipleDocuments];
+        }
+
         self.fIcon = [Torrent iconWithShadow:baseIcon];
     }
     return self.fIcon;
@@ -1051,9 +1080,9 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
         mediaExtensions = [NSSet setWithArray:@[
-            @"mkv",  @"avi",  @"mp4",  @"mov",  @"wmv", @"flv",  @"webm", @"m4v",  @"mpg", @"mpeg", @"ts",
-            @"m2ts", @"vob",  @"3gp",  @"ogv",  @"mp3", @"flac", @"wav",  @"aac",  @"ogg", @"wma",  @"m4a",
-            @"ape",  @"alac", @"aiff", @"opus", @"wv",  @"cue",  @"pdf",  @"epub", @"fb2", @"mobi"
+            @"mkv",  @"avi",  @"mp4", @"mov", @"wmv",  @"flv",  @"webm", @"m4v",  @"mpg", @"mpeg", @"ts",  @"m2ts",
+            @"vob",  @"3gp",  @"ogv", @"mp3", @"flac", @"wav",  @"aac",  @"ogg",  @"wma", @"m4a",  @"ape", @"alac",
+            @"aiff", @"opus", @"wv",  @"cue", @"pdf",  @"epub", @"fb2",  @"mobi", @"djv", @"djvu"
         ]];
         documentExtensions = [NSSet setWithArray:@[ @"pdf", @"epub", @"djv", @"djvu", @"fb2", @"mobi" ]];
         documentExternalExtensions = [NSSet setWithArray:@[ @"djv", @"djvu", @"fb2", @"mobi" ]];
@@ -1161,7 +1190,28 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
         path = !std::empty(location) ? @(location.c_str()) : [self.currentDirectory stringByAppendingPathComponent:fileName];
 
         BOOL const isDocument = [documentExtensions containsObject:ext];
-        if (isDocument && [documentExternalExtensions containsObject:ext])
+        BOOL useCompanionPdf = NO;
+        NSString* companionPdfPath = nil;
+        BOOL const isDjvu = [ext isEqualToString:@"djvu"] || [ext isEqualToString:@"djv"];
+
+        // Check for companion PDF for DJVU files (created by DjvuConverter)
+        if (isDjvu)
+        {
+            companionPdfPath = [path.stringByDeletingPathExtension stringByAppendingPathExtension:@"pdf"];
+            // Only use companion PDF if it exists and is valid (not damaged)
+            if ([NSFileManager.defaultManager fileExistsAtPath:companionPdfPath] && [DjvuConverter isValidPdf:companionPdfPath])
+            {
+                useCompanionPdf = YES;
+                path = companionPdfPath;
+            }
+            else
+            {
+                // Skip DJVU files until conversion is complete with valid PDF
+                continue;
+            }
+        }
+
+        if (isDocument && [documentExternalExtensions containsObject:ext] && !useCompanionPdf && !isDjvu)
         {
             NSURL* checkURL = [NSURL fileURLWithPath:[self.currentDirectory stringByAppendingPathComponent:fileName]];
             NSURL* appURL = [NSWorkspace.sharedWorkspace URLForApplicationToOpenURL:checkURL];
@@ -1199,7 +1249,8 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
             displayName = [displayName stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet];
         }
 
-        BOOL const opensInBooks = isDocument && ![documentExternalExtensions containsObject:ext];
+        // Use companion PDF opens in Books, original external documents need external apps
+        BOOL const opensInBooks = (isDocument && ![documentExternalExtensions containsObject:ext]) || useCompanionPdf;
         [playable addObject:@{
             @"type" : isDocument ? (opensInBooks ? @"document-books" : @"document") : @"file",
             @"index" : @(i),
@@ -1520,6 +1571,75 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
         ]];
     });
     return [mediaExtensions containsObject:self.name.pathExtension.lowercaseString];
+}
+
+- (NSString*)detectedMediaCategory
+{
+    if (self.magnet)
+    {
+        return nil;
+    }
+
+    // For folder torrents, use detectMediaType (fast, cached)
+    if (self.folder)
+    {
+        [self detectMediaType];
+        switch (self.fMediaType)
+        {
+        case TorrentMediaTypeVideo:
+            return @"video";
+        case TorrentMediaTypeAudio:
+            return @"audio";
+        case TorrentMediaTypeBooks:
+            return @"books";
+        default:
+            return nil;
+        }
+    }
+
+    // For single-file torrents, check extension
+    static NSSet<NSString*>* videoExtensions;
+    static NSSet<NSString*>* audioExtensions;
+    static NSSet<NSString*>* bookExtensions;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        videoExtensions = [NSSet setWithArray:@[
+            @"mkv",
+            @"avi",
+            @"mp4",
+            @"mov",
+            @"wmv",
+            @"flv",
+            @"webm",
+            @"m4v",
+            @"mpg",
+            @"mpeg",
+            @"ts",
+            @"m2ts",
+            @"vob",
+            @"3gp",
+            @"ogv"
+        ]];
+        audioExtensions = [NSSet
+            setWithArray:
+                @[ @"mp3", @"flac", @"wav", @"aac", @"ogg", @"wma", @"m4a", @"ape", @"alac", @"aiff", @"opus", @"wv" ]];
+        bookExtensions = [NSSet setWithArray:@[ @"pdf", @"epub", @"djv", @"djvu", @"fb2", @"mobi" ]];
+    });
+
+    NSString* ext = self.name.pathExtension.lowercaseString;
+    if ([videoExtensions containsObject:ext])
+    {
+        return @"video";
+    }
+    if ([audioExtensions containsObject:ext])
+    {
+        return @"audio";
+    }
+    if ([bookExtensions containsObject:ext])
+    {
+        return @"books";
+    }
+    return nil;
 }
 
 /// Detects dominant media type (video or audio) in folder torrents.
@@ -2727,6 +2847,21 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
     }
 }
 
+- (void)djvuConversionComplete:(NSNotification*)notification
+{
+    // Only invalidate cache if this notification is for our torrent
+    NSString* torrentHash = notification.object;
+    if ([torrentHash isEqualToString:self.hashString])
+    {
+        // Invalidate playable files cache so companion PDFs are detected
+        self.fPlayableFiles = nil;
+        // Also invalidate cached button state
+        self.cachedPlayButtonState = nil;
+        self.cachedPlayButtonSource = nil;
+        self.cachedPlayButtonLayout = nil;
+    }
+}
+
 - (NSUInteger)fileCount
 {
     return tr_torrentFileCount(self.fHandle);
@@ -3088,6 +3223,10 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
                                                name:@"GroupValueRemoved"
                                              object:nil];
 
+    [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(djvuConversionComplete:)
+                                               name:@"DjvuConversionComplete"
+                                             object:nil];
+
     [self update];
     [self updateTimeMachineExclude];
 
@@ -3225,6 +3364,9 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
     case TR_SEED:
     case TR_PARTIAL_SEED:
         {
+            // Invalidate icon cache so it refreshes with actual file icon (e.g., PDF preview)
+            self.fIcon = nil;
+
             NSDictionary* statusInfo = @{@"Status" : @(status), @"WasRunning" : @(wasRunning)};
             [NSNotificationCenter.defaultCenter postNotificationName:@"TorrentFinishedDownloading" object:self userInfo:statusInfo];
 

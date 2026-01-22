@@ -6,6 +6,7 @@
 #import "NSImageAdditions.h"
 #import "NSKeyedUnarchiverAdditions.h"
 #import "NSMutableArrayAdditions.h"
+#import "Torrent.h"
 
 static CGFloat const kIconWidth = 16.0;
 static CGFloat const kBorderWidth = 1.25;
@@ -55,31 +56,11 @@ GroupsController* fGroupsInstance = nil;
         }
         if (_fGroups == nil)
         {
-            //default groups
-            NSMutableDictionary* red = [NSMutableDictionary
-                dictionaryWithObjectsAndKeys:NSColor.systemRedColor, @"Color", NSLocalizedString(@"Red", "Groups -> Name"), @"Name", @0, @"Index", nil];
-
-            NSMutableDictionary* orange = [NSMutableDictionary
-                dictionaryWithObjectsAndKeys:NSColor.systemOrangeColor, @"Color", NSLocalizedString(@"Orange", "Groups -> Name"), @"Name", @1, @"Index", nil];
-
-            NSMutableDictionary* yellow = [NSMutableDictionary
-                dictionaryWithObjectsAndKeys:NSColor.systemYellowColor, @"Color", NSLocalizedString(@"Yellow", "Groups -> Name"), @"Name", @2, @"Index", nil];
-
-            NSMutableDictionary* green = [NSMutableDictionary
-                dictionaryWithObjectsAndKeys:NSColor.systemGreenColor, @"Color", NSLocalizedString(@"Green", "Groups -> Name"), @"Name", @3, @"Index", nil];
-
-            NSMutableDictionary* blue = [NSMutableDictionary
-                dictionaryWithObjectsAndKeys:NSColor.systemBlueColor, @"Color", NSLocalizedString(@"Blue", "Groups -> Name"), @"Name", @4, @"Index", nil];
-
-            NSMutableDictionary* purple = [NSMutableDictionary
-                dictionaryWithObjectsAndKeys:NSColor.systemPurpleColor, @"Color", NSLocalizedString(@"Purple", "Groups -> Name"), @"Name", @5, @"Index", nil];
-
-            NSMutableDictionary* gray = [NSMutableDictionary
-                dictionaryWithObjectsAndKeys:NSColor.systemGrayColor, @"Color", NSLocalizedString(@"Gray", "Groups -> Name"), @"Name", @6, @"Index", nil];
-
-            _fGroups = [[NSMutableArray alloc] initWithObjects:red, orange, yellow, green, blue, purple, gray, nil];
-            [self saveGroups]; //make sure this is saved right away
+            _fGroups = [[NSMutableArray alloc] init];
         }
+
+        // Ensure media-type groups exist for auto-assignment
+        [self ensureMediaGroupsExist];
     }
 
     return self;
@@ -316,6 +297,7 @@ GroupsController* fGroupsInstance = nil;
 
 - (NSInteger)groupIndexForTorrent:(Torrent*)torrent
 {
+    // First, try explicit rules
     for (NSDictionary* group in self.fGroups)
     {
         NSInteger row = [group[@"Index"] integerValue];
@@ -324,10 +306,111 @@ GroupsController* fGroupsInstance = nil;
             return row;
         }
     }
+
+    // Fallback: auto-assign based on detected media category
+    NSString* mediaCategory = torrent.detectedMediaCategory;
+    if (mediaCategory)
+    {
+        NSInteger matchedIndex = [self groupIndexForMediaCategory:mediaCategory];
+        if (matchedIndex != -1)
+        {
+            return matchedIndex;
+        }
+    }
+
+    return -1;
+}
+
+/// Returns group index for a media category by matching group names.
+/// Matches: "video" -> Video/Movies/Films, "audio" -> Audio/Music, "books" -> Books/Ebooks
+- (NSInteger)groupIndexForMediaCategory:(NSString*)category
+{
+    static NSDictionary<NSString*, NSArray<NSString*>*>* categoryKeywords;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        categoryKeywords = @{
+            @"video" : @[ @"video", @"movie", @"film", @"tv", @"serie" ],
+            @"audio" : @[ @"audio", @"music", @"song", @"album" ],
+            @"books" : @[ @"book", @"ebook", @"read", @"pdf", @"epub" ]
+        };
+    });
+
+    NSArray<NSString*>* keywords = categoryKeywords[category];
+    if (!keywords)
+    {
+        return -1;
+    }
+
+    for (NSDictionary* group in self.fGroups)
+    {
+        NSString* groupName = [group[@"Name"] lowercaseString];
+        for (NSString* keyword in keywords)
+        {
+            if ([groupName containsString:keyword])
+            {
+                return [group[@"Index"] integerValue];
+            }
+        }
+    }
+
     return -1;
 }
 
 #pragma mark - Private
+
+/// Ensures Video, Audio, Books groups exist for media auto-assignment.
+/// Creates missing groups without affecting existing user groups.
+- (void)ensureMediaGroupsExist
+{
+    NSArray<NSDictionary*>* mediaGroups = @[
+        @{
+            @"name" : NSLocalizedString(@"Video", "Groups -> Name"),
+            @"category" : @"video",
+            @"color" : NSColor.systemBlueColor
+        },
+        @{
+            @"name" : NSLocalizedString(@"Audio", "Groups -> Name"),
+            @"category" : @"audio",
+            @"color" : NSColor.systemPurpleColor
+        },
+        @{
+            @"name" : NSLocalizedString(@"Books", "Groups -> Name"),
+            @"category" : @"books",
+            @"color" : NSColor.systemOrangeColor
+        }
+    ];
+
+    BOOL groupsAdded = NO;
+    for (NSDictionary* mediaDef in mediaGroups)
+    {
+        NSString* category = mediaDef[@"category"];
+
+        // Check if a group matching this category already exists
+        if ([self groupIndexForMediaCategory:category] == -1)
+        {
+            // Find next available index
+            NSInteger maxIndex = -1;
+            for (NSDictionary* group in self.fGroups)
+            {
+                NSInteger idx = [group[@"Index"] integerValue];
+                if (idx > maxIndex)
+                {
+                    maxIndex = idx;
+                }
+            }
+
+            NSMutableDictionary* newGroup = [NSMutableDictionary
+                dictionaryWithObjectsAndKeys:mediaDef[@"color"], @"Color", mediaDef[@"name"], @"Name", @(maxIndex + 1), @"Index", nil];
+            [self.fGroups addObject:newGroup];
+            groupsAdded = YES;
+        }
+    }
+
+    if (groupsAdded)
+    {
+        [self saveGroups];
+    }
+}
 
 - (void)saveGroups
 {
