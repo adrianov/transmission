@@ -109,6 +109,14 @@ extern NSString* const kTorrentDidChangeGroupNotification;
 @property(nonatomic) CGFloat cachedPlayButtonsHeight;
 /// Cached width used for play buttons layout (calculated by TorrentTableView).
 @property(nonatomic) CGFloat cachedPlayButtonsWidth;
+/// Cached play button state (title/visibility) for UI rendering.
+@property(nonatomic, copy) NSArray<NSDictionary*>* cachedPlayButtonState;
+/// Cached source items for play button state.
+@property(nonatomic, copy) NSArray<NSDictionary*>* cachedPlayButtonSource;
+/// Cached play button layout (season headers + items).
+@property(nonatomic, copy) NSArray<NSDictionary*>* cachedPlayButtonLayout;
+/// Cached stats generation for play button progress.
+@property(nonatomic) NSUInteger cachedPlayButtonProgressGeneration;
 
 /// Returns current file progress (0.0-1.0) for a file index.
 - (CGFloat)fileProgressForIndex:(NSUInteger)index;
@@ -186,6 +194,7 @@ extern NSString* const kTorrentDidChangeGroupNotification;
 @property(nonatomic, readonly) NSString* statusString;
 @property(nonatomic, readonly) NSString* shortStatusString;
 @property(nonatomic, readonly) NSString* remainingTimeString;
+@property(nonatomic, readonly) NSUInteger statsGeneration;
 
 @property(nonatomic) NSString* fCachedHumanReadableTitle;
 

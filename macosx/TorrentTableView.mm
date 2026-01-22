@@ -945,13 +945,16 @@ static CGFloat const kPlayButtonVerticalPadding = 4.0;
     CGFloat progress = [item[@"progress"] doubleValue];
 
     // Build button title with progress
-    NSString* title;
-    if ([type hasPrefix:@"document"])
-        title = baseTitle;
-    else if (progress > 0 && progress < 1.0)
-        title = [NSString stringWithFormat:@"%@ (%d%%)", baseTitle, (int)floor(progress * 100)];
-    else
-        title = baseTitle;
+    NSString* title = item[@"title"];
+    if (!title)
+    {
+        if ([type hasPrefix:@"document"])
+            title = baseTitle;
+        else if (progress > 0 && progress < 1.0)
+            title = [NSString stringWithFormat:@"%@ (%d%%)", baseTitle, (int)floor(progress * 100)];
+        else
+            title = baseTitle;
+    }
 
     PlayButton* playButton = [[PlayButton alloc] init];
     playButton.title = title;
@@ -974,15 +977,19 @@ static CGFloat const kPlayButtonVerticalPadding = 4.0;
 
     if ([type hasPrefix:@"document"])
     {
-        NSImage* bookImage = nil;
-        if (@available(macOS 11.0, *))
-        {
-            bookImage = [NSImage imageWithSystemSymbolName:@"book" accessibilityDescription:nil];
-        }
+        NSImage* bookImage = item[@"icon"];
         if (!bookImage)
-            bookImage = [NSImage imageNamed:NSImageNameBookmarksTemplate];
-        bookImage = [bookImage copy];
-        bookImage.size = NSMakeSize(12.0, 12.0);
+        {
+            bookImage = nil;
+            if (@available(macOS 11.0, *))
+            {
+                bookImage = [NSImage imageWithSystemSymbolName:@"book" accessibilityDescription:nil];
+            }
+            if (!bookImage)
+                bookImage = [NSImage imageNamed:NSImageNameBookmarksTemplate];
+            bookImage = [bookImage copy];
+            bookImage.size = NSMakeSize(12.0, 12.0);
+        }
         playButton.image = bookImage;
         playButton.imagePosition = NSImageLeft;
     }
@@ -997,10 +1004,19 @@ static CGFloat const kPlayButtonVerticalPadding = 4.0;
     }
 
     // Hide until download starts (or completion for documents)
-    if ([type hasPrefix:@"document"])
+    NSNumber* visible = item[@"visible"];
+    if (visible != nil)
+    {
+        playButton.hidden = !visible.boolValue;
+    }
+    else if ([type hasPrefix:@"document"])
+    {
         playButton.hidden = (progress < 1.0);
+    }
     else
+    {
         playButton.hidden = (progress <= 0);
+    }
 
     return playButton;
 }
@@ -1013,6 +1029,27 @@ static id playButtonFolderCache(NSButton* sender)
 static void setPlayButtonFolderCache(NSButton* sender, id value)
 {
     objc_setAssociatedObject(sender, @selector(folderForPlayButton:), value, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+}
+
+static NSImage* bookIcon()
+{
+    static NSImage* icon = nil;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        NSImage* image = nil;
+        if (@available(macOS 11.0, *))
+        {
+            image = [NSImage imageWithSystemSymbolName:@"book" accessibilityDescription:nil];
+        }
+        if (!image)
+        {
+            image = [NSImage imageNamed:NSImageNameBookmarksTemplate];
+        }
+        image = [image copy];
+        image.size = NSMakeSize(12.0, 12.0);
+        icon = image;
+    });
+    return icon;
 }
 
 static NSString* folderForPlayButton(NSButton* sender, Torrent* torrent)
@@ -1055,6 +1092,167 @@ static NSString* folderForPlayButton(NSButton* sender, Torrent* torrent)
     return folder;
 }
 
+- (NSMutableArray<NSMutableDictionary*>*)playButtonStateForTorrent:(Torrent*)torrent
+{
+    NSArray<NSDictionary*>* playableFiles = torrent.playableFiles;
+    if (playableFiles.count == 0)
+    {
+        torrent.cachedPlayButtonSource = nil;
+        torrent.cachedPlayButtonState = nil;
+        torrent.cachedPlayButtonLayout = nil;
+        return nil;
+    }
+
+    BOOL isCompleteTransfer = torrent.isComplete && (torrent.isSeeding || !torrent.isActive);
+    BOOL isSameSource = [torrent.cachedPlayButtonSource isEqualToArray:playableFiles];
+    if (!isSameSource)
+    {
+        torrent.cachedPlayButtonSource = playableFiles;
+        torrent.cachedPlayButtonState = nil;
+        torrent.cachedPlayButtonLayout = nil;
+        torrent.cachedPlayButtonProgressGeneration = 0;
+    }
+
+    NSMutableArray<NSMutableDictionary*>* state = (NSMutableArray<NSMutableDictionary*>*)torrent.cachedPlayButtonState;
+    if (!state)
+    {
+        state = [NSMutableArray arrayWithCapacity:playableFiles.count];
+        BOOL singleItem = playableFiles.count == 1;
+        for (NSDictionary* fileInfo in playableFiles)
+        {
+            NSMutableDictionary* entry = [fileInfo mutableCopy];
+            if (singleItem)
+            {
+                if ([entry[@"type"] hasPrefix:@"document"])
+                    entry[@"baseTitle"] = @"Read";
+                else
+                    entry[@"baseTitle"] = @"▶ Play";
+            }
+            if ([entry[@"type"] hasPrefix:@"document"])
+            {
+                entry[@"icon"] = bookIcon();
+            }
+            entry[@"title"] = entry[@"baseTitle"] ?: @"";
+            entry[@"visible"] = @NO;
+            entry[@"progress"] = @0.0;
+            entry[@"progressPercent"] = @0;
+            [state addObject:entry];
+        }
+        torrent.cachedPlayButtonState = state;
+    }
+
+    if (isCompleteTransfer && isSameSource)
+    {
+        return state;
+    }
+
+    NSUInteger statsGeneration = torrent.statsGeneration;
+    if (torrent.cachedPlayButtonProgressGeneration == statsGeneration)
+    {
+        return state;
+    }
+
+    for (NSMutableDictionary* entry in state)
+    {
+        NSString* type = entry[@"type"] ?: @"file";
+        NSNumber* index = entry[@"index"];
+        CGFloat progress = [entry[@"progress"] doubleValue];
+        CGFloat newProgress = progress;
+        if (index)
+        {
+            newProgress = [torrent fileProgressForIndex:index.unsignedIntegerValue];
+        }
+        else
+        {
+            NSString* folder = entry[@"folder"];
+            newProgress = folder.length > 0 ? [torrent folderConsecutiveProgress:folder] : 0.0;
+        }
+        if (newProgress != progress)
+        {
+            progress = newProgress;
+            entry[@"progress"] = @(progress);
+            int progressPct = (int)floor(progress * 100);
+            entry[@"progressPercent"] = @(progressPct);
+            BOOL visible = [type hasPrefix:@"document"] ? (progress >= 1.0) : (progress > 0);
+            entry[@"visible"] = @(visible);
+            NSString* baseTitle = entry[@"baseTitle"] ?: @"";
+            NSString* title = baseTitle;
+            if (visible && ![type hasPrefix:@"document"] && progress < 1.0 && progressPct < 100)
+            {
+                title = [NSString stringWithFormat:@"%@ (%d%%)", baseTitle, progressPct];
+            }
+            entry[@"title"] = title;
+        }
+    }
+
+    torrent.cachedPlayButtonProgressGeneration = statsGeneration;
+    return state;
+}
+
+- (NSArray<NSDictionary*>*)playButtonLayoutForTorrent:(Torrent*)torrent state:(NSArray<NSDictionary*>*)state
+{
+    if (torrent.cachedPlayButtonLayout != nil)
+    {
+        return torrent.cachedPlayButtonLayout;
+    }
+
+    if (state.count == 0)
+    {
+        return nil;
+    }
+
+    NSMutableArray<NSDictionary*>* layout = [NSMutableArray array];
+    if (state.count == 1)
+    {
+        [layout addObject:@{ @"kind" : @"item", @"item" : state[0] }];
+        torrent.cachedPlayButtonLayout = layout;
+        return layout;
+    }
+
+    NSMutableDictionary<NSNumber*, NSMutableArray<NSDictionary*>*>* seasonGroups = [NSMutableDictionary dictionary];
+    for (NSDictionary* fileInfo in state)
+    {
+        id seasonValue = fileInfo[@"season"];
+        NSNumber* season = (seasonValue && seasonValue != [NSNull null]) ? seasonValue : @0;
+        if (!seasonGroups[season])
+        {
+            seasonGroups[season] = [NSMutableArray array];
+        }
+        [seasonGroups[season] addObject:fileInfo];
+    }
+
+    NSArray<NSNumber*>* sortedSeasons = [seasonGroups.allKeys sortedArrayUsingSelector:@selector(compare:)];
+    BOOL hasMultipleSeasons = sortedSeasons.count > 1;
+
+    NSUInteger totalFilesShown = 0;
+    NSUInteger const maxFiles = 100;
+
+    for (NSNumber* season in sortedSeasons)
+    {
+        if (totalFilesShown >= maxFiles)
+            break;
+
+        NSArray<NSDictionary*>* filesInSeason = seasonGroups[season];
+
+        if (hasMultipleSeasons && season.integerValue > 0)
+        {
+            NSString* title = [NSString stringWithFormat:@"Season %@:", season];
+            [layout addObject:@{ @"kind" : @"header", @"title" : title }];
+        }
+
+        for (NSDictionary* fileInfo in filesInSeason)
+        {
+            if (totalFilesShown >= maxFiles)
+                break;
+            [layout addObject:@{ @"kind" : @"item", @"item" : fileInfo }];
+            totalFilesShown++;
+        }
+    }
+
+    torrent.cachedPlayButtonLayout = layout;
+    return layout;
+}
+
 - (CGFloat)playButtonsAvailableWidthForCell:(TorrentCell*)cell
 {
     CGFloat tableWidth = NSWidth(self.bounds);
@@ -1065,10 +1263,11 @@ static NSString* folderForPlayButton(NSButton* sender, Torrent* torrent)
 
 - (void)configurePlayButtonsForCell:(TorrentCell*)cell torrent:(Torrent*)torrent
 {
-    NSArray<NSDictionary*>* playableFiles = torrent.playableFiles;
+    NSArray<NSDictionary*>* playButtonState = [self playButtonStateForTorrent:torrent];
+    NSArray<NSDictionary*>* playButtonLayout = [self playButtonLayoutForTorrent:torrent state:playButtonState];
 
     // Reuse existing buttons if same torrent/files
-    if (cell.fPlayButtonsView && [cell.fPlayButtonsSourceFiles isEqualToArray:playableFiles])
+    if (cell.fPlayButtonsView && [cell.fPlayButtonsSourceFiles isEqualToArray:playButtonState])
     {
         // Only update progress for finished torrents that might have just completed
         [self updatePlayButtonProgressForCell:cell torrent:torrent];
@@ -1084,7 +1283,7 @@ static NSString* folderForPlayButton(NSButton* sender, Torrent* torrent)
         cell.fPlayButtonsHeightConstraint = nil;
     }
 
-    if (!playableFiles || playableFiles.count == 0)
+    if (!playButtonLayout || playButtonLayout.count == 0)
         return;
 
     FlowLayoutView* flowView = [[FlowLayoutView alloc] init];
@@ -1093,62 +1292,23 @@ static NSString* folderForPlayButton(NSButton* sender, Torrent* torrent)
     flowView.verticalSpacing = 4;
     flowView.minimumButtonWidth = 50;
 
-    // Single item: show "▶ Play"
-    if (playableFiles.count == 1)
+    for (NSDictionary* entry in playButtonLayout)
     {
-        NSMutableDictionary* item = [playableFiles[0] mutableCopy];
-        if ([item[@"type"] hasPrefix:@"document"])
-            item[@"baseTitle"] = @"Read";
-        else
-            item[@"baseTitle"] = @"▶ Play";
-        [flowView addArrangedSubview:[self createPlayButtonFromItem:item]];
-    }
-    else
-    {
-        // Multiple items: group by season (for files) or show directly (for folders)
-        NSMutableDictionary<NSNumber*, NSMutableArray<NSDictionary*>*>* seasonGroups = [NSMutableDictionary dictionary];
-        for (NSDictionary* fileInfo in playableFiles)
+        NSString* kind = entry[@"kind"];
+        if ([kind isEqualToString:@"header"])
         {
-            id seasonValue = fileInfo[@"season"];
-            NSNumber* season = (seasonValue && seasonValue != [NSNull null]) ? seasonValue : @0; // Default to 0 for folder items
-            if (!seasonGroups[season])
-            {
-                seasonGroups[season] = [NSMutableArray array];
-            }
-            [seasonGroups[season] addObject:fileInfo];
+            [flowView addLineBreak];
+            NSTextField* seasonLabel = [NSTextField labelWithString:entry[@"title"] ?: @""];
+            seasonLabel.font = [NSFont boldSystemFontOfSize:11];
+            seasonLabel.textColor = NSColor.secondaryLabelColor;
+            [flowView addArrangedSubview:seasonLabel];
         }
-
-        // Sort seasons
-        NSArray<NSNumber*>* sortedSeasons = [seasonGroups.allKeys sortedArrayUsingSelector:@selector(compare:)];
-        BOOL hasMultipleSeasons = sortedSeasons.count > 1;
-
-        NSUInteger totalFilesShown = 0;
-        NSUInteger const maxFiles = 100;
-
-        for (NSNumber* season in sortedSeasons)
+        else
         {
-            if (totalFilesShown >= maxFiles)
-                break;
-
-            NSArray<NSDictionary*>* filesInSeason = seasonGroups[season];
-
-            // Add season header only if there are multiple seasons
-            if (hasMultipleSeasons && season.integerValue > 0)
+            NSDictionary* item = entry[@"item"];
+            if (item)
             {
-                [flowView addLineBreak];
-                NSTextField* seasonLabel = [NSTextField labelWithString:[NSString stringWithFormat:@"Season %@:", season]];
-                seasonLabel.font = [NSFont boldSystemFontOfSize:11];
-                seasonLabel.textColor = NSColor.secondaryLabelColor;
-                [flowView addArrangedSubview:seasonLabel];
-            }
-
-            for (NSDictionary* fileInfo in filesInSeason)
-            {
-                if (totalFilesShown >= maxFiles)
-                    break;
-
-                [flowView addArrangedSubview:[self createPlayButtonFromItem:fileInfo]];
-                totalFilesShown++;
+                [flowView addArrangedSubview:[self createPlayButtonFromItem:item]];
             }
         }
     }
@@ -1157,7 +1317,7 @@ static NSString* folderForPlayButton(NSButton* sender, Torrent* torrent)
     flowView.translatesAutoresizingMaskIntoConstraints = NO;
     [cell addSubview:flowView];
     cell.fPlayButtonsView = flowView;
-    cell.fPlayButtonsSourceFiles = playableFiles;
+    cell.fPlayButtonsSourceFiles = playButtonState;
 
     CGFloat rightMargin = kPlayButtonRightMargin; // Space for control buttons
 
@@ -1208,51 +1368,34 @@ static NSString* folderForPlayButton(NSButton* sender, Torrent* torrent)
     if (!cell.fPlayButtonsView || ![cell.fPlayButtonsView isKindOfClass:[FlowLayoutView class]])
         return;
 
+    NSArray<NSDictionary*>* state = [self playButtonStateForTorrent:torrent];
+    if (state.count == 0)
+        return;
+
     BOOL layoutNeeded = NO;
+    NSUInteger stateIndex = 0;
     for (NSView* view in [(FlowLayoutView*)cell.fPlayButtonsView arrangedSubviews])
     {
         if (![view isKindOfClass:[PlayButton class]])
             continue;
 
+        if (stateIndex >= state.count)
+            break;
         PlayButton* button = (PlayButton*)view;
-        NSString* baseTitle = button.accessibilityLabel;
-        NSString* type = button.accessibilityHelp;
-        if (!baseTitle)
-            continue;
-
-        CGFloat progress;
-        NSInteger fileIndex = button.tag;
-
-        if (fileIndex == NSNotFound)
+        NSDictionary* entry = state[stateIndex++];
+        NSNumber* visible = entry[@"visible"];
+        NSString* title = entry[@"title"];
+        if (visible && title)
         {
-            // Folder-based item: extract relative folder path and get progress
-            NSString* folder = folderForPlayButton(button, torrent);
-            progress = folder.length > 0 ? [torrent folderConsecutiveProgress:folder] : 0.0;
-        }
-        else
-        {
-            progress = [torrent fileProgressForIndex:fileIndex];
-        }
-
-        // Show/hide based on progress (documents need 100% to open)
-        BOOL shouldBeVisible = [type hasPrefix:@"document"] ? (progress >= 1.0) : (progress > 0);
-        if (button.hidden == shouldBeVisible)
-        {
-            button.hidden = !shouldBeVisible;
-            layoutNeeded = YES;
-        }
-
-        // Update title with current progress
-        if (shouldBeVisible && ![type hasPrefix:@"document"])
-        {
-            int progressPct = (int)floor(progress * 100);
-            NSString* newTitle = (progress < 1.0 && progressPct < 100) ?
-                [NSString stringWithFormat:@"%@ (%d%%)", baseTitle, progressPct] :
-                baseTitle;
-
-            if (![button.title isEqualToString:newTitle])
+            if (button.hidden == visible.boolValue)
             {
-                button.title = newTitle;
+                button.hidden = !visible.boolValue;
+                layoutNeeded = YES;
+            }
+
+            if (![button.title isEqualToString:title])
+            {
+                button.title = title;
                 [button invalidateIntrinsicContentSize];
                 [(FlowLayoutView*)cell.fPlayButtonsView invalidateSizeForView:button];
                 layoutNeeded = YES;
@@ -1263,6 +1406,7 @@ static NSString* folderForPlayButton(NSButton* sender, Torrent* torrent)
     if (layoutNeeded)
     {
         FlowLayoutView* flowView = (FlowLayoutView*)cell.fPlayButtonsView;
+        [flowView invalidateLayoutCache];
         [flowView setNeedsLayout:YES];
         [flowView layoutSubtreeIfNeeded];
 

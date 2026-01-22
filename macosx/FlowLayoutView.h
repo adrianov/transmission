@@ -22,5 +22,7 @@
 
 /// Clears cached size for a specific view (call when view content changes)
 - (void)invalidateSizeForView:(NSView*)view;
+/// Clears cached layout/height (call when visibility changes)
+- (void)invalidateLayoutCache;
 
 @end

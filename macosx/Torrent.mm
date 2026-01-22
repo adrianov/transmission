@@ -1003,19 +1003,6 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
     NSMutableDictionary<NSString*, NSString*>* normalizedCache = [NSMutableDictionary dictionary];
     NSMutableDictionary<NSString*, NSString*>* codecCache = [NSMutableDictionary dictionary];
 
-    NSString* (^normalizedMediaKey)(NSString*) = ^NSString*(NSString* value) {
-        if (value.length == 0)
-            return @"";
-        NSString* cached = normalizedCache[value];
-        if (cached)
-            return cached;
-        NSString* lowercase = value.lowercaseString;
-        NSString* normalized = [nonWordRegex stringByReplacingMatchesInString:lowercase options:0
-                                                                        range:NSMakeRange(0, lowercase.length)
-                                                                 withTemplate:@""];
-        normalizedCache[value] = normalized;
-        return normalized;
-    };
     NSString* (^normalizedMediaKeyWithoutCodec)(NSString*) = ^NSString*(NSString* value) {
         if (value.length == 0)
             return @"";
@@ -2520,6 +2507,11 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
     {
         return self.shortStatusString;
     }
+}
+
+- (NSUInteger)statsGeneration
+{
+    return self.fStatsGeneration;
 }
 
 - (NSString*)stateString

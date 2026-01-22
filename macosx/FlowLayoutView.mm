@@ -14,6 +14,11 @@
 {
     NSMutableArray<NSView*>* _arrangedSubviews;
     NSMapTable<NSView*, NSValue*>* _cachedSizes;
+    NSArray<NSView*>* _visibleSubviewsCache;
+    BOOL _visibleCacheValid;
+    BOOL _layoutDirty;
+    CGFloat _lastLayoutWidth;
+    CGFloat _lastLayoutHeight;
 }
 
 - (instancetype)initWithFrame:(NSRect)frameRect
@@ -25,6 +30,10 @@
         _horizontalSpacing = 6;
         _verticalSpacing = 4;
         _minimumButtonWidth = 50;
+        _visibleCacheValid = NO;
+        _layoutDirty = YES;
+        _lastLayoutWidth = 0;
+        _lastLayoutHeight = 0;
     }
     return self;
 }
@@ -33,6 +42,8 @@
 {
     [_arrangedSubviews addObject:view];
     [self addSubview:view];
+    _visibleCacheValid = NO;
+    _layoutDirty = YES;
     [self setNeedsLayout:YES];
 }
 
@@ -41,6 +52,8 @@
     FlowLineBreak* br = [[FlowLineBreak alloc] init];
     [_arrangedSubviews addObject:br];
     [self addSubview:br];
+    _visibleCacheValid = NO;
+    _layoutDirty = YES;
     [self setNeedsLayout:YES];
 }
 
@@ -80,20 +93,37 @@
     return size;
 }
 
+- (NSArray<NSView*>*)visibleArrangedSubviews
+{
+    if (_visibleCacheValid)
+        return _visibleSubviewsCache;
+
+    NSMutableArray<NSView*>* visible = [NSMutableArray array];
+    for (NSView* view in _arrangedSubviews)
+    {
+        if (!view.hidden)
+        {
+            [visible addObject:view];
+        }
+    }
+    _visibleSubviewsCache = [visible copy];
+    _visibleCacheValid = YES;
+    return _visibleSubviewsCache;
+}
+
 - (void)layoutSubviewsForWidth:(CGFloat)availableWidth
 {
     if (availableWidth <= 0)
+        return;
+    if (!_layoutDirty && availableWidth == _lastLayoutWidth)
         return;
 
     CGFloat x = 0;
     CGFloat y = 0;
     CGFloat rowHeight = 0;
 
-    for (NSView* view in _arrangedSubviews)
+    for (NSView* view in [self visibleArrangedSubviews])
     {
-        if (view.hidden)
-            continue;
-
         if ([view isKindOfClass:[FlowLineBreak class]])
         {
             y += rowHeight + (rowHeight > 0 ? _verticalSpacing : 0);
@@ -117,22 +147,25 @@
         x += size.width + _horizontalSpacing;
         rowHeight = MAX(rowHeight, size.height);
     }
+
+    _layoutDirty = NO;
+    _lastLayoutWidth = availableWidth;
+    _lastLayoutHeight = y + rowHeight;
 }
 
 - (CGFloat)heightForWidth:(CGFloat)availableWidth
 {
     if (availableWidth <= 0)
         return 0;
+    if (!_layoutDirty && availableWidth == _lastLayoutWidth)
+        return _lastLayoutHeight;
 
     CGFloat x = 0;
     CGFloat y = 0;
     CGFloat rowHeight = 0;
 
-    for (NSView* view in _arrangedSubviews)
+    for (NSView* view in [self visibleArrangedSubviews])
     {
-        if (view.hidden)
-            continue;
-
         if ([view isKindOfClass:[FlowLineBreak class]])
         {
             x = 0;
@@ -155,13 +188,15 @@
         rowHeight = MAX(rowHeight, size.height);
     }
 
-    return y + rowHeight;
+    _lastLayoutWidth = availableWidth;
+    _lastLayoutHeight = y + rowHeight;
+    return _lastLayoutHeight;
 }
 
 - (NSSize)intrinsicContentSize
 {
     BOOL hasVisible = NO;
-    for (NSView* view in _arrangedSubviews)
+    for (NSView* view in [self visibleArrangedSubviews])
     {
         if (!view.hidden && ![view isKindOfClass:[FlowLineBreak class]])
         {
@@ -185,6 +220,15 @@
 - (void)invalidateSizeForView:(NSView*)view
 {
     [_cachedSizes removeObjectForKey:view];
+    _visibleCacheValid = NO;
+    _layoutDirty = YES;
+}
+
+- (void)invalidateLayoutCache
+{
+    _visibleCacheValid = NO;
+    _layoutDirty = YES;
+    [self setNeedsLayout:YES];
 }
 
 @end
