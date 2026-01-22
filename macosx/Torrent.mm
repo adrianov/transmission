@@ -26,7 +26,12 @@ static int const kETAIdleDisplaySec = 2 * 60;
 static dispatch_queue_t timeMachineExcludeQueue;
 
 /// Media type for folder torrents
-typedef NS_ENUM(NSInteger, TorrentMediaType) { TorrentMediaTypeNone = 0, TorrentMediaTypeVideo, TorrentMediaTypeAudio, TorrentMediaTypeBooks };
+typedef NS_ENUM(NSInteger, TorrentMediaType) {
+    TorrentMediaTypeNone = 0,
+    TorrentMediaTypeVideo,
+    TorrentMediaTypeAudio,
+    TorrentMediaTypeBooks
+};
 
 @interface Torrent ()
 
@@ -792,13 +797,33 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
                 {
                     name = [NSString stringWithFormat:@"%@ %lu", (isDisc ? @"Disc" : @"Album"), (unsigned long)(i + 1)];
                 }
-                else if (!isDisc)
+                else
                 {
-                    // Humanize album names
-                    NSString* humanized = name.humanReadableEpisodeName;
-                    if (humanized.length > 0)
+                    NSArray<NSString*>* parts = [folder pathComponents];
+                    if (parts.count >= 2)
                     {
-                        name = humanized;
+                        NSRegularExpression* cdRegex = [NSRegularExpression regularExpressionWithPattern:@"^(CD|Disc)\\s*\\d+$"
+                                                                                                 options:NSRegularExpressionCaseInsensitive
+                                                                                                   error:nil];
+                        NSRange nameRange = NSMakeRange(0, name.length);
+                        if ([cdRegex firstMatchInString:name options:0 range:nameRange])
+                        {
+                            NSString* parent = parts[parts.count - 2];
+                            if (parent.length > 0)
+                            {
+                                name = [NSString stringWithFormat:@"%@ - %@", parent, name];
+                            }
+                        }
+                    }
+
+                    if (!isDisc)
+                    {
+                        // Humanize album names
+                        NSString* humanized = name.humanReadableEpisodeName;
+                        if (humanized.length > 0)
+                        {
+                            name = humanized;
+                        }
                     }
                 }
             }
@@ -834,9 +859,9 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
         mediaExtensions = [NSSet setWithArray:@[
-            @"mkv", @"avi", @"mp4",  @"mov", @"wmv", @"flv", @"webm", @"m4v", @"mpg", @"mpeg", @"ts",   @"m2ts", @"vob", @"3gp",
-            @"ogv", @"mp3", @"flac", @"wav", @"aac", @"ogg", @"wma",  @"m4a", @"ape", @"alac", @"aiff", @"opus", @"cue",
-            @"pdf", @"epub"
+            @"mkv", @"avi",  @"mp4", @"mov",  @"wmv",  @"flv",  @"webm", @"m4v", @"mpg", @"mpeg",
+            @"ts",  @"m2ts", @"vob", @"3gp",  @"ogv",  @"mp3",  @"flac", @"wav", @"aac", @"ogg",
+            @"wma", @"m4a",  @"ape", @"alac", @"aiff", @"opus", @"cue",  @"pdf", @"epub"
         ]];
         documentExtensions = [NSSet setWithArray:@[ @"pdf", @"epub", @"djv", @"djvu" ]];
         documentExternalExtensions = [NSSet setWithArray:@[ @"djv", @"djvu" ]];
@@ -936,11 +961,14 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
                 displayName = fileName.lastPathComponent.stringByDeletingPathExtension.humanReadableTitle;
             }
             // Strip resolution from button titles
-            displayName = [displayName stringByReplacingOccurrencesOfString:@"#2160p" withString:@"" options:NSCaseInsensitiveSearch
+            displayName = [displayName stringByReplacingOccurrencesOfString:@"#2160p" withString:@""
+                                                                    options:NSCaseInsensitiveSearch
                                                                       range:NSMakeRange(0, displayName.length)];
-            displayName = [displayName stringByReplacingOccurrencesOfString:@"#1080p" withString:@"" options:NSCaseInsensitiveSearch
+            displayName = [displayName stringByReplacingOccurrencesOfString:@"#1080p" withString:@""
+                                                                    options:NSCaseInsensitiveSearch
                                                                       range:NSMakeRange(0, displayName.length)];
-            displayName = [displayName stringByReplacingOccurrencesOfString:@"#720p" withString:@"" options:NSCaseInsensitiveSearch
+            displayName = [displayName stringByReplacingOccurrencesOfString:@"#720p" withString:@""
+                                                                    options:NSCaseInsensitiveSearch
                                                                       range:NSMakeRange(0, displayName.length)];
             displayName = [displayName stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet];
         }
