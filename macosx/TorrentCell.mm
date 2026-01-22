@@ -31,7 +31,6 @@
     self.layer.backgroundColor = NSColor.clearColor.CGColor;
 }
 
-
 - (void)drawRect:(NSRect)dirtyRect
 {
     if (self.fTorrentTableView)
