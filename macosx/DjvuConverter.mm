@@ -8,12 +8,18 @@
 
 #import <ddjvuapi.h>
 
+#include <miniexp.h>
+
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <climits>
 #include <algorithm>
+#include <cctype>
+#include <unordered_map>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <vector>
 
 // macOS defines `fract1` / `fract2` macros via CarbonCore's FixMath.h, which
@@ -195,6 +201,16 @@ struct CropRect
     int y1 = 0; // exclusive
 };
 
+struct OutlineNode
+{
+    std::string title;
+    int rawPage = -1; // numeric page reference when not directly resolved
+    int pageIndex = -1; // resolved 0-based page index
+    std::vector<OutlineNode> children;
+};
+
+using PageTargetMap = std::unordered_map<std::string, int>;
+
 static void padCropRect(CropRect* r, int pad, int w, int h)
 {
     if (r == nullptr)
@@ -204,6 +220,377 @@ static void padCropRect(CropRect* r, int pad, int w, int h)
     r->y0 = MAX(0, r->y0 - pad);
     r->x1 = MIN(w, r->x1 + pad);
     r->y1 = MIN(h, r->y1 + pad);
+}
+
+static int parseOutlinePageNumber(std::string_view url)
+{
+    size_t const hashPos = url.find('#');
+    if (hashPos == std::string_view::npos)
+        return -1;
+
+    char const* start = url.data() + hashPos + 1;
+    if (start >= url.data() + url.size() || !std::isdigit((unsigned char)*start))
+        return -1;
+
+    char* end = nullptr;
+    long const page = std::strtol(start, &end, 10);
+    if (end == start || page < 0)
+        return -1;
+
+    return (int)page;
+}
+
+static bool decodeHex(char c, unsigned char* out)
+{
+    if (out == nullptr)
+        return false;
+    if (c >= '0' && c <= '9')
+    {
+        *out = (unsigned char)(c - '0');
+        return true;
+    }
+    if (c >= 'a' && c <= 'f')
+    {
+        *out = (unsigned char)(10 + (c - 'a'));
+        return true;
+    }
+    if (c >= 'A' && c <= 'F')
+    {
+        *out = (unsigned char)(10 + (c - 'A'));
+        return true;
+    }
+    return false;
+}
+
+static std::string decodeUrlValue(std::string_view value)
+{
+    std::string out;
+    out.reserve(value.size());
+    for (size_t i = 0; i < value.size(); ++i)
+    {
+        char const ch = value[i];
+        if (ch == '%' && i + 2 < value.size())
+        {
+            unsigned char hi = 0;
+            unsigned char lo = 0;
+            if (decodeHex(value[i + 1], &hi) && decodeHex(value[i + 2], &lo))
+            {
+                out.push_back((char)((hi << 4) | lo));
+                i += 2;
+                continue;
+            }
+        }
+        if (ch == '+')
+            out.push_back(' ');
+        else
+            out.push_back(ch);
+    }
+    return out;
+}
+
+static std::string extractOutlineTarget(std::string_view url)
+{
+    if (url.empty())
+        return {};
+
+    if (url[0] == '#')
+        return decodeUrlValue(url.substr(1));
+
+    size_t qpos = url.find('?');
+    if (qpos == std::string_view::npos)
+        return {};
+
+    std::string_view query = url.substr(qpos + 1);
+    while (!query.empty())
+    {
+        size_t const amp = query.find('&');
+        std::string_view param = amp == std::string_view::npos ? query : query.substr(0, amp);
+        size_t const eq = param.find('=');
+        if (eq != std::string_view::npos)
+        {
+            std::string_view key = param.substr(0, eq);
+            std::string_view val = param.substr(eq + 1);
+            if (key == "page" || key == "p")
+                return decodeUrlValue(val);
+        }
+        if (amp == std::string_view::npos)
+            break;
+        query = query.substr(amp + 1);
+    }
+
+    return {};
+}
+
+static PageTargetMap buildPageTargetMap(ddjvu_context_t* ctx, ddjvu_document_t* doc)
+{
+    PageTargetMap map;
+    if (ctx == nullptr || doc == nullptr)
+        return map;
+
+    int filenum = ddjvu_document_get_filenum(doc);
+    while (filenum == 0)
+    {
+        ddjvu_message_t* msg = ddjvu_message_wait(ctx);
+        if (msg)
+            ddjvu_message_pop(ctx);
+        filenum = ddjvu_document_get_filenum(doc);
+    }
+
+    if (filenum <= 0)
+        return map;
+
+    ddjvu_fileinfo_t info{};
+    for (int i = 0; i < filenum; ++i)
+    {
+        ddjvu_status_t status = ddjvu_document_get_fileinfo(doc, i, &info);
+        while (status < DDJVU_JOB_OK)
+        {
+            ddjvu_message_t* msg = ddjvu_message_wait(ctx);
+            if (msg)
+                ddjvu_message_pop(ctx);
+            status = ddjvu_document_get_fileinfo(doc, i, &info);
+        }
+
+        if (status >= DDJVU_JOB_FAILED)
+            continue;
+        if (info.type != 'P' || info.pageno < 0)
+            continue;
+
+        int const pageIndex = info.pageno;
+        if (info.name != nullptr && info.name[0] != '\0')
+            map.emplace(info.name, pageIndex);
+        if (info.title != nullptr && info.title[0] != '\0')
+            map.emplace(info.title, pageIndex);
+    }
+
+    return map;
+}
+
+static int resolveOutlineTarget(ddjvu_document_t* doc, PageTargetMap const& map, std::string const& target)
+{
+    auto it = map.find(target);
+    if (it != map.end())
+        return it->second;
+
+    if (doc != nullptr)
+    {
+        int const resolved = ddjvu_document_search_pageno(doc, target.c_str());
+        if (resolved >= 0)
+            return resolved;
+    }
+
+    return -1;
+}
+
+static bool parseOutlineEntry(ddjvu_document_t* doc, PageTargetMap const& map, miniexp_t entry, OutlineNode* out)
+{
+    if (out == nullptr || doc == nullptr || !miniexp_consp(entry))
+        return false;
+
+    miniexp_t titleExp = miniexp_car(entry);
+    miniexp_t urlExp = miniexp_cadr(entry);
+    if (!miniexp_stringp(titleExp) || !miniexp_stringp(urlExp))
+        return false;
+
+    char const* title = miniexp_to_str(titleExp);
+    char const* url = miniexp_to_str(urlExp);
+    if (title == nullptr || url == nullptr)
+        return false;
+
+    std::string const target = extractOutlineTarget(url);
+    if (target.empty())
+        return false;
+
+    OutlineNode node;
+    node.title = title;
+    int const resolved = resolveOutlineTarget(doc, map, target);
+    if (resolved >= 0)
+    {
+        node.pageIndex = resolved;
+    }
+    else
+    {
+        int const rawPage = parseOutlinePageNumber(target);
+        if (rawPage < 0)
+            return false;
+        node.rawPage = rawPage;
+    }
+
+    miniexp_t rest = miniexp_cddr(entry);
+    while (miniexp_consp(rest))
+    {
+        miniexp_t childExp = miniexp_car(rest);
+        OutlineNode child;
+        if (parseOutlineEntry(doc, map, childExp, &child))
+            node.children.push_back(std::move(child));
+        rest = miniexp_cdr(rest);
+    }
+
+    *out = std::move(node);
+    return true;
+}
+
+static void applyOutlineOffset(std::vector<OutlineNode>* nodes, int offset, int pageCount)
+{
+    if (nodes == nullptr)
+        return;
+
+    for (auto& node : *nodes)
+    {
+        if (node.pageIndex < 0 && node.rawPage >= 0)
+        {
+            node.pageIndex = node.rawPage - offset;
+            if (node.pageIndex < 0 || node.pageIndex >= pageCount)
+                node.pageIndex = -1;
+        }
+        applyOutlineOffset(&node.children, offset, pageCount);
+    }
+}
+
+static void filterOutlineNodes(std::vector<OutlineNode>* nodes)
+{
+    if (nodes == nullptr)
+        return;
+
+    std::vector<OutlineNode> filtered;
+    filtered.reserve(nodes->size());
+    for (auto& node : *nodes)
+    {
+        filterOutlineNodes(&node.children);
+        if (node.pageIndex >= 0)
+            filtered.push_back(std::move(node));
+    }
+    *nodes = std::move(filtered);
+}
+
+static void collectOutlinePages(std::vector<OutlineNode> const& nodes, std::vector<int>* pages)
+{
+    if (pages == nullptr)
+        return;
+
+    for (auto const& node : nodes)
+    {
+        if (node.pageIndex < 0 && node.rawPage >= 0)
+            pages->push_back(node.rawPage);
+        collectOutlinePages(node.children, pages);
+    }
+}
+
+static int chooseOutlineOffset(std::vector<OutlineNode> const& outline, int pageCount)
+{
+    std::vector<int> pages;
+    collectOutlinePages(outline, &pages);
+    if (pages.empty() || pageCount <= 0)
+        return 1;
+
+    int minRaw = INT_MAX;
+    int maxRaw = -1;
+    for (int raw : pages)
+    {
+        minRaw = MIN(minRaw, raw);
+        maxRaw = MAX(maxRaw, raw);
+    }
+
+    std::vector<int> candidates;
+    candidates.push_back(0);
+    candidates.push_back(1);
+    for (int d = 0; d <= 3; ++d)
+    {
+        int c = minRaw - 1 - d;
+        if (c >= 0)
+            candidates.push_back(c);
+    }
+    if (maxRaw == pageCount)
+        candidates.push_back(1);
+    if (maxRaw == pageCount - 1)
+        candidates.push_back(0);
+
+    int bestOffset = 1;
+    int bestValid = -1;
+    int bestDistance = INT_MAX;
+
+    for (int offset : candidates)
+    {
+        int valid = 0;
+        for (int raw : pages)
+        {
+            int idx = raw - offset;
+            if (idx >= 0 && idx < pageCount)
+                ++valid;
+        }
+
+        int distance = abs(offset - 1);
+        if (valid > bestValid || (valid == bestValid && distance < bestDistance))
+        {
+            bestValid = valid;
+            bestOffset = offset;
+            bestDistance = distance;
+        }
+    }
+
+    return bestOffset;
+}
+
+static std::vector<OutlineNode> readDjvuOutline(ddjvu_context_t* ctx, ddjvu_document_t* doc, int pageCount)
+{
+    std::vector<OutlineNode> outline;
+    if (ctx == nullptr || doc == nullptr || pageCount <= 0)
+        return outline;
+
+    PageTargetMap const pageTargets = buildPageTargetMap(ctx, doc);
+
+    miniexp_t exp = miniexp_dummy;
+    while (exp == miniexp_dummy)
+    {
+        exp = ddjvu_document_get_outline(doc);
+        if (exp == miniexp_dummy)
+        {
+            ddjvu_message_t* msg = ddjvu_message_wait(ctx);
+            if (msg)
+                ddjvu_message_pop(ctx);
+        }
+    }
+
+    if (exp == miniexp_nil)
+        return outline;
+
+    if (miniexp_symbolp(exp))
+    {
+        char const* name = miniexp_to_name(exp);
+        if (name != nullptr && (strcmp(name, "failed") == 0 || strcmp(name, "stopped") == 0))
+        {
+            ddjvu_miniexp_release(doc, exp);
+            return outline;
+        }
+    }
+
+    miniexp_t list = exp;
+    if (miniexp_consp(list) && miniexp_symbolp(miniexp_car(list)))
+    {
+        char const* head = miniexp_to_name(miniexp_car(list));
+        if (head != nullptr && strcmp(head, "bookmarks") == 0)
+            list = miniexp_cdr(list);
+    }
+
+    while (miniexp_consp(list))
+    {
+        miniexp_t entry = miniexp_car(list);
+        OutlineNode node;
+        if (parseOutlineEntry(doc, pageTargets, entry, &node))
+            outline.push_back(std::move(node));
+        list = miniexp_cdr(list);
+    }
+
+    ddjvu_miniexp_release(doc, exp);
+
+    if (!outline.empty())
+    {
+        int const offset = chooseOutlineOffset(outline, pageCount);
+        applyOutlineOffset(&outline, offset, pageCount);
+        filterOutlineNodes(&outline);
+    }
+
+    return outline;
 }
 
 static bool findGrayContentRect(unsigned char const* gray, int w, int h, size_t rowBytes, unsigned char threshold, CropRect* out)
@@ -583,7 +970,124 @@ static bool flushJbig2Batch(Jbig2Batch* batch, std::vector<DjvuPdfPageInfo>* pag
     return ok;
 }
 
-static bool writePdfDeterministic(NSString* tmpPdfPath, std::vector<DjvuPdfPageInfo> const& pages, std::vector<std::vector<uint8_t>> const& jbig2Globals)
+struct PdfOutlineItem
+{
+    std::string title;
+    int pageIndex = -1;
+    int parent = -1;
+    int firstChild = -1;
+    int lastChild = -1;
+    int prev = -1;
+    int next = -1;
+    int count = 0;
+};
+
+struct OutlineBuildResult
+{
+    int first = -1;
+    int last = -1;
+    int descendants = 0;
+};
+
+static OutlineBuildResult buildOutlineItems(std::vector<PdfOutlineItem>* items, std::vector<OutlineNode> const& nodes, int parent)
+{
+    OutlineBuildResult result;
+    int prev = -1;
+
+    for (auto const& node : nodes)
+    {
+        int const idx = (int)items->size();
+        items->push_back({ node.title, node.pageIndex, parent });
+
+        if (result.first == -1)
+            result.first = idx;
+        if (prev != -1)
+        {
+            (*items)[prev].next = idx;
+            (*items)[idx].prev = prev;
+        }
+        prev = idx;
+
+        OutlineBuildResult childResult;
+        if (!node.children.empty())
+        {
+            childResult = buildOutlineItems(items, node.children, idx);
+            (*items)[idx].firstChild = childResult.first;
+            (*items)[idx].lastChild = childResult.last;
+            (*items)[idx].count = childResult.descendants;
+        }
+
+        result.last = idx;
+        result.descendants += 1 + (*items)[idx].count;
+    }
+
+    return result;
+}
+
+static std::string pdfEscapeString(std::string_view text)
+{
+    std::string out;
+    out.reserve(text.size() + 8);
+    for (unsigned char ch : text)
+    {
+        switch (ch)
+        {
+        case '\\':
+        case '(':
+        case ')':
+            out.push_back('\\');
+            out.push_back((char)ch);
+            break;
+        case '\n':
+            out.append("\\n");
+            break;
+        case '\r':
+            out.append("\\r");
+            break;
+        case '\t':
+            out.append("\\t");
+            break;
+        default:
+            out.push_back((char)ch);
+            break;
+        }
+    }
+    return out;
+}
+
+static void appendHexByte(std::string* out, unsigned char value)
+{
+    static char constexpr Hex[] = "0123456789ABCDEF";
+    out->push_back(Hex[value >> 4]);
+    out->push_back(Hex[value & 0x0F]);
+}
+
+static std::string pdfOutlineTitle(std::string_view text)
+{
+    NSString* ns = [[NSString alloc] initWithBytes:text.data() length:text.size() encoding:NSUTF8StringEncoding];
+    if (ns == nil)
+        return "(" + pdfEscapeString(text) + ")";
+
+    NSData* data = [ns dataUsingEncoding:NSUTF16BigEndianStringEncoding];
+    if (data == nil)
+        return "(" + pdfEscapeString(text) + ")";
+
+    std::string out;
+    out.reserve(2 + (data.length + 2) * 2);
+    out.push_back('<');
+    out.append("FEFF");
+    unsigned char const* bytes = static_cast<unsigned char const*>(data.bytes);
+    for (NSUInteger i = 0; i < data.length; ++i)
+        appendHexByte(&out, bytes[i]);
+    out.push_back('>');
+    return out;
+}
+
+static bool writePdfDeterministic(
+    NSString* tmpPdfPath,
+    std::vector<DjvuPdfPageInfo> const& pages,
+    std::vector<std::vector<uint8_t>> const& jbig2Globals,
+    std::vector<OutlineNode> const& outlineNodes)
 {
     if (tmpPdfPath == nil || pages.empty())
         return false;
@@ -614,6 +1118,22 @@ static bool writePdfDeterministic(NSString* tmpPdfPath, std::vector<DjvuPdfPageI
     {
         if (!jbig2Globals[i].empty())
             jbig2GlobalsObjs[i] = nextObj++;
+    }
+
+    std::vector<PdfOutlineItem> outlineItems;
+    std::vector<int> outlineObjs;
+    int outlinesObj = 0;
+    OutlineBuildResult outlineResult;
+    if (!outlineNodes.empty())
+    {
+        outlineResult = buildOutlineItems(&outlineItems, outlineNodes, -1);
+        if (!outlineItems.empty())
+        {
+            outlinesObj = nextObj++;
+            outlineObjs.resize(outlineItems.size(), 0);
+            for (size_t i = 0; i < outlineItems.size(); ++i)
+                outlineObjs[i] = nextObj++;
+        }
     }
 
     for (size_t i = 0; i < pages.size(); ++i)
@@ -650,7 +1170,10 @@ static bool writePdfDeterministic(NSString* tmpPdfPath, std::vector<DjvuPdfPageI
 
     // 1) Catalog
     writeObjBegin(catalogObj);
-    fprintf(fp, "<< /Type /Catalog /Pages %d 0 R >>\n", pagesObj);
+    if (outlinesObj != 0)
+        fprintf(fp, "<< /Type /Catalog /Pages %d 0 R /Outlines %d 0 R /PageMode /UseOutlines >>\n", pagesObj, outlinesObj);
+    else
+        fprintf(fp, "<< /Type /Catalog /Pages %d 0 R >>\n", pagesObj);
     writeObjEnd();
 
     // 2) Pages tree
@@ -661,7 +1184,61 @@ static bool writePdfDeterministic(NSString* tmpPdfPath, std::vector<DjvuPdfPageI
     fprintf(fp, " ] /Count %zu >>\n", pages.size());
     writeObjEnd();
 
-    // 3) JBIG2Globals
+    // 3) Outlines
+    if (outlinesObj != 0)
+    {
+        writeObjBegin(outlinesObj);
+        if (outlineResult.first != -1)
+        {
+            fprintf(
+                fp,
+                "<< /Type /Outlines /First %d 0 R /Last %d 0 R /Count %d >>\n",
+                outlineObjs[(size_t)outlineResult.first],
+                outlineObjs[(size_t)outlineResult.last],
+                outlineResult.descendants);
+        }
+        else
+        {
+            fputs("<< /Type /Outlines >>\n", fp);
+        }
+        writeObjEnd();
+
+        for (size_t i = 0; i < outlineItems.size(); ++i)
+        {
+            auto const& item = outlineItems[i];
+            int const parentObj = item.parent == -1 ? outlinesObj : outlineObjs[(size_t)item.parent];
+            int pageIndex = item.pageIndex;
+            if (pageIndex < 0 || (size_t)pageIndex >= pageObjs.size())
+                pageIndex = 0;
+
+            std::string const titleToken = pdfOutlineTitle(item.title);
+
+            writeObjBegin(outlineObjs[i]);
+            fprintf(
+                fp,
+                "<< /Title %s /Parent %d 0 R /Dest [%d 0 R /Fit]",
+                titleToken.c_str(),
+                parentObj,
+                pageObjs[(size_t)pageIndex].page);
+            if (item.prev != -1)
+                fprintf(fp, " /Prev %d 0 R", outlineObjs[(size_t)item.prev]);
+            if (item.next != -1)
+                fprintf(fp, " /Next %d 0 R", outlineObjs[(size_t)item.next]);
+            if (item.firstChild != -1)
+            {
+                fprintf(
+                    fp,
+                    " /First %d 0 R /Last %d 0 R /Count %d",
+                    outlineObjs[(size_t)item.firstChild],
+                    outlineObjs[(size_t)item.lastChild],
+                    item.count);
+            }
+            fputs(" >>\n", fp);
+            writeObjEnd();
+        }
+    }
+
+    // 4) JBIG2Globals
     for (size_t i = 0; i < jbig2Globals.size(); ++i)
     {
         int obj = jbig2GlobalsObjs[i];
@@ -669,7 +1246,7 @@ static bool writePdfDeterministic(NSString* tmpPdfPath, std::vector<DjvuPdfPageI
             writeStreamObj(obj, "<< ", jbig2Globals[i].data(), jbig2Globals[i].size());
     }
 
-    // 4) Per-page objects
+    // 5) Per-page objects
     for (size_t i = 0; i < pages.size(); ++i)
     {
         DjvuPdfPageInfo const& p = pages[i];
@@ -795,6 +1372,8 @@ static BOOL convertDjvuFileDeterministic(NSString* djvuPath, NSString* tmpPdfPat
     }
 
     setTotalPagesForPath(djvuPath, pageCount);
+
+    std::vector<OutlineNode> outline = readDjvuOutline(ctx, doc, pageCount);
 
     ddjvu_format_t* rgb24 = ddjvu_format_create(DDJVU_FORMAT_RGB24, 0, nullptr);
     ddjvu_format_t* grey8 = ddjvu_format_create(DDJVU_FORMAT_GREY8, 0, nullptr);
@@ -1137,7 +1716,7 @@ static BOOL convertDjvuFileDeterministic(NSString* djvuPath, NSString* tmpPdfPat
 
     if (ok)
     {
-        ok = writePdfDeterministic(tmpPdfPath, pages, jbig2Globals);
+        ok = writePdfDeterministic(tmpPdfPath, pages, jbig2Globals, outline);
         if (!ok)
             NSLog(@"DjvuConverter ERROR: writePdfDeterministic failed for %@", djvuPath);
     }
