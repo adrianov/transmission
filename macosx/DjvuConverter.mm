@@ -121,8 +121,7 @@ static CGImageRef createTiffG4FromBitonal(unsigned char const* bgra, int width, 
         return nullptr;
 
     CGColorSpaceRef gray = CGColorSpaceCreateDeviceGray();
-    CGImageRef bitImage = CGImageCreate(width, height, 1, 1, bitRowBytes, gray, kCGImageAlphaNone, provider, nullptr, false,
-        kCGRenderingIntentDefault);
+    CGImageRef bitImage = CGImageCreate(width, height, 1, 1, bitRowBytes, gray, kCGImageAlphaNone, provider, nullptr, false, kCGRenderingIntentDefault);
     CGDataProviderRelease(provider);
     CGColorSpaceRelease(gray);
     if (!bitImage)
@@ -131,14 +130,17 @@ static CGImageRef createTiffG4FromBitonal(unsigned char const* bgra, int width, 
     // Encode as TIFF CCITT Group 4
     NSMutableData* tiffData = [NSMutableData data];
     CGImageDestinationRef dest = CGImageDestinationCreateWithData(
-        (__bridge CFMutableDataRef)tiffData, (__bridge CFStringRef)UTTypeTIFF.identifier, 1, nullptr);
+        (__bridge CFMutableDataRef)tiffData,
+        (__bridge CFStringRef)UTTypeTIFF.identifier,
+        1,
+        nullptr);
     if (!dest)
     {
         CGImageRelease(bitImage);
         return nullptr;
     }
 
-    NSDictionary* props = @{ (__bridge id)kCGImagePropertyTIFFCompression : @4 };
+    NSDictionary* props = @{(__bridge id)kCGImagePropertyTIFFCompression : @4};
     CGImageDestinationAddImage(dest, bitImage, (__bridge CFDictionaryRef)props);
     bool ok = CGImageDestinationFinalize(dest);
     CFRelease(dest);
@@ -158,18 +160,7 @@ static CGImageRef createJpegFromGray(unsigned char const* gray, int width, int h
 
     unsigned char* jpegBuf = nullptr;
     unsigned long jpegSize = 0;
-    int const rc = tjCompress2(
-        tj,
-        const_cast<unsigned char*>(gray),
-        width,
-        (int)rowBytes,
-        height,
-        TJPF_GRAY,
-        &jpegBuf,
-        &jpegSize,
-        TJSAMP_GRAY,
-        quality,
-        TJFLAG_FASTDCT);
+    int const rc = tjCompress2(tj, const_cast<unsigned char*>(gray), width, (int)rowBytes, height, TJPF_GRAY, &jpegBuf, &jpegSize, TJSAMP_GRAY, quality, TJFLAG_FASTDCT);
     tjDestroy(tj);
 
     if (rc != 0 || jpegBuf == nullptr || jpegSize == 0)
@@ -201,18 +192,7 @@ static CGImageRef createJpegFromBgra(unsigned char const* bgra, int width, int h
 
     unsigned char* jpegBuf = nullptr;
     unsigned long jpegSize = 0;
-    int const rc = tjCompress2(
-        tj,
-        const_cast<unsigned char*>(bgra),
-        width,
-        (int)rowBytes,
-        height,
-        TJPF_BGRA,
-        &jpegBuf,
-        &jpegSize,
-        subsamp,
-        quality,
-        TJFLAG_FASTDCT);
+    int const rc = tjCompress2(tj, const_cast<unsigned char*>(bgra), width, (int)rowBytes, height, TJPF_BGRA, &jpegBuf, &jpegSize, subsamp, quality, TJFLAG_FASTDCT);
     tjDestroy(tj);
 
     if (rc != 0 || jpegBuf == nullptr || jpegSize == 0)
@@ -401,7 +381,7 @@ static BOOL isValidPdf(NSString* path)
             }
         });
     }
-    
+
     dispatch_group_notify(group, dispatch_get_main_queue(), ^{
         [NSNotificationCenter.defaultCenter postNotificationName:@"DjvuConversionComplete" object:notificationObject];
     });
@@ -591,7 +571,8 @@ static BOOL isValidPdf(NSString* path)
     // Encoding:
     // - Truly bitonal pages -> TIFF CCITT Group 4 (strict detection to avoid false positives)
     // - Other pages -> JPEG via TurboJPEG
-    bool const bitonal = pageType != DDJVU_PAGETYPE_PHOTO && isTrulyBitonal((unsigned char const*)buffer, renderWidth, renderHeight, rowSize);
+    bool const bitonal = pageType != DDJVU_PAGETYPE_PHOTO &&
+        isTrulyBitonal((unsigned char const*)buffer, renderWidth, renderHeight, rowSize);
 
     CGImageRef image = nullptr;
     if (bitonal)
@@ -639,14 +620,7 @@ static BOOL isValidPdf(NSString* path)
     if (!image)
     {
         CGColorSpaceRef colorSpace = CGColorSpaceCreateDeviceRGB();
-        CGContextRef bitmapContext = CGBitmapContextCreate(
-            buffer,
-            renderWidth,
-            renderHeight,
-            8,
-            rowSize,
-            colorSpace,
-            kCGImageAlphaPremultipliedFirst | kCGBitmapByteOrder32Little);
+        CGContextRef bitmapContext = CGBitmapContextCreate(buffer, renderWidth, renderHeight, 8, rowSize, colorSpace, kCGImageAlphaPremultipliedFirst | kCGBitmapByteOrder32Little);
 
         if (bitmapContext)
         {
