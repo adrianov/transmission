@@ -631,28 +631,33 @@ void onTorrentCompletenessChanged(tr_torrent* tor, tr_completeness status, bool 
         return;
     }
 
-    [Torrent updateTorrents:self.fTorrents];
+    // Run file checks asynchronously to avoid blocking UI on startup
+    NSArray<Torrent*>* torrents = [self.fTorrents copy];
+    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+        [Torrent updateTorrents:torrents];
 
-    NSMutableArray<Torrent*>* toRemove = [NSMutableArray array];
-    for (Torrent* torrent in self.fTorrents)
-    {
-        if (torrent.error && torrent.allFilesMissing)
+        NSMutableArray<Torrent*>* toRemove = [NSMutableArray array];
+        for (Torrent* torrent in torrents)
         {
-            [toRemove addObject:torrent];
+            if (torrent.error && torrent.allFilesMissing)
+            {
+                [toRemove addObject:torrent];
+            }
         }
-    }
 
-    if (toRemove.count == 0)
-    {
-        return;
-    }
+        if (toRemove.count == 0)
+        {
+            return;
+        }
 
-    for (Torrent* torrent in toRemove)
-    {
-        [self.fTorrentHashes removeObjectForKey:torrent.hashString];
-    }
-
-    [self confirmRemoveTorrents:toRemove deleteData:NO];
+        dispatch_async(dispatch_get_main_queue(), ^{
+            for (Torrent* torrent in toRemove)
+            {
+                [self.fTorrentHashes removeObjectForKey:torrent.hashString];
+            }
+            [self confirmRemoveTorrents:toRemove deleteData:NO];
+        });
+    });
 }
 
 - (void)awakeFromNib
