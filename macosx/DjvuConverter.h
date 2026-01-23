@@ -32,4 +32,7 @@
 /// Get the page progress string ("X of Y pages") for current conversion.
 + (NSString*)convertingProgressForTorrent:(Torrent*)torrent;
 
+/// Clear failed conversion tracking for a torrent (allows retry).
++ (void)clearFailedConversionsForTorrent:(Torrent*)torrent;
+
 @end

@@ -349,7 +349,16 @@ static bool encodeJp2Grok(std::vector<uint8_t>* out, unsigned char const* pixels
     grk_compress_set_default_params(&params);
     params.cod_format = GRK_FMT_JP2;
     params.verbose = false;
-    params.irreversible = false; // lossless (reversible)
+
+    // Use lossy compression with quality-based (PSNR) allocation.
+    // PSNR of 44 dB gives excellent visual quality with adaptive compression -
+    // complex images get more bytes, simple images compress more.
+    // DjVu backgrounds are already lossy (IW44), so lossless JP2 is overkill.
+    params.irreversible = true;
+    params.allocation_by_quality = true;
+    params.numlayers = 1;
+    params.layer_distortion[0] = 44.0; // PSNR in dB
+    params.num_threads = 2; // Use 2 threads per encode for better throughput
 
     size_t rawSize = stride * (size_t)h;
     size_t cap = rawSize + 1024U * 1024U;
@@ -505,7 +514,13 @@ static bool writePdfDeterministic(
             writeObjBegin(o.mask);
             fprintf(
                 fp,
-                "<< /Type /XObject /Subtype /Image /Width %d /Height %d /BitsPerComponent 1 /ImageMask true /Filter /JBIG2Decode /DecodeParms << /JBIG2Globals %d 0 R >> /Length %zu >>\nstream\n",
+                p.hasBackground ?
+                    // JBIG2Decode output uses 0=black, 1=white. For an ImageMask,
+                    // we want 0 (black/text) to paint and 1 (white/background) to be transparent.
+                    "<< /Type /XObject /Subtype /Image /Width %d /Height %d /BitsPerComponent 1 /ImageMask true /Decode [0 1] /Filter /JBIG2Decode /DecodeParms << /JBIG2Globals %d 0 R >> /Length %zu >>\nstream\n" :
+                    // For standalone bitonal pages, store as a normal bilevel grayscale image.
+                    // JBIG2Decode output uses 0=black, 1=white, which matches the default /Decode [0 1].
+                    "<< /Type /XObject /Subtype /Image /Width %d /Height %d /ColorSpace /DeviceGray /BitsPerComponent 1 /Filter /JBIG2Decode /DecodeParms << /JBIG2Globals %d 0 R >> /Length %zu >>\nstream\n",
                 p.maskW,
                 p.maskH,
                 jbig2GlobalsObj,
@@ -524,7 +539,7 @@ static bool writePdfDeterministic(
         if (p.hasBackground)
             contents.append("/ImBg Do\n");
         if (p.hasMask)
-            contents.append("0 g\n/ImM Do\n");
+            contents.append(p.hasBackground ? "0 g\n/ImM Do\n" : "/ImM Do\n");
         contents.append("Q\n");
 
         writeStreamObj(o.contents, "<< ", (uint8_t const*)contents.data(), contents.size());
@@ -562,11 +577,15 @@ static BOOL convertDjvuFileDeterministic(NSString* djvuPath, NSString* tmpPdfPat
     // Create DJVU context
     ddjvu_context_t* ctx = ddjvu_context_create("Transmission");
     if (!ctx)
+    {
+        NSLog(@"DjvuConverter ERROR: failed to create DJVU context for %@", djvuPath);
         return NO;
+    }
 
     ddjvu_document_t* doc = ddjvu_document_create_by_filename_utf8(ctx, djvuPath.UTF8String, TRUE);
     if (!doc)
     {
+        NSLog(@"DjvuConverter ERROR: failed to open DJVU document: %@", djvuPath);
         ddjvu_context_release(ctx);
         return NO;
     }
@@ -580,6 +599,7 @@ static BOOL convertDjvuFileDeterministic(NSString* djvuPath, NSString* tmpPdfPat
 
     if (ddjvu_document_decoding_error(doc))
     {
+        NSLog(@"DjvuConverter ERROR: DJVU document decoding failed: %@", djvuPath);
         ddjvu_document_release(doc);
         ddjvu_context_release(ctx);
         return NO;
@@ -588,6 +608,7 @@ static BOOL convertDjvuFileDeterministic(NSString* djvuPath, NSString* tmpPdfPat
     int pageCount = ddjvu_document_get_pagenum(doc);
     if (pageCount <= 0)
     {
+        NSLog(@"DjvuConverter ERROR: invalid page count (%d) for %@", pageCount, djvuPath);
         ddjvu_document_release(doc);
         ddjvu_context_release(ctx);
         return NO;
@@ -600,6 +621,7 @@ static BOOL convertDjvuFileDeterministic(NSString* djvuPath, NSString* tmpPdfPat
     ddjvu_format_t* msb = ddjvu_format_create(DDJVU_FORMAT_MSBTOLSB, 0, nullptr);
     if (!rgb24 || !grey8 || !msb)
     {
+        NSLog(@"DjvuConverter ERROR: failed to create pixel format for %@", djvuPath);
         if (rgb24)
             ddjvu_format_release(rgb24);
         if (grey8)
@@ -624,8 +646,10 @@ static BOOL convertDjvuFileDeterministic(NSString* djvuPath, NSString* tmpPdfPat
     dispatch_queue_t encQ = dispatch_queue_create("transmission.djvu.jp2.encode", DISPATCH_QUEUE_CONCURRENT);
     dispatch_group_t encGroup = dispatch_group_create();
 
+    // Allow more concurrent JP2 encodes. Each encode uses 2 threads internally,
+    // so with 8 cores we can run ~4 concurrent encodes efficiently.
     NSInteger cpu = NSProcessInfo.processInfo.activeProcessorCount;
-    NSInteger maxConcurrent = MAX(1, MIN(cpu, 3));
+    NSInteger maxConcurrent = MAX(1, cpu / 2);
     dispatch_semaphore_t sem = dispatch_semaphore_create(maxConcurrent);
 
     bool ok = true;
@@ -650,6 +674,7 @@ static BOOL convertDjvuFileDeterministic(NSString* djvuPath, NSString* tmpPdfPat
             ddjvu_page_t* page = ddjvu_page_create_by_pageno(doc, pageNum);
             if (!page)
             {
+                NSLog(@"DjvuConverter ERROR: failed to create page %d in %@", pageNum, djvuPath);
                 ok = false;
                 break;
             }
@@ -663,6 +688,7 @@ static BOOL convertDjvuFileDeterministic(NSString* djvuPath, NSString* tmpPdfPat
 
             if (ddjvu_page_decoding_error(page))
             {
+                NSLog(@"DjvuConverter ERROR: page %d decoding failed in %@", pageNum, djvuPath);
                 ddjvu_page_release(page);
                 ok = false;
                 break;
@@ -674,6 +700,7 @@ static BOOL convertDjvuFileDeterministic(NSString* djvuPath, NSString* tmpPdfPat
             int pageDpi = ddjvu_page_get_resolution(page);
             if (pageWidth <= 0 || pageHeight <= 0 || pageDpi <= 0)
             {
+                NSLog(@"DjvuConverter ERROR: invalid page dimensions (w=%d h=%d dpi=%d) for page %d in %@", pageWidth, pageHeight, pageDpi, pageNum, djvuPath);
                 ddjvu_page_release(page);
                 ok = false;
                 break;
@@ -696,8 +723,10 @@ static BOOL convertDjvuFileDeterministic(NSString* djvuPath, NSString* tmpPdfPat
             bool wantBg = (pageType == DDJVU_PAGETYPE_PHOTO || pageType == DDJVU_PAGETYPE_COMPOUND);
             bool wantMask = (pageType == DDJVU_PAGETYPE_BITONAL || pageType == DDJVU_PAGETYPE_COMPOUND);
 
-            // ddjvu can report UNKNOWN even after decoding is done; don't emit blank pages.
-            if (pageType == DDJVU_PAGETYPE_UNKNOWN)
+            // ddjvu can report UNKNOWN even after decoding is done.
+            // For UNKNOWN pages, we'll try multiple render modes to find the content.
+            bool isUnknownType = (pageType == DDJVU_PAGETYPE_UNKNOWN);
+            if (isUnknownType)
             {
                 wantBg = true;
                 wantMask = false;
@@ -719,15 +748,22 @@ static BOOL convertDjvuFileDeterministic(NSString* djvuPath, NSString* tmpPdfPat
                 compoundMaskPbm = renderDjvuMaskPbmData(page, grey8, msb, compoundMaskW, compoundMaskH, preferBitonal, &coverage);
                 if (compoundMaskPbm == nil || compoundMaskPbm.length == 0)
                 {
+                    NSLog(
+                        @"DjvuConverter ERROR: failed to render compound mask for page %d (type=%d w=%d h=%d) in %@",
+                        pageNum,
+                        (int)pageType,
+                        compoundMaskW,
+                        compoundMaskH,
+                        djvuPath);
                     ddjvu_page_release(page);
                     ok = false;
                     break;
                 }
 
-                double constexpr MinTextCoverage = 0.001; // 0.1%
-                double constexpr MaxTextCoverage = 0.25; // 25%
-                bool const looksLikeTextMask = (coverage >= MinTextCoverage) && (coverage <= MaxTextCoverage);
-                if (!looksLikeTextMask)
+                // Only skip mask if it's completely empty (< 0.01% coverage).
+                // Preserve the two-layer structure for better fidelity to the original DjVu.
+                double constexpr MinTextCoverage = 0.0001; // 0.01%
+                if (coverage < MinTextCoverage)
                 {
                     wantMask = false;
                     pageType = DDJVU_PAGETYPE_PHOTO;
@@ -801,34 +837,79 @@ static BOOL convertDjvuFileDeterministic(NSString* djvuPath, NSString* tmpPdfPat
                 {
                     rgb = std::make_shared<std::vector<uint8_t>>(rowBytes * (size_t)bgH, (uint8_t)0xFF);
                     ddjvu_rect_t rect = { 0, 0, (unsigned int)bgW, (unsigned int)bgH };
-                    int rendered = ddjvu_page_render(
-                        page,
-                        pageType == DDJVU_PAGETYPE_COMPOUND ? DDJVU_RENDER_BACKGROUND : DDJVU_RENDER_COLOR,
-                        &rect,
-                        &rect,
-                        rgb24,
-                        (unsigned long)rowBytes,
-                        (char*)rgb->data());
 
-                    if (!rendered && pageType == DDJVU_PAGETYPE_COMPOUND)
+                    // Try different render modes until one succeeds.
+                    // For UNKNOWN pages, try all modes; for known types, use appropriate mode.
+                    std::vector<ddjvu_render_mode_t> modesToTry;
+                    if (pageType == DDJVU_PAGETYPE_COMPOUND)
                     {
-                        // Some files don't expose background separately; fall back to full render.
-                        rendered = ddjvu_page_render(
-                            page,
-                            DDJVU_RENDER_COLOR,
-                            &rect,
-                            &rect,
-                            rgb24,
-                            (unsigned long)rowBytes,
-                            (char*)rgb->data());
+                        modesToTry = { DDJVU_RENDER_BACKGROUND, DDJVU_RENDER_COLOR };
+                    }
+                    else if (isUnknownType)
+                    {
+                        // For UNKNOWN type, try ALL possible modes
+                        modesToTry = { DDJVU_RENDER_COLOR,    DDJVU_RENDER_BLACK,      DDJVU_RENDER_COLORONLY,
+                                       DDJVU_RENDER_MASKONLY, DDJVU_RENDER_FOREGROUND, DDJVU_RENDER_BACKGROUND };
+                    }
+                    else
+                    {
+                        modesToTry = { DDJVU_RENDER_COLOR };
                     }
 
-                    if (!rendered)
+                    int rendered = 0;
+                    for (auto tryMode : modesToTry)
                     {
-                        ddjvu_page_release(page);
-                        ok = false;
-                        break;
+                        // Clear buffer to white before each attempt
+                        std::fill(rgb->begin(), rgb->end(), (uint8_t)0xFF);
+                        rendered = ddjvu_page_render(page, tryMode, &rect, &rect, rgb24, (unsigned long)rowBytes, (char*)rgb->data());
+                        if (rendered)
+                            break;
                     }
+
+                    // If scaled render failed, try at native resolution and scale down ourselves.
+                    if (!rendered && (bgW != pageWidth || bgH != pageHeight))
+                    {
+                        size_t nativeRowBytes = (size_t)pageWidth * 3;
+                        auto nativeRgb = std::make_shared<std::vector<uint8_t>>(nativeRowBytes * (size_t)pageHeight, (uint8_t)0xFF);
+                        ddjvu_rect_t nativeRect = { 0, 0, (unsigned int)pageWidth, (unsigned int)pageHeight };
+
+                        for (auto tryMode : modesToTry)
+                        {
+                            rendered = ddjvu_page_render(
+                                page,
+                                tryMode,
+                                &nativeRect,
+                                &nativeRect,
+                                rgb24,
+                                (unsigned long)nativeRowBytes,
+                                (char*)nativeRgb->data());
+                            if (rendered)
+                                break;
+                        }
+
+                        if (rendered)
+                        {
+                            // Scale down using nearest-neighbor sampling.
+                            double scaleX = (double)pageWidth / bgW;
+                            double scaleY = (double)pageHeight / bgH;
+                            for (int y = 0; y < bgH; ++y)
+                            {
+                                for (int x = 0; x < bgW; ++x)
+                                {
+                                    int srcX = MIN((int)(x * scaleX), pageWidth - 1);
+                                    int srcY = MIN((int)(y * scaleY), pageHeight - 1);
+                                    auto const* src = nativeRgb->data() + (size_t)srcY * nativeRowBytes + (size_t)srcX * 3;
+                                    auto* dst = rgb->data() + (size_t)y * rowBytes + (size_t)x * 3;
+                                    dst[0] = src[0];
+                                    dst[1] = src[1];
+                                    dst[2] = src[2];
+                                }
+                            }
+                        }
+                    }
+
+                    // If still not rendered, page has no image content - use blank (white) page.
+                    // This can happen with annotation-only pages or intentionally blank pages.
                 }
 
                 bool const gray = isGrayscaleRgb24(rgb->data(), bgW, bgH, rowBytes);
@@ -875,9 +956,12 @@ static BOOL convertDjvuFileDeterministic(NSString* djvuPath, NSString* tmpPdfPat
                 if (jb == nullptr)
                 {
                     // Create JBIG2 context on-demand; backfill earlier pages with blanks.
+                    // Parameters: thresh=0.85 (symbol matching), weight=0.5, no resolution,
+                    // PDF mode (no full headers), refinement disabled (upstream refinement is unreliable).
                     jb = jbig2_init(0.85f, 0.5f, 0, 0, false, -1);
                     if (jb == nullptr)
                     {
+                        NSLog(@"DjvuConverter ERROR: jbig2_init failed for %@", djvuPath);
                         ddjvu_page_release(page);
                         ok = false;
                         break;
@@ -887,6 +971,7 @@ static BOOL convertDjvuFileDeterministic(NSString* djvuPath, NSString* tmpPdfPat
                     {
                         if (!addBlankJbig2Page())
                         {
+                            NSLog(@"DjvuConverter ERROR: failed to add blank JBIG2 page %d for %@", i, djvuPath);
                             ddjvu_page_release(page);
                             ok = false;
                             break;
@@ -915,6 +1000,7 @@ static BOOL convertDjvuFileDeterministic(NSString* djvuPath, NSString* tmpPdfPat
 
                 if (pbm == nil || pbm.length == 0)
                 {
+                    NSLog(@"DjvuConverter ERROR: failed to render mask PBM for page %d (type=%d w=%d h=%d) in %@", pageNum, (int)pageType, maskW, maskH, djvuPath);
                     ddjvu_page_release(page);
                     ok = false;
                     break;
@@ -923,6 +1009,7 @@ static BOOL convertDjvuFileDeterministic(NSString* djvuPath, NSString* tmpPdfPat
                 PIX* pix = pixReadMemPnm((l_uint8 const*)pbm.bytes, pbm.length);
                 if (pix == nullptr)
                 {
+                    NSLog(@"DjvuConverter ERROR: failed to parse mask PBM for page %d in %@", pageNum, djvuPath);
                     ddjvu_page_release(page);
                     ok = false;
                     break;
@@ -940,6 +1027,7 @@ static BOOL convertDjvuFileDeterministic(NSString* djvuPath, NSString* tmpPdfPat
                 // Keep page index alignment for jbig2enc outputs.
                 if (!addBlankJbig2Page())
                 {
+                    NSLog(@"DjvuConverter ERROR: failed to add blank JBIG2 page %d (alignment) for %@", pageNum, djvuPath);
                     ddjvu_page_release(page);
                     ok = false;
                     break;
@@ -958,8 +1046,11 @@ static BOOL convertDjvuFileDeterministic(NSString* djvuPath, NSString* tmpPdfPat
     {
         for (int i = 0; i < pageCount && ok; ++i)
         {
-            if (pagesPtr[i].hasBackground)
-                ok = !pagesPtr[i].background.jp2.empty();
+            if (pagesPtr[i].hasBackground && pagesPtr[i].background.jp2.empty())
+            {
+                NSLog(@"DjvuConverter ERROR: JP2 encoding failed for page %d in %@", i, djvuPath);
+                ok = false;
+            }
         }
     }
 
@@ -971,6 +1062,7 @@ static BOOL convertDjvuFileDeterministic(NSString* djvuPath, NSString* tmpPdfPat
         uint8_t* globalsBuf = jbig2_pages_complete(jb, &globalsLen);
         if (globalsBuf == nullptr || globalsLen <= 0)
         {
+            NSLog(@"DjvuConverter ERROR: jbig2_pages_complete failed for %@", djvuPath);
             ok = false;
         }
         else
@@ -988,6 +1080,7 @@ static BOOL convertDjvuFileDeterministic(NSString* djvuPath, NSString* tmpPdfPat
                 uint8_t* pageBuf = jbig2_produce_page(jb, i, -1, -1, &len);
                 if (pageBuf == nullptr || len <= 0)
                 {
+                    NSLog(@"DjvuConverter ERROR: jbig2_produce_page failed for page %d in %@", i, djvuPath);
                     ok = false;
                     break;
                 }
@@ -1004,6 +1097,8 @@ static BOOL convertDjvuFileDeterministic(NSString* djvuPath, NSString* tmpPdfPat
     {
         bool const haveJbig2 = !globals.empty() && !jbig2Pages.empty();
         ok = writePdfDeterministic(tmpPdfPath, pages, haveJbig2 ? &globals : nullptr, haveJbig2 ? &jbig2Pages : nullptr);
+        if (!ok)
+            NSLog(@"DjvuConverter ERROR: writePdfDeterministic failed for %@", djvuPath);
     }
 
     if (jb != nullptr)
@@ -1017,442 +1112,6 @@ static BOOL convertDjvuFileDeterministic(NSString* djvuPath, NSString* tmpPdfPat
 
     return ok ? YES : NO;
 }
-
-#if 0 // Removed: MuPDF/OpenJPEG backend (use Grok+JBIG2 deterministic writer)
-
-enum class DjvuPdfBgFormat
-{
-    Jpx,
-    Jpeg
-};
-
-struct DjvuPdfBackground
-{
-    DjvuPdfBgFormat format = DjvuPdfBgFormat::Jpx;
-    bool gray = false;
-    int w = 0;
-    int h = 0;
-    std::vector<uint8_t> bytes;
-};
-
-struct DjvuPdfPage
-{
-    int pageWidth = 0;
-    int pageHeight = 0;
-    int pageDpi = 0;
-    ddjvu_page_type_t pageType = DDJVU_PAGETYPE_BITONAL;
-
-    int renderWidth = 0;
-    int renderHeight = 0;
-    int targetDpi = 0;
-
-    CGFloat pdfWidth = 0;
-    CGFloat pdfHeight = 0;
-
-    bool hasBackground = false;
-    DjvuPdfBackground background;
-
-    bool hasMask = false;
-};
-
-static NSString* findJbig2encExecutable()
-{
-    // In GUI apps, PATH is not reliable. Probe common Homebrew locations first.
-    static NSArray<NSString*>* candidates = nil;
-    static dispatch_once_t onceToken;
-    dispatch_once(&onceToken, ^{
-        candidates = @[ @"/opt/homebrew/bin/jbig2enc", @"/usr/local/bin/jbig2enc", @"/usr/bin/jbig2enc" ];
-    });
-
-    for (NSString* path in candidates)
-    {
-        if ([NSFileManager.defaultManager isExecutableFileAtPath:path])
-            return path;
-    }
-
-    return nil;
-}
-
-static NSData* pbmP4DataFromBits(int w, int h, size_t rowBytes, unsigned char const* bits)
-{
-    NSMutableData* data = [NSMutableData data];
-    NSString* header = [NSString stringWithFormat:@"P4\n%d %d\n", w, h];
-    [data appendData:[header dataUsingEncoding:NSASCIIStringEncoding]];
-    [data appendBytes:bits length:rowBytes * (size_t)h];
-    return data;
-}
-
-static bool renderDjvuMaskPbm(ddjvu_page_t* page, ddjvu_format_t* grey8, ddjvu_format_t* msb, int renderWidth, int renderHeight, bool preferBitonal, NSString* outPath)
-{
-    ddjvu_rect_t rect = { 0, 0, (unsigned int)renderWidth, (unsigned int)renderHeight };
-
-    // Prefer direct 1-bit output when possible; otherwise render GREY8 and threshold.
-    if (preferBitonal)
-    {
-        size_t rowBytes = ((size_t)renderWidth + 7U) / 8U;
-        size_t size = rowBytes * (size_t)renderHeight;
-        auto* bits = (unsigned char*)calloc(size, 1);
-        if (bits == nullptr)
-            return false;
-
-        int const ok = ddjvu_page_render(page, DDJVU_RENDER_MASKONLY, &rect, &rect, msb, (unsigned long)rowBytes, (char*)bits);
-        NSData* pbm = ok ? pbmP4DataFromBits(renderWidth, renderHeight, rowBytes, bits) : nil;
-        free(bits);
-        return pbm != nil && [pbm writeToFile:outPath atomically:YES];
-    }
-
-    size_t grayRowBytes = (size_t)renderWidth;
-    size_t graySize = grayRowBytes * (size_t)renderHeight;
-    auto* gray = (unsigned char*)malloc(graySize);
-    if (gray == nullptr)
-        return false;
-    memset(gray, 0xFF, graySize);
-
-    int const ok = ddjvu_page_render(page, DDJVU_RENDER_MASKONLY, &rect, &rect, grey8, (unsigned long)grayRowBytes, (char*)gray);
-    if (!ok)
-    {
-        free(gray);
-        return false;
-    }
-
-    size_t bitRowBytes = ((size_t)renderWidth + 7U) / 8U;
-    size_t bitSize = bitRowBytes * (size_t)renderHeight;
-    auto* bits = (unsigned char*)calloc(bitSize, 1);
-    if (bits == nullptr)
-    {
-        free(gray);
-        return false;
-    }
-
-    // Mask-only render in GREY8 uses white background with black text. Threshold to 1-bit.
-    unsigned char constexpr Threshold = 127;
-    for (int y = 0; y < renderHeight; ++y)
-    {
-        auto const* src = gray + (size_t)y * grayRowBytes;
-        auto* dst = bits + (size_t)y * bitRowBytes;
-        for (int x = 0; x < renderWidth; ++x)
-        {
-            if (src[x] < Threshold)
-                dst[x / 8] |= (unsigned char)(0x80U >> (x % 8));
-        }
-    }
-
-    NSData* pbm = pbmP4DataFromBits(renderWidth, renderHeight, bitRowBytes, bits);
-    free(bits);
-    free(gray);
-
-    return pbm != nil && [pbm writeToFile:outPath atomically:YES];
-}
-
-struct OpjMemSink
-{
-    std::vector<uint8_t> bytes;
-};
-
-static OPJ_SIZE_T opjWrite(void* p_buffer, OPJ_SIZE_T p_nb_bytes, void* p_user_data)
-{
-    auto* sink = static_cast<OpjMemSink*>(p_user_data);
-    auto* b = static_cast<uint8_t*>(p_buffer);
-    sink->bytes.insert(sink->bytes.end(), b, b + p_nb_bytes);
-    return p_nb_bytes;
-}
-
-static OPJ_OFF_T opjSkip(OPJ_OFF_T, void*)
-{
-    return (OPJ_OFF_T)-1;
-}
-
-static OPJ_BOOL opjSeek(OPJ_OFF_T, void*)
-{
-    return OPJ_FALSE;
-}
-
-static bool encodeJpxLossless(OpjMemSink* sink, unsigned char const* pixels, int w, int h, size_t stride, bool gray)
-{
-    opj_cparameters_t params;
-    opj_set_default_encoder_parameters(&params);
-    params.tcp_numlayers = 1;
-    params.cp_disto_alloc = 1;
-    params.irreversible = 0; // lossless 5/3
-    params.tcp_rates[0] = 0.0f;
-
-    int const comps = gray ? 1 : 3;
-    std::vector<opj_image_cmptparm_t> cmpt((size_t)comps);
-    for (int c = 0; c < comps; ++c)
-    {
-        cmpt[c].dx = 1;
-        cmpt[c].dy = 1;
-        cmpt[c].w = (OPJ_UINT32)w;
-        cmpt[c].h = (OPJ_UINT32)h;
-        cmpt[c].prec = 8;
-        cmpt[c].bpp = 8;
-        cmpt[c].sgnd = 0;
-    }
-
-    OPJ_COLOR_SPACE cs = gray ? OPJ_CLRSPC_GRAY : OPJ_CLRSPC_SRGB;
-    opj_image_t* image = opj_image_create(comps, cmpt.data(), cs);
-    if (image == nullptr)
-        return false;
-    image->x1 = (OPJ_UINT32)w;
-    image->y1 = (OPJ_UINT32)h;
-
-    // Convert packed pixels to planar int32 as expected by OpenJPEG.
-    if (gray)
-    {
-        for (int y = 0; y < h; ++y)
-        {
-            auto const* row = pixels + (size_t)y * stride;
-            for (int x = 0; x < w; ++x)
-                image->comps[0].data[y * w + x] = row[x];
-        }
-    }
-    else
-    {
-        for (int y = 0; y < h; ++y)
-        {
-            auto const* row = pixels + (size_t)y * stride;
-            for (int x = 0; x < w; ++x)
-            {
-                int const idx = y * w + x;
-                image->comps[0].data[idx] = row[x * 3 + 0];
-                image->comps[1].data[idx] = row[x * 3 + 1];
-                image->comps[2].data[idx] = row[x * 3 + 2];
-            }
-        }
-    }
-
-    opj_stream_t* stream = opj_stream_create(64 * 1024, OPJ_FALSE);
-    opj_stream_set_user_data(stream, sink, nullptr);
-    opj_stream_set_write_function(stream, opjWrite);
-    opj_stream_set_skip_function(stream, opjSkip);
-    opj_stream_set_seek_function(stream, opjSeek);
-
-    opj_codec_t* codec = opj_create_compress(OPJ_CODEC_JP2);
-    bool ok = false;
-    if (codec != nullptr)
-    {
-        if (opj_setup_encoder(codec, &params, image) && opj_start_compress(codec, image, stream) && opj_encode(codec, stream) &&
-            opj_end_compress(codec, stream))
-        {
-            ok = true;
-        }
-        opj_destroy_codec(codec);
-    }
-
-    opj_stream_destroy(stream);
-    opj_image_destroy(image);
-    return ok;
-}
-
-static bool encodeJpegTurbo(std::vector<uint8_t>* out, unsigned char const* pixels, int w, int h, size_t stride, bool gray, int quality)
-{
-#if HAVE_TURBOJPEG
-    tjhandle tj = tjInitCompress();
-    if (!tj)
-        return false;
-
-    unsigned char* jpegBuf = nullptr;
-    unsigned long jpegSize = 0;
-    int const pf = gray ? TJPF_GRAY : TJPF_RGB;
-    int const subsamp = gray ? TJSAMP_GRAY : TJSAMP_420;
-    int const rc = tjCompress2(tj, const_cast<unsigned char*>(pixels), w, (int)stride, h, pf, &jpegBuf, &jpegSize, subsamp, quality, TJFLAG_FASTDCT);
-    tjDestroy(tj);
-
-    if (rc == 0 && jpegBuf && jpegSize)
-        out->assign(jpegBuf, jpegBuf + jpegSize);
-
-    if (jpegBuf)
-        tjFree(jpegBuf);
-
-    return rc == 0 && !out->empty();
-#else
-    (void)out;
-    (void)pixels;
-    (void)w;
-    (void)h;
-    (void)stride;
-    (void)gray;
-    (void)quality;
-    return false;
-#endif
-}
-
-static bool runJbig2enc(
-    NSString* jbig2encPath,
-    NSString* workingDir,
-    NSArray<NSString*>* pbmPaths,
-    std::vector<uint8_t>* globals,
-    std::vector<std::vector<uint8_t>>* pages)
-{
-    if (pbmPaths.count == 0)
-        return false;
-
-    NSTask* task = [[NSTask alloc] init];
-    task.executableURL = [NSURL fileURLWithPath:jbig2encPath];
-    task.currentDirectoryURL = [NSURL fileURLWithPath:workingDir];
-
-    NSMutableArray<NSString*>* args = [NSMutableArray arrayWithCapacity:pbmPaths.count + 2];
-    [args addObject:@"-p"];
-    [args addObject:@"-s"];
-    [args addObjectsFromArray:pbmPaths];
-    task.arguments = args;
-
-    @try
-    {
-        [task launch];
-        [task waitUntilExit];
-    }
-    @catch (__unused NSException* e)
-    {
-        return false;
-    }
-
-    if (task.terminationStatus != 0)
-        return false;
-
-    NSData* globalsData = [NSData dataWithContentsOfFile:[workingDir stringByAppendingPathComponent:@"symboltable"]];
-    if (globalsData.length == 0)
-        return false;
-    globals->assign((uint8_t const*)globalsData.bytes, (uint8_t const*)globalsData.bytes + globalsData.length);
-
-    pages->clear();
-    pages->reserve(pbmPaths.count);
-    for (NSInteger i = 0; i < (NSInteger)pbmPaths.count; ++i)
-    {
-        NSString* pageFile = [workingDir stringByAppendingPathComponent:[NSString stringWithFormat:@"page-%ld", (long)i]];
-        NSData* pageData = [NSData dataWithContentsOfFile:pageFile];
-        if (pageData.length == 0)
-            return false;
-        pages->emplace_back((uint8_t const*)pageData.bytes, (uint8_t const*)pageData.bytes + pageData.length);
-    }
-
-    return true;
-}
-
-static bool addMuPdfPage(fz_context* ctx, pdf_document* pdf, pdf_obj* jbig2GlobalsObj, DjvuPdfPage const& page, DjvuPdfBackground const* bg, std::vector<uint8_t> const* maskBytes)
-{
-    fz_rect media = { 0, 0, (float)page.pdfWidth, (float)page.pdfHeight };
-
-    pdf_obj* resources = pdf_new_dict(ctx, pdf, 8);
-    pdf_obj* xobjects = pdf_new_dict(ctx, pdf, 8);
-    pdf_dict_puts_drop(ctx, resources, "XObject", xobjects);
-
-    if (bg != nullptr && !bg->bytes.empty())
-    {
-        pdf_obj* img = pdf_new_dict(ctx, pdf, 16);
-        pdf_dict_put(ctx, img, PDF_NAME(Type), PDF_NAME(XObject));
-        pdf_dict_put(ctx, img, PDF_NAME(Subtype), PDF_NAME(Image));
-        pdf_dict_put_int(ctx, img, PDF_NAME(Width), bg->w);
-        pdf_dict_put_int(ctx, img, PDF_NAME(Height), bg->h);
-        pdf_dict_put_int(ctx, img, PDF_NAME(BitsPerComponent), 8);
-        pdf_dict_put(ctx, img, PDF_NAME(ColorSpace), bg->gray ? PDF_NAME(DeviceGray) : PDF_NAME(DeviceRGB));
-        pdf_dict_put(ctx, img, PDF_NAME(Filter), bg->format == DjvuPdfBgFormat::Jpx ? PDF_NAME(JPXDecode) : PDF_NAME(DCTDecode));
-
-        fz_buffer* stream = fz_new_buffer_from_copied_data(ctx, bg->bytes.data(), bg->bytes.size());
-        pdf_obj* ref = pdf_add_stream(ctx, pdf, stream, img, 1);
-        fz_drop_buffer(ctx, stream);
-        pdf_drop_obj(ctx, img);
-        pdf_dict_puts_drop(ctx, xobjects, "ImBg", ref);
-    }
-
-    if (maskBytes != nullptr && !maskBytes->empty())
-    {
-        pdf_obj* mask = pdf_new_dict(ctx, pdf, 16);
-        pdf_dict_put(ctx, mask, PDF_NAME(Type), PDF_NAME(XObject));
-        pdf_dict_put(ctx, mask, PDF_NAME(Subtype), PDF_NAME(Image));
-        pdf_dict_put_int(ctx, mask, PDF_NAME(Width), page.renderWidth);
-        pdf_dict_put_int(ctx, mask, PDF_NAME(Height), page.renderHeight);
-        pdf_dict_put_int(ctx, mask, PDF_NAME(BitsPerComponent), 1);
-        pdf_dict_put_bool(ctx, mask, PDF_NAME(ImageMask), 1);
-        pdf_dict_put(ctx, mask, PDF_NAME(Filter), PDF_NAME(JBIG2Decode));
-
-        pdf_obj* dp = pdf_new_dict(ctx, pdf, 2);
-        pdf_dict_put(ctx, dp, PDF_NAME(JBIG2Globals), jbig2GlobalsObj);
-        pdf_dict_put_drop(ctx, mask, PDF_NAME(DecodeParms), dp);
-
-        fz_buffer* stream = fz_new_buffer_from_copied_data(ctx, maskBytes->data(), maskBytes->size());
-        pdf_obj* ref = pdf_add_stream(ctx, pdf, stream, mask, 1);
-        fz_drop_buffer(ctx, stream);
-        pdf_drop_obj(ctx, mask);
-        pdf_dict_puts_drop(ctx, xobjects, "ImM", ref);
-    }
-
-    // Content stream: draw background (if any), then stencil mask in black (if any).
-    fz_buffer* contents = fz_new_buffer(ctx, 256);
-    fz_append_printf(ctx, contents, "q\n%g 0 0 %g 0 0 cm\n", page.pdfWidth, page.pdfHeight);
-    if (bg != nullptr && !bg->bytes.empty())
-        fz_append_printf(ctx, contents, "/ImBg Do\n");
-    if (maskBytes != nullptr && !maskBytes->empty())
-        fz_append_printf(ctx, contents, "0 g\n/ImM Do\n");
-    fz_append_printf(ctx, contents, "Q\n");
-
-    pdf_obj* pageObj = pdf_add_page(ctx, pdf, media, 0, resources, contents);
-    pdf_insert_page(ctx, pdf, -1, pageObj);
-    pdf_drop_obj(ctx, pageObj);
-    pdf_drop_obj(ctx, resources);
-    fz_drop_buffer(ctx, contents);
-    return true;
-}
-
-static bool writePdfMuPdf(
-    NSString* tmpPdfPath,
-    std::vector<DjvuPdfPage> const& pages,
-    std::vector<uint8_t> const& globals,
-    std::vector<std::vector<uint8_t>> const& jbig2Pages)
-{
-    bool ok = false;
-    fz_context* ctx = nullptr;
-    pdf_document* pdf = nullptr;
-
-    ctx = fz_new_context(nullptr, nullptr, FZ_STORE_UNLIMITED);
-    if (ctx == nullptr)
-        return false;
-
-    fz_try(ctx)
-    {
-        pdf = pdf_create_document(ctx);
-
-        // JBIG2Globals stream (raw segment data). Kept as an indirect object.
-        fz_buffer* globalsBuf = fz_new_buffer_from_copied_data(ctx, globals.data(), globals.size());
-        pdf_obj* globalsDict = pdf_new_dict(ctx, pdf, 0);
-        pdf_obj* globalsObj = pdf_add_stream(ctx, pdf, globalsBuf, globalsDict, 0);
-        fz_drop_buffer(ctx, globalsBuf);
-        pdf_drop_obj(ctx, globalsDict);
-
-        for (size_t i = 0; i < pages.size(); ++i)
-        {
-            DjvuPdfPage const& p = pages[i];
-            DjvuPdfBackground const* bg = p.hasBackground ? &p.background : nullptr;
-            std::vector<uint8_t> const* mask = (p.hasMask && i < jbig2Pages.size()) ? &jbig2Pages[i] : nullptr;
-            (void)addMuPdfPage(ctx, pdf, globalsObj, p, bg, mask);
-        }
-
-        fz_output* out = fz_new_output_with_path(ctx, tmpPdfPath.UTF8String, 0);
-        pdf_write_options opts = pdf_default_write_options;
-        opts.do_compress = 1;
-        opts.do_compress_images = 0;
-        pdf_write_document(ctx, pdf, out, &opts);
-        fz_close_output(ctx, out);
-        fz_drop_output(ctx, out);
-
-        pdf_drop_obj(ctx, globalsObj);
-        ok = true;
-    }
-    fz_always(ctx)
-    {
-        if (pdf != nullptr)
-            pdf_drop_document(ctx, pdf);
-        fz_drop_context(ctx);
-    }
-    fz_catch(ctx)
-    {
-        ok = false;
-    }
-
-    return ok;
-}
-
-#endif // 0
 
 @implementation DjvuConverter
 
@@ -1714,8 +1373,8 @@ static void clearPageTrackingForPath(NSString* djvuPath)
                 NSString* pdfPath = file[@"pdf"];
                 BOOL success = YES;
 
-                // Mark active when the worker actually begins
-                dispatch_sync(dispatch_get_main_queue(), ^{
+                // Mark active when the worker actually begins (use async to avoid deadlock)
+                dispatch_async(dispatch_get_main_queue(), ^{
                     [sActiveConversions addObject:djvuPath];
                 });
 
@@ -1838,344 +1497,6 @@ static void clearPageTrackingForPath(NSString* djvuPath)
 
     return nil;
 }
-
-#if HAVE_MUPDF && HAVE_OPENJPEG
-
-static bool isGrayscaleRgb24(unsigned char const* rgb, int width, int height, size_t rowBytes)
-{
-    int stepX = MAX(1, width / 512);
-    int stepY = MAX(1, height / 512);
-
-    for (int y = 0; y < height; y += stepY)
-    {
-        auto const* row = rgb + (size_t)y * rowBytes;
-        for (int x = 0; x < width; x += stepX)
-        {
-            unsigned char r = row[x * 3 + 0];
-            unsigned char g = row[x * 3 + 1];
-            unsigned char b = row[x * 3 + 2];
-            if (abs((int)r - (int)g) > 2 || abs((int)r - (int)b) > 2)
-                return false;
-        }
-    }
-
-    return true;
-}
-
-static BOOL convertDjvuFileWithMuPdf(NSString* djvuPath, NSString* tmpPdfPath)
-{
-    NSString* jbig2enc = findJbig2encExecutable();
-    if (jbig2enc == nil)
-        return NO;
-
-    NSString* workDir = [NSTemporaryDirectory() stringByAppendingPathComponent:NSUUID.UUID.UUIDString];
-    if (![NSFileManager.defaultManager createDirectoryAtPath:workDir withIntermediateDirectories:YES attributes:nil error:nil])
-        return NO;
-
-    ddjvu_context_t* ctx = ddjvu_context_create("Transmission");
-    if (!ctx)
-    {
-        [NSFileManager.defaultManager removeItemAtPath:workDir error:nil];
-        return NO;
-    }
-
-    ddjvu_document_t* doc = ddjvu_document_create_by_filename_utf8(ctx, djvuPath.UTF8String, TRUE);
-    if (!doc)
-    {
-        ddjvu_context_release(ctx);
-        [NSFileManager.defaultManager removeItemAtPath:workDir error:nil];
-        return NO;
-    }
-
-    while (!ddjvu_document_decoding_done(doc))
-    {
-        ddjvu_message_t* msg = ddjvu_message_wait(ctx);
-        if (msg)
-            ddjvu_message_pop(ctx);
-    }
-
-    if (ddjvu_document_decoding_error(doc))
-    {
-        ddjvu_document_release(doc);
-        ddjvu_context_release(ctx);
-        [NSFileManager.defaultManager removeItemAtPath:workDir error:nil];
-        return NO;
-    }
-
-    int pageCount = ddjvu_document_get_pagenum(doc);
-    if (pageCount <= 0)
-    {
-        ddjvu_document_release(doc);
-        ddjvu_context_release(ctx);
-        [NSFileManager.defaultManager removeItemAtPath:workDir error:nil];
-        return NO;
-    }
-
-    ddjvu_format_t* rgb24 = ddjvu_format_create(DDJVU_FORMAT_RGB24, 0, nullptr);
-    ddjvu_format_t* grey8 = ddjvu_format_create(DDJVU_FORMAT_GREY8, 0, nullptr);
-    ddjvu_format_t* msb = ddjvu_format_create(DDJVU_FORMAT_MSBTOLSB, 0, nullptr);
-    if (!rgb24 || !grey8 || !msb)
-    {
-        if (rgb24)
-            ddjvu_format_release(rgb24);
-        if (grey8)
-            ddjvu_format_release(grey8);
-        if (msb)
-            ddjvu_format_release(msb);
-        ddjvu_document_release(doc);
-        ddjvu_context_release(ctx);
-        [NSFileManager.defaultManager removeItemAtPath:workDir error:nil];
-        return NO;
-    }
-
-    ddjvu_format_set_row_order(rgb24, TRUE);
-    ddjvu_format_set_y_direction(rgb24, TRUE);
-    ddjvu_format_set_row_order(grey8, TRUE);
-    ddjvu_format_set_y_direction(grey8, TRUE);
-    ddjvu_format_set_row_order(msb, TRUE);
-    ddjvu_format_set_y_direction(msb, TRUE);
-
-    std::vector<DjvuPdfPage> pages((size_t)pageCount);
-    DjvuPdfPage* pagesPtr = pages.data();
-
-    NSMutableArray<NSString*>* pbmPaths = [NSMutableArray arrayWithCapacity:(NSUInteger)pageCount];
-
-    dispatch_queue_t encQ = dispatch_queue_create("transmission.djvu.jp2.encode", DISPATCH_QUEUE_CONCURRENT);
-    dispatch_group_t encGroup = dispatch_group_create();
-
-    NSInteger cpu = NSProcessInfo.processInfo.activeProcessorCount;
-    NSInteger maxConcurrent = MAX(1, MIN(cpu, 4));
-    dispatch_semaphore_t sem = dispatch_semaphore_create(maxConcurrent);
-
-    bool ok = true;
-
-    for (int pageNum = 0; pageNum < pageCount && ok; ++pageNum)
-    {
-        @autoreleasepool
-        {
-            ddjvu_page_t* page = ddjvu_page_create_by_pageno(doc, pageNum);
-            if (!page)
-            {
-                ok = false;
-                break;
-            }
-
-            while (!ddjvu_page_decoding_done(page))
-            {
-                ddjvu_message_t* msg = ddjvu_message_wait(ctx);
-                if (msg)
-                    ddjvu_message_pop(ctx);
-            }
-
-            if (ddjvu_page_decoding_error(page))
-            {
-                ddjvu_page_release(page);
-                ok = false;
-                break;
-            }
-
-            ddjvu_page_type_t pageType = ddjvu_page_get_type(page);
-            int pageWidth = ddjvu_page_get_width(page);
-            int pageHeight = ddjvu_page_get_height(page);
-            int pageDpi = ddjvu_page_get_resolution(page);
-            if (pageWidth <= 0 || pageHeight <= 0 || pageDpi <= 0)
-            {
-                ddjvu_page_release(page);
-                ok = false;
-                break;
-            }
-
-            DjvuPdfPage& p = pagesPtr[pageNum];
-            p.pageWidth = pageWidth;
-            p.pageHeight = pageHeight;
-            p.pageDpi = pageDpi;
-            p.pageType = pageType;
-            p.pdfWidth = (CGFloat)pageWidth * 72.0 / (CGFloat)pageDpi;
-            p.pdfHeight = (CGFloat)pageHeight * 72.0 / (CGFloat)pageDpi;
-
-            int constexpr BgMaxDpi = 200;
-            int constexpr MaskMaxDpi = 300;
-
-            int bgDpi = MIN(BgMaxDpi, pageDpi);
-            int maskDpi = MIN(MaskMaxDpi, pageDpi);
-
-            // Background (JPXDecode) for photo/compound pages
-            if (pageType == DDJVU_PAGETYPE_PHOTO || pageType == DDJVU_PAGETYPE_COMPOUND)
-            {
-                int bgW = 0;
-                int bgH = 0;
-                computeRenderDimensions(pageWidth, pageHeight, pageDpi, bgDpi, &bgW, &bgH);
-
-                size_t rowBytes = (size_t)bgW * 3;
-                std::shared_ptr<std::vector<uint8_t>> rgb = std::make_shared<std::vector<uint8_t>>(rowBytes * (size_t)bgH, (uint8_t)0xFF);
-
-                ddjvu_rect_t rect = { 0, 0, (unsigned int)bgW, (unsigned int)bgH };
-                int rendered = ddjvu_page_render(
-                    page,
-                    pageType == DDJVU_PAGETYPE_COMPOUND ? DDJVU_RENDER_BACKGROUND : DDJVU_RENDER_COLOR,
-                    &rect,
-                    &rect,
-                    rgb24,
-                    (unsigned long)rowBytes,
-                    (char*)rgb->data());
-
-                if (!rendered && pageType == DDJVU_PAGETYPE_COMPOUND)
-                {
-                    // Some files don't expose background separately; fall back to full render.
-                    rendered = ddjvu_page_render(
-                        page,
-                        DDJVU_RENDER_COLOR,
-                        &rect,
-                        &rect,
-                        rgb24,
-                        (unsigned long)rowBytes,
-                        (char*)rgb->data());
-                }
-
-                if (!rendered)
-                {
-                    ddjvu_page_release(page);
-                    ok = false;
-                    break;
-                }
-
-                bool const gray = isGrayscaleRgb24(rgb->data(), bgW, bgH, rowBytes);
-                p.hasBackground = true;
-                p.background.w = bgW;
-                p.background.h = bgH;
-                p.background.gray = gray;
-                p.background.format = DjvuPdfBgFormat::Jpx;
-
-                dispatch_group_async(encGroup, encQ, ^{
-                    @autoreleasepool
-                    {
-                        dispatch_semaphore_wait(sem, DISPATCH_TIME_FOREVER);
-
-                        DjvuPdfBackground bg;
-                        bg.w = bgW;
-                        bg.h = bgH;
-                        bg.gray = gray;
-                        bg.format = DjvuPdfBgFormat::Jpx;
-
-                        OpjMemSink sink;
-                        std::vector<uint8_t> grayBuf;
-                        unsigned char const* src = rgb->data();
-                        size_t srcStride = rowBytes;
-                        if (gray)
-                        {
-                            grayBuf.resize((size_t)bgW * (size_t)bgH);
-                            for (int y = 0; y < bgH; ++y)
-                            {
-                                auto const* srcRow = rgb->data() + (size_t)y * rowBytes;
-                                auto* dst = grayBuf.data() + (size_t)y * (size_t)bgW;
-                                for (int x = 0; x < bgW; ++x)
-                                    dst[x] = srcRow[x * 3 + 0];
-                            }
-                            src = grayBuf.data();
-                            srcStride = (size_t)bgW;
-                        }
-
-                        bool encoded = encodeJpxLossless(&sink, src, bgW, bgH, srcStride, gray);
-
-                        if (encoded)
-                        {
-                            bg.bytes = std::move(sink.bytes);
-                        }
-                        else if (encodeJpegTurbo(&bg.bytes, src, bgW, bgH, srcStride, gray, 80))
-                        {
-                            bg.format = DjvuPdfBgFormat::Jpeg;
-                            encoded = true;
-                        }
-
-                        if (encoded)
-                            pagesPtr[pageNum].background = std::move(bg);
-                        else
-                            pagesPtr[pageNum].hasBackground = false;
-
-                        dispatch_semaphore_signal(sem);
-                    }
-                });
-            }
-
-            // Mask (JBIG2Decode) for bitonal/compound pages
-            if (pageType == DDJVU_PAGETYPE_BITONAL || pageType == DDJVU_PAGETYPE_COMPOUND)
-            {
-                int maskW = 0;
-                int maskH = 0;
-                computeRenderDimensions(pageWidth, pageHeight, pageDpi, maskDpi, &maskW, &maskH);
-
-                // Only attempt direct 1-bit when unscaled at source resolution.
-                bool const preferBitonal = (maskDpi == pageDpi) && (maskW == pageWidth) && (maskH == pageHeight);
-
-                NSString* pbmPath = [workDir stringByAppendingPathComponent:[NSString stringWithFormat:@"mask-%d.pbm", pageNum]];
-                if (!renderDjvuMaskPbm(page, grey8, msb, maskW, maskH, preferBitonal, pbmPath))
-                {
-                    ddjvu_page_release(page);
-                    ok = false;
-                    break;
-                }
-
-                [pbmPaths addObject:pbmPath];
-                p.hasMask = true;
-                p.renderWidth = maskW;
-                p.renderHeight = maskH;
-                p.targetDpi = maskDpi;
-            }
-            else
-            {
-                // Keep page index alignment for jbig2enc outputs.
-                NSString* pbmPath = [workDir stringByAppendingPathComponent:[NSString stringWithFormat:@"mask-%d.pbm", pageNum]];
-                unsigned char zero = 0;
-                NSData* pbm = pbmP4DataFromBits(1, 1, 1, &zero);
-                if (![pbm writeToFile:pbmPath atomically:YES])
-                {
-                    ddjvu_page_release(page);
-                    ok = false;
-                    break;
-                }
-                [pbmPaths addObject:pbmPath];
-                p.hasMask = false;
-            }
-
-            ddjvu_page_release(page);
-        }
-    }
-
-    dispatch_group_wait(encGroup, DISPATCH_TIME_FOREVER);
-
-    if (ok && pbmPaths.count == (NSUInteger)pageCount)
-    {
-        // Ensure required background images were successfully encoded.
-        for (int i = 0; i < pageCount && ok; ++i)
-        {
-            if (pagesPtr[i].pageType == DDJVU_PAGETYPE_PHOTO || pagesPtr[i].pageType == DDJVU_PAGETYPE_COMPOUND)
-            {
-                ok = pagesPtr[i].hasBackground && !pagesPtr[i].background.bytes.empty();
-            }
-        }
-
-        if (ok)
-        {
-            std::vector<uint8_t> globals;
-            std::vector<std::vector<uint8_t>> jbig2Pages;
-            ok = runJbig2enc(jbig2enc, workDir, pbmPaths, &globals, &jbig2Pages) && writePdfMuPdf(tmpPdfPath, pages, globals, jbig2Pages);
-        }
-    }
-    else
-    {
-        ok = false;
-    }
-
-    ddjvu_format_release(rgb24);
-    ddjvu_format_release(grey8);
-    ddjvu_format_release(msb);
-    ddjvu_document_release(doc);
-    ddjvu_context_release(ctx);
-    [NSFileManager.defaultManager removeItemAtPath:workDir error:nil];
-    return ok ? YES : NO;
-}
-
-#endif // HAVE_MUPDF && HAVE_OPENJPEG
 
 + (BOOL)convertDjvuFile:(NSString*)djvuPath toPdf:(NSString*)pdfPath
 {

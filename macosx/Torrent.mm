@@ -401,6 +401,9 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
     //allow the file to be indexed by Time Machine
     [self setTimeMachineExclude:NO];
 
+    // Remove notification observers BEFORE invalidating fHandle to prevent crashes
+    [NSNotificationCenter.defaultCenter removeObserver:self name:@"DjvuConversionComplete" object:nil];
+
     // Clear DJVU conversion tracking
     [DjvuConverter clearTrackingForTorrent:self];
 
@@ -2984,6 +2987,10 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
 
 - (void)djvuConversionComplete:(NSNotification*)notification
 {
+    // Safety check: don't access fHandle if torrent is being deallocated
+    if (!self.fHandle)
+        return;
+
     // Only invalidate cache if this notification is for our torrent
     NSString* torrentHash = notification.object;
     if ([torrentHash isEqualToString:self.hashString])
