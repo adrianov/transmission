@@ -1547,31 +1547,8 @@ static bool writePdfMuPdf(
     if (filesToConvert.count == 0)
         return;
 
-    // Copy torrentHash to ensure it's retained for the notification block
-    NSString* notificationObject = [torrentHash copy];
-
-    // Use dispatch group to notify when all conversions complete
-    dispatch_group_t group = dispatch_group_create();
-    for (NSDictionary* file in filesToConvert)
-    {
-        dispatch_group_async(group, sConversionDispatchQueue, ^{
-            @autoreleasepool
-            {
-                NSString* djvuPath = file[@"djvu"];
-                NSString* pdfPath = file[@"pdf"];
-
-                // Skip if PDF already exists
-                if (![NSFileManager.defaultManager fileExistsAtPath:pdfPath])
-                {
-                    [self convertDjvuFile:djvuPath toPdf:pdfPath];
-                }
-            }
-        });
-    }
-
-    dispatch_group_notify(group, dispatch_get_main_queue(), ^{
-        [NSNotificationCenter.defaultCenter postNotificationName:@"DjvuConversionComplete" object:notificationObject];
-    });
+    // Dispatch conversions via the shared path so we can track "active" vs "pending" work.
+    [self ensureConversionDispatchedForTorrent:torrent];
 }
 
 + (void)clearTrackingForTorrent:(Torrent*)torrent
@@ -1579,8 +1556,10 @@ static bool writePdfMuPdf(
     if (!torrent)
         return;
 
-    [sLastScanTime removeObjectForKey:torrent.hashString];
-    [sConversionQueue removeObjectForKey:torrent.hashString];
+    NSString* hash = torrent.hashString;
+    [sLastScanTime removeObjectForKey:hash];
+    [sConversionQueue removeObjectForKey:hash];
+    [sFailedConversions removeObjectForKey:hash];
 }
 
 + (NSString*)convertingFileNameForTorrent:(Torrent*)torrent
@@ -1624,11 +1603,6 @@ static NSMutableDictionary<NSString*, NSMutableSet<NSString*>*>* sFailedConversi
 // Track per-file page progress (djvu path -> counts)
 static NSMutableDictionary<NSString*, NSNumber*>* sConversionTotalPages = nil;
 static NSMutableDictionary<NSString*, NSNumber*>* sConversionDonePages = nil;
-
-// Forward declarations for per-file page tracking helpers
-static void setTotalPagesForPath(NSString* djvuPath, int total);
-static void incrementDonePagesForPath(NSString* djvuPath);
-static void clearPageTrackingForPath(NSString* djvuPath);
 
 static void setTotalPagesForPath(NSString* djvuPath, int total)
 {
@@ -1787,20 +1761,37 @@ static void clearPageTrackingForPath(NSString* djvuPath)
     if (!failedFiles || failedFiles.count == 0)
         return nil;
 
+    // Collect files to remove (can't modify set while iterating)
+    NSMutableArray<NSString*>* toRemove = [NSMutableArray array];
+    NSString* firstFailed = nil;
+
     for (NSString* djvuPath in failedFiles)
     {
         // If a PDF exists now, clear the failure entry
         NSString* pdfPath = [djvuPath.stringByDeletingPathExtension stringByAppendingPathExtension:@"pdf"];
         if ([NSFileManager.defaultManager fileExistsAtPath:pdfPath])
         {
-            [failedFiles removeObject:djvuPath];
+            [toRemove addObject:djvuPath];
             continue;
         }
 
-        return djvuPath.lastPathComponent;
+        if (firstFailed == nil)
+            firstFailed = djvuPath.lastPathComponent;
     }
 
-    return nil;
+    // Remove files that now have PDFs
+    for (NSString* path in toRemove)
+        [failedFiles removeObject:path];
+
+    return firstFailed;
+}
+
++ (void)clearFailedConversionsForTorrent:(Torrent*)torrent
+{
+    if (!torrent || !sFailedConversions)
+        return;
+
+    [sFailedConversions removeObjectForKey:torrent.hashString];
 }
 
 + (NSString*)convertingProgressForTorrent:(Torrent*)torrent
