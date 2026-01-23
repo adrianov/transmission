@@ -207,7 +207,9 @@ target_sources(${TR_NAME}-mac
         WebSeedTableView.h
         WebSeedTableView.mm
         DjvuConverter.h
-        DjvuConverter.mm)
+        DjvuConverter.mm
+        Fb2Converter.h
+        Fb2Converter.mm)
 
 set(XIB_FILES
     AboutWindow.xib

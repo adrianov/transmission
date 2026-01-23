@@ -16,14 +16,15 @@ The converter writes an image-only PDF directly (PDF objects + xref), using:
 - **JBIG2** via **jbig2enc + Leptonica** for 1‑bit masks (`/JBIG2Decode` + `/JBIG2Globals`).
 - **JPEG 2000** via **Grok** for grayscale/color backgrounds (`/JPXDecode`, JP2 stream).
 
-### Layer mapping
+### Content detection and encoding
 
-DjVu page type from `ddjvu_page_get_type()` guides what gets embedded:
+Each page is encoded as a **single image XObject**, chosen by content:
 
-- **PHOTO** → background only (JP2)
-- **BITONAL** → mask only (JBIG2)
-  - If a “bitonal” page is detected to contain non‑bitonal grayscale/color, it is treated as PHOTO to avoid blank output.
-- **COMPOUND** → background (JP2) + mask (JBIG2)
+- **Bitonal pages** → **JBIG2** (1‑bit) using DjVu’s mask rendering.
+- **Grayscale pages** → **JP2 grayscale** (Grok).
+- **Color pages** → **JP2 RGB** (Grok).
+
+Bitonal detection is based on the rendered grayscale content, not `ddjvu_page_get_type()`.
 
 ### Pipeline overview
 
@@ -38,13 +39,16 @@ DjVu page type from `ddjvu_page_get_type()` guides what gets embedded:
 
 2. **Convert one DjVu to PDF** (entry point: `+[DjvuConverter convertDjvuFile:toPdf:]`)
    - Creates a DjVuLibre context and document (`ddjvu_context_t`, `ddjvu_document_t`), waits for decode to finish, and bails on errors.
-   - Renders page layers at bounded DPI:
-     - **Background**: up to **200 DPI** (never above `pageDpi`)
-     - **Mask**: up to **300 DPI** (never above `pageDpi`)
+   - Renders pages at bounded DPI:
+     - **Max DPI**: no higher than `pageDpi`
      - Clamp so neither render dimension exceeds **4000 px**.
-   - Encodes layers deterministically:
-     - **Background** → **JP2** via Grok
-     - **Mask** → **JBIG2** via jbig2enc (multipage: globals + per-page segments)
+   - Detects content and crops to the minimal bounding rectangle (threshold **245**):
+     - **Grayscale** pages: threshold on the grayscale buffer.
+     - **Color** pages: threshold on RGB content.
+     - **Bitonal** pages: uses DjVu’s mask rendering and clips to foreground.
+   - Encodes deterministically:
+     - **JBIG2** via jbig2enc for bitonal pages (multipage globals + per-page segments, refinement enabled).
+     - **JP2** via Grok for grayscale/color pages.
    - Writes to a temp file, then atomically renames to the final path on success.
 
 ### PDF page sizing
@@ -54,7 +58,11 @@ PDF page size is computed from the DjVu’s pixel dimensions and DPI:
 - `pdfWidthPoints  = pageWidthPx  * 72 / pageDpi`
 - `pdfHeightPoints = pageHeightPx * 72 / pageDpi`
 
-The background and mask XObjects are drawn to fill the full page rectangle, so the effective raster DPI is approximately the chosen target DPI (unless reduced by the 4000px clamp).
+The image XObject is placed at the computed crop rectangle in PDF space, so the effective raster DPI matches the chosen target DPI (unless reduced by the 4000px clamp).
+
+### Document outline (Contents)
+
+If the DjVu file contains an outline (bookmarks), it is copied into the PDF’s `/Outlines` tree. Only entries that reference a page (`#<page>` form) are preserved.
 
 ### Notes
 

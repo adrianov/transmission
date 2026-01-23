@@ -58,6 +58,7 @@
 #import "VersionComparator.h"
 #import "PowerManager.h"
 #import "DjvuConverter.h"
+#import "Fb2Converter.h"
 
 typedef NSString* ToolbarItemIdentifier NS_TYPED_EXTENSIBLE_ENUM;
 
@@ -867,12 +868,13 @@ void onTorrentCompletenessChanged(tr_torrent* tor, tr_completeness status, bool 
 
     [self updateMainWindow];
 
-    // Check all torrents for DJVU files that need conversion on startup
+    // Check all torrents for DJVU/FB2 files that need conversion on startup
     if ([self.fDefaults boolForKey:@"AutoConvertDjvu"])
     {
         for (Torrent* torrent in self.fTorrents)
         {
             [DjvuConverter checkAndConvertCompletedFiles:torrent];
+            [Fb2Converter checkAndConvertCompletedFiles:torrent];
         }
     }
 
@@ -2592,11 +2594,12 @@ static NSTimeInterval const kLowPriorityDelay = 15.0;
                 anyCompleted |= torrent.finishedSeeding;
                 anyActive |= torrent.active && !torrent.stalled && !torrent.error;
 
-                // Check for completed DJVU files to convert
+                // Check for completed DJVU/FB2 files to convert
                 // Check both downloading and seeding torrents (files may complete while seeding)
                 if (autoConvertDjvu && (torrent.downloading || torrent.seeding))
                 {
                     [DjvuConverter checkAndConvertCompletedFiles:torrent];
+                    [Fb2Converter checkAndConvertCompletedFiles:torrent];
                 }
             }
 
@@ -2840,10 +2843,11 @@ static NSTimeInterval const kLowPriorityDelay = 15.0;
                                                                      object:torrent.dataLocation];
     }
 
-    // Convert any remaining DJVU files to PDF (catches files completed during this session)
+    // Convert any remaining DJVU/FB2 files (catches files completed during this session)
     if ([self.fDefaults boolForKey:@"AutoConvertDjvu"])
     {
         [DjvuConverter checkAndConvertCompletedFiles:torrent];
+        [Fb2Converter checkAndConvertCompletedFiles:torrent];
     }
 
     [self fullUpdateUI];

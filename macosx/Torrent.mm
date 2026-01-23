@@ -22,6 +22,7 @@
 #import "NSStringAdditions.h"
 #import "TrackerNode.h"
 #import "DjvuConverter.h"
+#import "Fb2Converter.h"
 
 NSString* const kTorrentDidChangeGroupNotification = @"TorrentDidChangeGroup";
 
@@ -403,9 +404,11 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
 
     // Remove notification observers BEFORE invalidating fHandle to prevent crashes
     [NSNotificationCenter.defaultCenter removeObserver:self name:@"DjvuConversionComplete" object:nil];
+    [NSNotificationCenter.defaultCenter removeObserver:self name:@"Fb2ConversionComplete" object:nil];
 
-    // Clear DJVU conversion tracking
+    // Clear conversion tracking
     [DjvuConverter clearTrackingForTorrent:self];
+    [Fb2Converter clearTrackingForTorrent:self];
 
     tr_torrentRemove(self.fHandle, trashFiles, trashDataFile, nullptr, nullptr, nullptr);
 }
@@ -1228,15 +1231,21 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
         }
     }
 
-    // Second pass: collect PDF base names in the torrent (to skip DJVU files that have matching PDFs)
+    // Second pass: collect PDF/EPUB base names in the torrent (to skip DJVU/FB2 files with matching companions)
     NSMutableSet<NSString*>* pdfBaseNames = [NSMutableSet set];
+    NSMutableSet<NSString*>* epubBaseNames = [NSMutableSet set];
     for (NSUInteger i = 0; i < count; i++)
     {
         auto const file = tr_torrentFile(self.fHandle, i);
         NSString* fileName = @(file.name);
-        if ([fileName.pathExtension.lowercaseString isEqualToString:@"pdf"])
+        NSString* ext = fileName.pathExtension.lowercaseString;
+        if ([ext isEqualToString:@"pdf"])
         {
             [pdfBaseNames addObject:fileName.stringByDeletingPathExtension.lowercaseString];
+        }
+        else if ([ext isEqualToString:@"epub"])
+        {
+            [epubBaseNames addObject:fileName.stringByDeletingPathExtension.lowercaseString];
         }
     }
 
@@ -1290,6 +1299,7 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
         }
 
         BOOL const isDjvu = [ext isEqualToString:@"djvu"] || [ext isEqualToString:@"djv"];
+        BOOL const isFb2 = [ext isEqualToString:@"fb2"];
 
         // Skip DJVU files if the torrent already contains a PDF with the same base name
         if (isDjvu)
@@ -1298,6 +1308,15 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
             if ([pdfBaseNames containsObject:baseName])
             {
                 // Torrent has both DJVU and PDF - skip DJVU, PDF will be shown separately
+                continue;
+            }
+        }
+        if (isFb2)
+        {
+            NSString* baseName = fileName.stringByDeletingPathExtension.lowercaseString;
+            if ([epubBaseNames containsObject:baseName])
+            {
+                // Torrent has both FB2 and EPUB - skip FB2, EPUB will be shown separately
                 continue;
             }
         }
@@ -1314,7 +1333,9 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
 
         BOOL const isDocument = [documentExtensions containsObject:ext];
         BOOL useCompanionPdf = NO;
+        BOOL useCompanionEpub = NO;
         NSString* companionPdfPath = nil;
+        NSString* companionEpubPath = nil;
 
         // Check for companion PDF for DJVU files (created by DjvuConverter)
         if (isDjvu)
@@ -1334,7 +1355,24 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
             }
         }
 
-        if (isDocument && [documentExternalExtensions containsObject:ext] && !useCompanionPdf && !isDjvu)
+        if (isFb2)
+        {
+            companionEpubPath = [path.stringByDeletingPathExtension stringByAppendingPathExtension:@"epub"];
+            // Only use companion EPUB if it exists.
+            // Fb2Converter writes EPUBs atomically (temp file + rename), so partial EPUBs won't be visible.
+            if ([NSFileManager.defaultManager fileExistsAtPath:companionEpubPath])
+            {
+                useCompanionEpub = YES;
+                path = companionEpubPath;
+            }
+            else
+            {
+                // Skip FB2 files until conversion is complete with valid EPUB
+                continue;
+            }
+        }
+
+        if (isDocument && [documentExternalExtensions containsObject:ext] && !useCompanionPdf && !useCompanionEpub && !isDjvu && !isFb2)
         {
             NSURL* checkURL = [NSURL fileURLWithPath:[self.currentDirectory stringByAppendingPathComponent:fileName]];
             NSURL* appURL = [NSWorkspace.sharedWorkspace URLForApplicationToOpenURL:checkURL];
@@ -1362,7 +1400,7 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
         }
 
         // Use companion PDF opens in Books, original external documents need external apps
-        BOOL const opensInBooks = (isDocument && ![documentExternalExtensions containsObject:ext]) || useCompanionPdf;
+        BOOL const opensInBooks = (isDocument && ![documentExternalExtensions containsObject:ext]) || useCompanionPdf || useCompanionEpub;
         [playable addObject:@{
             @"type" : isDocument ? (opensInBooks ? @"document-books" : @"document") : @"file",
             @"index" : @(i),
@@ -2577,6 +2615,13 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
                                           failedConversionFileName];
     }
 
+    NSString* failedFb2FileName = [Fb2Converter failedConversionFileNameForTorrent:self];
+    if (failedFb2FileName)
+    {
+        return [NSString stringWithFormat:NSLocalizedString(@"Error: %@ cannot be converted to EPUB", "Torrent -> status string"),
+                                          failedFb2FileName];
+    }
+
     NSString* convertingFileName = [DjvuConverter convertingFileNameForTorrent:self];
     if (convertingFileName)
     {
@@ -2591,6 +2636,22 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
         }
         return [NSString stringWithFormat:NSLocalizedString(@"Converting %@ to PDF for compatibility reading…", "Torrent -> status string"),
                                           convertingFileName];
+    }
+
+    NSString* convertingFb2FileName = [Fb2Converter convertingFileNameForTorrent:self];
+    if (convertingFb2FileName)
+    {
+        // Ensure conversion is actually dispatched (recovery if it wasn't)
+        [Fb2Converter ensureConversionDispatchedForTorrent:self];
+        NSString* progress = [Fb2Converter convertingProgressForTorrent:self];
+        if (progress.length > 0)
+        {
+            return [NSString stringWithFormat:NSLocalizedString(@"Converting %@ (%@) to EPUB for compatibility reading…", "Torrent -> status string"),
+                                              convertingFb2FileName,
+                                              progress];
+        }
+        return [NSString stringWithFormat:NSLocalizedString(@"Converting %@ to EPUB for compatibility reading…", "Torrent -> status string"),
+                                          convertingFb2FileName];
     }
 
     NSString* string;
@@ -2985,17 +3046,16 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
     }
 }
 
-- (void)djvuConversionComplete:(NSNotification*)notification
+- (void)handleConversionCompleteForTorrentHash:(NSString*)torrentHash
 {
     // Safety check: don't access fHandle if torrent is being deallocated
     if (!self.fHandle)
         return;
 
     // Only invalidate cache if this notification is for our torrent
-    NSString* torrentHash = notification.object;
     if ([torrentHash isEqualToString:self.hashString])
     {
-        // Invalidate playable files cache so companion PDFs are detected
+        // Invalidate playable files cache so companion files are detected
         self.fPlayableFiles = nil;
         // Also invalidate cached button state
         self.cachedPlayButtonState = nil;
@@ -3005,6 +3065,16 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
         // Trigger UI refresh
         [NSNotificationCenter.defaultCenter postNotificationName:@"UpdateUI" object:nil];
     }
+}
+
+- (void)djvuConversionComplete:(NSNotification*)notification
+{
+    [self handleConversionCompleteForTorrentHash:notification.object];
+}
+
+- (void)fb2ConversionComplete:(NSNotification*)notification
+{
+    [self handleConversionCompleteForTorrentHash:notification.object];
 }
 
 - (NSUInteger)fileCount
@@ -3370,6 +3440,9 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
 
     [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(djvuConversionComplete:)
                                                name:@"DjvuConversionComplete"
+                                             object:nil];
+    [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(fb2ConversionComplete:)
+                                               name:@"Fb2ConversionComplete"
                                              object:nil];
 
     [self update];
