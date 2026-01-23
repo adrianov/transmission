@@ -2571,7 +2571,7 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
     if (failedConversionFileName)
     {
         return [NSString stringWithFormat:NSLocalizedString(@"Error: %@ cannot be converted to PDF", "Torrent -> status string"),
-                                         failedConversionFileName];
+                                          failedConversionFileName];
     }
 
     NSString* convertingFileName = [DjvuConverter convertingFileNameForTorrent:self];
@@ -2583,10 +2583,11 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
         if (progress.length > 0)
         {
             return [NSString stringWithFormat:NSLocalizedString(@"Converting %@ (%@) to PDF for compatibility reading…", "Torrent -> status string"),
-                                             convertingFileName,
-                                             progress];
+                                              convertingFileName,
+                                              progress];
         }
-        return [NSString stringWithFormat:NSLocalizedString(@"Converting %@ to PDF for compatibility reading…", "Torrent -> status string"), convertingFileName];
+        return [NSString stringWithFormat:NSLocalizedString(@"Converting %@ to PDF for compatibility reading…", "Torrent -> status string"),
+                                          convertingFileName];
     }
 
     NSString* string;

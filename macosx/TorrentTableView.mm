@@ -477,7 +477,7 @@ static CGFloat const kPlayButtonVerticalPadding = 4.0;
         }
 
         BOOL displayGroupRowRatio = self.fDisplayGroupRowRatio;
-        
+
         // Always hide speed indicators - they're broken and global speed is shown elsewhere
         groupCell.fGroupDownloadField.hidden = YES;
         groupCell.fGroupDownloadView.hidden = YES;
@@ -492,7 +492,7 @@ static CGFloat const kPlayButtonVerticalPadding = 4.0;
             NSString* tooltipRatio = NSLocalizedString(@"Ratio", "Torrent table -> group row -> tooltip");
             groupCell.fGroupUploadAndRatioField.toolTip = tooltipRatio;
             groupCell.fGroupUploadAndRatioView.toolTip = tooltipRatio;
-            
+
             groupCell.fGroupUploadAndRatioField.hidden = NO;
             groupCell.fGroupUploadAndRatioView.hidden = NO;
         }
