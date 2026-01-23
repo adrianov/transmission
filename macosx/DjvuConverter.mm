@@ -78,6 +78,7 @@ struct DjvuPdfImageInfo
     bool gray = false;
     int w = 0;
     int h = 0;
+    int jbig2GlobalsIndex = -1;
 
     // Placement in PDF user space (points).
     double x = 0.0;
@@ -506,7 +507,83 @@ static bool encodeJp2Grok(std::vector<uint8_t>* out, unsigned char const* pixels
     return ok;
 }
 
-static bool writePdfDeterministic(NSString* tmpPdfPath, std::vector<DjvuPdfPageInfo> const& pages, std::vector<uint8_t> const* jbig2Globals)
+struct Jbig2Batch
+{
+    std::vector<PIX*> pixes;
+    std::vector<int> pageNums;
+};
+
+static bool flushJbig2Batch(Jbig2Batch* batch, std::vector<DjvuPdfPageInfo>* pages, std::vector<std::vector<uint8_t>>* globals, NSString* djvuPath)
+{
+    if (batch == nullptr || pages == nullptr || globals == nullptr)
+        return false;
+    if (batch->pixes.empty())
+        return true;
+
+    jbig2ctx* jb2 = jbig2_init(0.85f, 0.5f, 0, 0, false, -1);
+    if (jb2 == nullptr)
+    {
+        NSLog(@"DjvuConverter ERROR: jbig2_init failed for %@", djvuPath);
+        for (auto*& pix : batch->pixes)
+            pixDestroy(&pix);
+        batch->pixes.clear();
+        batch->pageNums.clear();
+        return false;
+    }
+
+    for (auto* pix : batch->pixes)
+        jbig2_add_page(jb2, pix);
+
+    int globalsLen = 0;
+    uint8_t* globalsBuf = jbig2_pages_complete(jb2, &globalsLen);
+    if (globalsBuf == nullptr || globalsLen <= 0)
+    {
+        NSLog(@"DjvuConverter ERROR: jbig2_pages_complete failed for %@", djvuPath);
+        jbig2_destroy(jb2);
+        for (auto*& pix : batch->pixes)
+            pixDestroy(&pix);
+        batch->pixes.clear();
+        batch->pageNums.clear();
+        return false;
+    }
+
+    size_t globalsIndex = globals->size();
+    globals->emplace_back(globalsBuf, globalsBuf + (size_t)globalsLen);
+    free(globalsBuf);
+
+    bool ok = true;
+    for (size_t i = 0; i < batch->pageNums.size() && ok; ++i)
+    {
+        int len = 0;
+        uint8_t* pageBuf = jbig2_produce_page(jb2, (int)i, -1, -1, &len);
+        if (pageBuf == nullptr || len <= 0)
+        {
+            NSLog(@"DjvuConverter ERROR: jbig2_produce_page failed for batch index %zu in %@", i, djvuPath);
+            ok = false;
+            break;
+        }
+
+        int const pageIndex = batch->pageNums[i];
+        DjvuPdfPageInfo& pageInfo = (*pages)[(size_t)pageIndex];
+        pageInfo.image.bytes.assign(pageBuf, pageBuf + (size_t)len);
+        pageInfo.image.jbig2GlobalsIndex = (int)globalsIndex;
+        free(pageBuf);
+
+        if (pageInfo.image.bytes.empty())
+            ok = false;
+    }
+
+    jbig2_destroy(jb2);
+
+    for (auto*& pix : batch->pixes)
+        pixDestroy(&pix);
+    batch->pixes.clear();
+    batch->pageNums.clear();
+
+    return ok;
+}
+
+static bool writePdfDeterministic(NSString* tmpPdfPath, std::vector<DjvuPdfPageInfo> const& pages, std::vector<std::vector<uint8_t>> const& jbig2Globals)
 {
     if (tmpPdfPath == nil || pages.empty())
         return false;
@@ -532,7 +609,12 @@ static bool writePdfDeterministic(NSString* tmpPdfPath, std::vector<DjvuPdfPageI
     int nextObj = 1;
     int const catalogObj = nextObj++;
     int const pagesObj = nextObj++;
-    int const jbig2GlobalsObj = (jbig2Globals != nullptr && !jbig2Globals->empty()) ? nextObj++ : 0;
+    std::vector<int> jbig2GlobalsObjs(jbig2Globals.size(), 0);
+    for (size_t i = 0; i < jbig2Globals.size(); ++i)
+    {
+        if (!jbig2Globals[i].empty())
+            jbig2GlobalsObjs[i] = nextObj++;
+    }
 
     for (size_t i = 0; i < pages.size(); ++i)
     {
@@ -580,9 +662,11 @@ static bool writePdfDeterministic(NSString* tmpPdfPath, std::vector<DjvuPdfPageI
     writeObjEnd();
 
     // 3) JBIG2Globals
-    if (jbig2GlobalsObj != 0)
+    for (size_t i = 0; i < jbig2Globals.size(); ++i)
     {
-        writeStreamObj(jbig2GlobalsObj, "<< ", jbig2Globals->data(), jbig2Globals->size());
+        int obj = jbig2GlobalsObjs[i];
+        if (obj != 0)
+            writeStreamObj(obj, "<< ", jbig2Globals[i].data(), jbig2Globals[i].size());
     }
 
     // 4) Per-page objects
@@ -607,14 +691,17 @@ static bool writePdfDeterministic(NSString* tmpPdfPath, std::vector<DjvuPdfPageI
             }
             else if (img.kind == DjvuPdfImageKind::Jbig2)
             {
-                if (jbig2GlobalsObj == 0)
+                if (img.jbig2GlobalsIndex < 0 || (size_t)img.jbig2GlobalsIndex >= jbig2GlobalsObjs.size())
+                    return false;
+                int const globalsObj = jbig2GlobalsObjs[(size_t)img.jbig2GlobalsIndex];
+                if (globalsObj == 0)
                     return false;
                 fprintf(
                     fp,
                     "<< /Type /XObject /Subtype /Image /Width %d /Height %d /ColorSpace /DeviceGray /BitsPerComponent 1 /Filter /JBIG2Decode /DecodeParms << /JBIG2Globals %d 0 R >> /Length %zu >>\nstream\n",
                     img.w,
                     img.h,
-                    jbig2GlobalsObj,
+                    globalsObj,
                     img.bytes.size());
             }
             else
@@ -746,8 +833,9 @@ static BOOL convertDjvuFileDeterministic(NSString* djvuPath, NSString* tmpPdfPat
     dispatch_semaphore_t sem = dispatch_semaphore_create(maxConcurrent);
 
     bool ok = true;
-    std::vector<PIX*> bitonalPixes;
-    std::vector<int> bitonalPageNums;
+    int constexpr Jbig2BatchSize = 20;
+    Jbig2Batch jbig2Batch;
+    std::vector<std::vector<uint8_t>> jbig2Globals;
 
     for (int pageNum = 0; pageNum < pageCount && ok; ++pageNum)
     {
@@ -919,8 +1007,10 @@ static BOOL convertDjvuFileDeterministic(NSString* djvuPath, NSString* tmpPdfPat
                                     p.image.w = pixGetWidth(pixCropped);
                                     p.image.h = pixGetHeight(pixCropped);
                                     setPdfPlacementForCrop(&p.image, renderW, renderH, cr, p.pdfWidth, p.pdfHeight);
-                                    bitonalPageNums.push_back(pageNum);
-                                    bitonalPixes.push_back(pixCropped);
+                                    jbig2Batch.pageNums.push_back(pageNum);
+                                    jbig2Batch.pixes.push_back(pixCropped);
+                                    if ((int)jbig2Batch.pixes.size() >= Jbig2BatchSize)
+                                        ok = flushJbig2Batch(&jbig2Batch, &pages, &jbig2Globals, djvuPath);
                                 }
                                 else if (pixCropped != nullptr)
                                 {
@@ -1022,6 +1112,14 @@ static BOOL convertDjvuFileDeterministic(NSString* djvuPath, NSString* tmpPdfPat
 
     dispatch_group_wait(encGroup, DISPATCH_TIME_FOREVER);
 
+    if (!ok && !jbig2Batch.pixes.empty())
+    {
+        for (auto*& pix : jbig2Batch.pixes)
+            pixDestroy(&pix);
+        jbig2Batch.pixes.clear();
+        jbig2Batch.pageNums.clear();
+    }
+
     if (ok)
     {
         for (int i = 0; i < pageCount && ok; ++i)
@@ -1034,68 +1132,12 @@ static BOOL convertDjvuFileDeterministic(NSString* djvuPath, NSString* tmpPdfPat
         }
     }
 
-    std::vector<uint8_t> globals;
-    if (ok && !bitonalPixes.empty())
-    {
-        jbig2ctx* jb2 = jbig2_init(0.85f, 0.5f, 0, 0, false, -1);
-        if (jb2 == nullptr)
-        {
-            NSLog(@"DjvuConverter ERROR: jbig2_init failed for %@", djvuPath);
-            ok = false;
-        }
-
-        if (ok)
-        {
-            for (auto* pix : bitonalPixes)
-                jbig2_add_page(jb2, pix);
-
-            int globalsLen = 0;
-            uint8_t* globalsBuf = jbig2_pages_complete(jb2, &globalsLen);
-            if (globalsBuf == nullptr || globalsLen <= 0)
-            {
-                NSLog(@"DjvuConverter ERROR: jbig2_pages_complete failed for %@", djvuPath);
-                ok = false;
-            }
-            else
-            {
-                globals.assign(globalsBuf, globalsBuf + (size_t)globalsLen);
-                free(globalsBuf);
-            }
-
-            if (ok)
-            {
-                for (size_t i = 0; i < bitonalPageNums.size() && ok; ++i)
-                {
-                    int len = 0;
-                    uint8_t* pageBuf = jbig2_produce_page(jb2, (int)i, -1, -1, &len);
-                    if (pageBuf == nullptr || len <= 0)
-                    {
-                        NSLog(@"DjvuConverter ERROR: jbig2_produce_page failed for bitonal index %zu in %@", i, djvuPath);
-                        ok = false;
-                        break;
-                    }
-
-                    int const pageIndex = bitonalPageNums[i];
-                    pagesPtr[pageIndex].image.bytes.assign(pageBuf, pageBuf + (size_t)len);
-                    free(pageBuf);
-                    if (pagesPtr[pageIndex].image.bytes.empty())
-                        ok = false;
-                }
-            }
-        }
-
-        if (jb2 != nullptr)
-            jbig2_destroy(jb2);
-    }
-
-    for (auto*& pix : bitonalPixes)
-        pixDestroy(&pix);
-    bitonalPixes.clear();
+    if (ok && !jbig2Batch.pixes.empty())
+        ok = flushJbig2Batch(&jbig2Batch, &pages, &jbig2Globals, djvuPath);
 
     if (ok)
     {
-        bool const haveJbig2 = !globals.empty();
-        ok = writePdfDeterministic(tmpPdfPath, pages, haveJbig2 ? &globals : nullptr);
+        ok = writePdfDeterministic(tmpPdfPath, pages, jbig2Globals);
         if (!ok)
             NSLog(@"DjvuConverter ERROR: writePdfDeterministic failed for %@", djvuPath);
     }
