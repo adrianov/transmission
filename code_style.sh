@@ -83,7 +83,15 @@ fi
 
 # format JS
 # but only if js has changed
-git diff --cached --quiet -- "web/**" && exit $exitcode
+git diff --cached --quiet -- "web/**"
+rc=$?
+if [ $rc -eq 0 ]; then
+  exit $exitcode
+elif [ $rc -ne 1 ]; then
+  echo 'JS code could not be checked -- "git diff" failed'
+  exitcode=1
+  exit $exitcode
+fi
 cd "${root}/web" || exit 1
 npm_lint_args="$([ -n "$fix" ] && echo 'lint:fix' || echo 'lint')"
 if ! npm ci --no-audit --no-fund --no-progress &>/dev/null; then
