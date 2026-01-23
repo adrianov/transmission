@@ -34,38 +34,6 @@ static CGImageRef createImageFromEncodedData(NSData* data)
     return image;
 }
 
-static bool isTrulyBitonal(unsigned char const* bgra, int width, int height, size_t rowBytes)
-{
-    // Strict: only allow near-black and near-white pixels, with almost no gray shades.
-    // This avoids misclassifying pages that have antialiasing or grayscale photos.
-    unsigned char constexpr MinBlack = 16;
-    unsigned char constexpr MinWhite = 239;
-    int constexpr MaxChannelDelta = 2;
-
-    int stepX = MAX(1, width / 512);
-    int stepY = MAX(1, height / 512);
-
-    for (int y = 0; y < height; y += stepY)
-    {
-        auto const* row = bgra + (size_t)y * rowBytes;
-        for (int x = 0; x < width; x += stepX)
-        {
-            auto const b = row[x * 4 + 0];
-            auto const g = row[x * 4 + 1];
-            auto const r = row[x * 4 + 2];
-
-            if (abs((int)r - (int)g) > MaxChannelDelta || abs((int)r - (int)b) > MaxChannelDelta)
-                return false;
-
-            auto const v = r; // grayscale
-            if (v > MinBlack && v < MinWhite)
-                return false;
-        }
-    }
-
-    return true;
-}
-
 static bool isGrayscale(unsigned char const* bgra, int width, int height, size_t rowBytes)
 {
     // Strict: only treat as grayscale when channels match very closely.
@@ -90,6 +58,92 @@ static bool isGrayscale(unsigned char const* bgra, int width, int height, size_t
     }
 
     return true;
+}
+
+static bool isBitonalGray(unsigned char const* bgra, int width, int height, size_t rowBytes)
+{
+    // Heuristic for grayscale pages: treat as bitonal when the non-white pixels are mostly near-black.
+    unsigned char constexpr WhiteMaxBlackness = 16; // >= 239 treated as white-ish
+    unsigned char constexpr LowBlackness = 32;
+    unsigned char constexpr HighBlackness = 128;
+    double constexpr MinRatio = 0.75;
+    double constexpr MaxTileDarkFraction = 0.80;
+    int constexpr TileCount = 16;
+
+    size_t tileSamples[TileCount * TileCount] = {};
+    size_t tileLow[TileCount * TileCount] = {};
+
+    size_t nonWhite = 0;
+    size_t low = 0;
+    size_t high = 0;
+
+    int stepX = MAX(1, width / 512);
+    int stepY = MAX(1, height / 512);
+
+    for (int y = 0; y < height; y += stepY)
+    {
+        auto const* row = bgra + (size_t)y * rowBytes;
+        int const ty = (y * TileCount) / height;
+        for (int x = 0; x < width; x += stepX)
+        {
+            int const tx = (x * TileCount) / width;
+            size_t const tileIdx = (size_t)ty * (size_t)TileCount + (size_t)tx;
+            ++tileSamples[tileIdx];
+
+            unsigned char const v = row[x * 4 + 2]; // r
+            unsigned char const blackness = (unsigned char)(255U - (unsigned)v);
+
+            if (blackness <= WhiteMaxBlackness)
+                continue;
+
+            ++nonWhite;
+
+            if (blackness >= LowBlackness)
+            {
+                ++low;
+                ++tileLow[tileIdx];
+                if (blackness >= HighBlackness)
+                    ++high;
+            }
+        }
+    }
+
+    if (nonWhite == 0)
+        return true;
+
+    if (low == 0)
+        return false;
+
+    // Reject "photo-like" pages with localized dense dark regions:
+    // a small dark picture can satisfy the global ratio, but would get destroyed by 1-bit thresholding.
+    double maxTile = 0.0;
+    for (size_t i = 0; i < (size_t)TileCount * (size_t)TileCount; ++i)
+    {
+        if (tileSamples[i] < 64)
+            continue;
+        maxTile = MAX(maxTile, (double)tileLow[i] / (double)tileSamples[i]);
+    }
+    if (maxTile > MaxTileDarkFraction)
+        return false;
+
+    return (double)high / (double)low >= MinRatio;
+}
+
+static void computeRenderDimensions(int pageWidth, int pageHeight, int pageDpi, int targetDpi, int* outWidth, int* outHeight)
+{
+    int renderWidth = (int)((double)pageWidth * targetDpi / pageDpi);
+    int renderHeight = (int)((double)pageHeight * targetDpi / pageDpi);
+
+    // Clamp to max 4000 pixels
+    if (renderWidth > 4000 || renderHeight > 4000)
+    {
+        double scale = 4000.0 / MAX(renderWidth, renderHeight);
+        renderWidth = (int)(renderWidth * scale);
+        renderHeight = (int)(renderHeight * scale);
+    }
+
+    *outWidth = renderWidth;
+    *outHeight = renderHeight;
 }
 
 static CGImageRef createTiffG4FromBitonal(unsigned char const* bgra, int width, int height, size_t rowBytes)
@@ -529,19 +583,15 @@ static BOOL isValidPdf(NSString* path)
         return NO;
     }
 
-    // Render at up to 200 DPI (never upscale beyond the source DPI).
-    // Upscaling increases PDF size without adding detail.
-    int targetDpi = MIN(200, pageDpi);
-    int renderWidth = (int)((double)pageWidth * targetDpi / pageDpi);
-    int renderHeight = (int)((double)pageHeight * targetDpi / pageDpi);
+    int constexpr DefaultMaxDpi = 200;
+    int constexpr BitonalMaxDpi = 300;
 
-    // Clamp to max 4000 pixels
-    if (renderWidth > 4000 || renderHeight > 4000)
-    {
-        double scale = 4000.0 / MAX(renderWidth, renderHeight);
-        renderWidth = (int)(renderWidth * scale);
-        renderHeight = (int)(renderHeight * scale);
-    }
+    // Render at up to 200 DPI (never upscale beyond the source DPI).
+    // Bitonal pages can use a higher cap since TIFF G4 compresses well and improves text sharpness.
+    int targetDpi = MIN(pageType == DDJVU_PAGETYPE_BITONAL ? BitonalMaxDpi : DefaultMaxDpi, pageDpi);
+    int renderWidth = 0;
+    int renderHeight = 0;
+    computeRenderDimensions(pageWidth, pageHeight, pageDpi, targetDpi, &renderWidth, &renderHeight);
 
     size_t rowSize = (size_t)renderWidth * 4;
     size_t bufferSize = rowSize * renderHeight;
@@ -560,19 +610,58 @@ static BOOL isValidPdf(NSString* path)
     ddjvu_rect_t renderRect = { 0, 0, (unsigned int)renderWidth, (unsigned int)renderHeight };
 
     int rendered = ddjvu_page_render(page, DDJVU_RENDER_COLOR, &pageRect, &renderRect, format, rowSize, buffer);
-    ddjvu_page_release(page);
 
     if (!rendered)
     {
+        ddjvu_page_release(page);
         free(buffer);
         return NO;
     }
 
     // Encoding:
-    // - Truly bitonal pages -> TIFF CCITT Group 4 (strict detection to avoid false positives)
+    // - Grayscale pages that are effectively bitonal -> TIFF CCITT Group 4
     // - Other pages -> JPEG via TurboJPEG
-    bool const bitonal = pageType != DDJVU_PAGETYPE_PHOTO &&
-        isTrulyBitonal((unsigned char const*)buffer, renderWidth, renderHeight, rowSize);
+    bool gray = isGrayscale((unsigned char const*)buffer, renderWidth, renderHeight, rowSize);
+    bool bitonal = gray && pageType != DDJVU_PAGETYPE_PHOTO &&
+        isBitonalGray((unsigned char const*)buffer, renderWidth, renderHeight, rowSize);
+
+    int bitonalTargetDpi = MIN(BitonalMaxDpi, pageDpi);
+    if (bitonal && targetDpi < bitonalTargetDpi)
+    {
+        int hiWidth = 0;
+        int hiHeight = 0;
+        computeRenderDimensions(pageWidth, pageHeight, pageDpi, bitonalTargetDpi, &hiWidth, &hiHeight);
+
+        size_t hiRowSize = (size_t)hiWidth * 4;
+        size_t hiBufferSize = hiRowSize * (size_t)hiHeight;
+        char* hiBuffer = (char*)malloc(hiBufferSize);
+        if (hiBuffer != nullptr)
+        {
+            memset(hiBuffer, 0xFF, hiBufferSize);
+            ddjvu_rect_t hiPageRect = { 0, 0, (unsigned int)hiWidth, (unsigned int)hiHeight };
+            ddjvu_rect_t hiRenderRect = { 0, 0, (unsigned int)hiWidth, (unsigned int)hiHeight };
+            int const hiRendered = ddjvu_page_render(page, DDJVU_RENDER_COLOR, &hiPageRect, &hiRenderRect, format, hiRowSize, hiBuffer);
+            if (hiRendered)
+            {
+                free(buffer);
+                buffer = hiBuffer;
+                targetDpi = bitonalTargetDpi;
+                renderWidth = hiWidth;
+                renderHeight = hiHeight;
+                rowSize = hiRowSize;
+
+                gray = isGrayscale((unsigned char const*)buffer, renderWidth, renderHeight, rowSize);
+                bitonal = gray && pageType != DDJVU_PAGETYPE_PHOTO &&
+                    isBitonalGray((unsigned char const*)buffer, renderWidth, renderHeight, rowSize);
+            }
+            else
+            {
+                free(hiBuffer);
+            }
+        }
+    }
+
+    ddjvu_page_release(page);
 
     CGImageRef image = nullptr;
     if (bitonal)
@@ -588,25 +677,25 @@ static BOOL isValidPdf(NSString* path)
         int subsamp = 0;
 #endif
         // If the page is grayscale, encode as grayscale JPEG (smaller than color JPEG).
-        if (isGrayscale((unsigned char const*)buffer, renderWidth, renderHeight, rowSize))
+        if (gray)
         {
             size_t grayRowBytes = (size_t)renderWidth;
             size_t graySize = grayRowBytes * (size_t)renderHeight;
-            auto* gray = (unsigned char*)malloc(graySize);
-            if (gray != nullptr)
+            auto* grayBuf = (unsigned char*)malloc(graySize);
+            if (grayBuf != nullptr)
             {
                 for (int y = 0; y < renderHeight; ++y)
                 {
                     auto const* srcRow = (unsigned char const*)buffer + (size_t)y * rowSize;
-                    auto* dstRow = gray + (size_t)y * grayRowBytes;
+                    auto* dstRow = grayBuf + (size_t)y * grayRowBytes;
                     for (int x = 0; x < renderWidth; ++x)
                     {
                         dstRow[x] = srcRow[x * 4 + 2]; // r
                     }
                 }
 
-                image = createJpegFromGray(gray, renderWidth, renderHeight, grayRowBytes, quality);
-                free(gray);
+                image = createJpegFromGray(grayBuf, renderWidth, renderHeight, grayRowBytes, quality);
+                free(grayBuf);
             }
         }
 
