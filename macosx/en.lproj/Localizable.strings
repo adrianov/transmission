@@ -373,6 +373,11 @@
    Torrent -> status string */
 "Downloading" = "Downloading";
 
+/* Torrent -> status string */
+"Converting %@ to PDF for compatibility reading…" = "Converting %@ to PDF for compatibility reading…";
+/* Torrent -> status string */
+"Converting %@ (%@) to PDF for compatibility reading…" = "Converting %@ (%@) to PDF for compatibility reading…";
+
 /* Blocklist -> message */
 "Downloading blocklist" = "Downloading blocklist";
 

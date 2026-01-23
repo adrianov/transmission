@@ -312,6 +312,82 @@ function formatHumanTitle(name) {
   return result || name;
 }
 
+/**
+ * Converts a filename (or folder name) to a lightweight human-friendly label.
+ *
+ * This intentionally does not extract years/dates or strip technical tags.
+ * It only replaces separator-heavy names ('.', '-', '_') with spaces.
+ */
+function formatHumanFileName(name) {
+  if (!name) {
+    return 'Unknown';
+  }
+
+  // Keep the file extension intact if it looks like one.
+  const lastDot = name.lastIndexOf('.');
+  let base = name;
+  let ext = '';
+  if (lastDot > 0) {
+    const tail = name.slice(lastDot + 1);
+    if (tail.length > 0 && tail.length <= 5 && /^[a-z0-9]+$/i.test(tail)) {
+      base = name.slice(0, lastDot);
+      ext = name.slice(lastDot);
+    }
+  }
+
+  let whitespaceCount = 0;
+  let dotCount = 0;
+  let hyphenCount = 0;
+  let underscoreCount = 0;
+  for (const ch of base) {
+    if (ch === ' ') {
+      whitespaceCount += 1;
+    } else if (ch === '.') {
+      dotCount += 1;
+    } else if (ch === '-') {
+      hyphenCount += 1;
+    } else if (ch === '_') {
+      underscoreCount += 1;
+    }
+  }
+
+  const separatorCount = dotCount + hyphenCount + underscoreCount;
+  const noSpaces = whitespaceCount === 0;
+  const shouldReplaceSeparators =
+    (separatorCount >= 3 && separatorCount > whitespaceCount) ||
+    (noSpaces && (underscoreCount > 0 || dotCount >= 2 || hyphenCount >= 2));
+
+  if (!shouldReplaceSeparators) {
+    return name;
+  }
+
+  let out = '';
+  for (let i = 0; i < base.length; i += 1) {
+    const c = base[i];
+    const prev = i > 0 ? base[i - 1] : '';
+    const next = i + 1 < base.length ? base[i + 1] : '';
+    const betweenDigits = /\d/.test(prev) && /\d/.test(next);
+
+    if (c === '_') {
+      out += ' ';
+    } else if (c === '.') {
+      out += betweenDigits ? '.' : ' ';
+    } else if (c === '-') {
+      const spacedDash = prev === ' ' && next === ' ';
+      out += betweenDigits || spacedDash ? '-' : ' ';
+    } else {
+      out += c;
+    }
+  }
+
+  out = out.replaceAll(/\s+/g, ' ').trim();
+  if (!out) {
+    return name;
+  }
+
+  return `${out}${ext}`;
+}
+
 export const Formatter = {
   /** Round a string of a number to a specified number of decimal places */
   _toTruncFixed(number, places) {
@@ -326,6 +402,11 @@ export const Formatter = {
   /** Converts technical torrent name to human-friendly title */
   humanTitle(name) {
     return formatHumanTitle(name);
+  },
+
+  /** Converts a filename/folder name to a lightweight human-friendly label */
+  humanFileName(name) {
+    return formatHumanFileName(name);
   },
 
   // Formats a memory size into a human-readable string

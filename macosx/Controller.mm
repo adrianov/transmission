@@ -2593,7 +2593,8 @@ static NSTimeInterval const kLowPriorityDelay = 15.0;
                 anyActive |= torrent.active && !torrent.stalled && !torrent.error;
 
                 // Check for completed DJVU files to convert
-                if (autoConvertDjvu && torrent.downloading)
+                // Check both downloading and seeding torrents (files may complete while seeding)
+                if (autoConvertDjvu && (torrent.downloading || torrent.seeding))
                 {
                     [DjvuConverter checkAndConvertCompletedFiles:torrent];
                 }

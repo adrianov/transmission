@@ -560,6 +560,105 @@ if(ENABLE_MAC)
     add_subdirectory(${TR_THIRD_PARTY_SOURCE_DIR}/djvulibre)
 endif()
 
+# Grok (JP2) + JBIG2 (jbig2enc/leptonica) for DjVu→PDF conversion (macOS only)
+if(ENABLE_MAC)
+    tr_add_external_auto_library(LEPTONICA leptonica leptonica
+        TARGET leptonica::leptonica
+        CMAKE_ARGS
+            -DBUILD_SHARED_LIBS=OFF
+            -DBUILD_PROG=OFF
+            -DENABLE_ZLIB=OFF
+            -DENABLE_PNG=OFF
+            -DENABLE_GIF=OFF
+            -DENABLE_JPEG=OFF
+            -DENABLE_TIFF=OFF
+            -DENABLE_WEBP=OFF
+            -DENABLE_OPENJPEG=OFF)
+
+    tr_add_external_auto_library(JBIG2ENC jbig2enc libjbig2enc
+        TARGET jbig2enc::jbig2enc
+        CMAKE_ARGS
+            -DBUILD_SHARED_LIBS=OFF
+            "-DCMAKE_PREFIX_PATH=${LEPTONICA_PREFIX}")
+
+    set(GROK_UPSTREAM_TARGET grok)
+    set(GROK_EXT_PREFIX "${TR_THIRD_PARTY_BINARY_DIR}/grok.bld")
+    set(GROK_EXT_BINARY_DIR "${GROK_EXT_PREFIX}/bld")
+    set(GROK_EXT_BIN_DIR "${GROK_EXT_BINARY_DIR}/bin")
+    set(GROK_INCLUDE_DIRS
+        "${TR_THIRD_PARTY_SOURCE_DIR}/grok/src/lib/core"
+        "${GROK_EXT_BINARY_DIR}/src/lib/core")
+    set(GROK_LIBRARIES
+        "${GROK_EXT_BIN_DIR}/${CMAKE_STATIC_LIBRARY_PREFIX}grokj2k${CMAKE_STATIC_LIBRARY_SUFFIX}"
+        "${GROK_EXT_BIN_DIR}/${CMAKE_STATIC_LIBRARY_PREFIX}lcms2${CMAKE_STATIC_LIBRARY_SUFFIX}"
+        "${GROK_EXT_BIN_DIR}/${CMAKE_STATIC_LIBRARY_PREFIX}hwy${CMAKE_STATIC_LIBRARY_SUFFIX}")
+
+    set(GROK_EXT_PROJ_CMAKE_ARGS)
+    if(APPLE)
+        string(REPLACE ";" "$<SEMICOLON>" GROK_CMAKE_OSX_ARCHITECTURES "${CMAKE_OSX_ARCHITECTURES}")
+        list(APPEND GROK_EXT_PROJ_CMAKE_ARGS
+            "-DCMAKE_OSX_ARCHITECTURES:STRING=${GROK_CMAKE_OSX_ARCHITECTURES}"
+            "-DCMAKE_OSX_DEPLOYMENT_TARGET:STRING=${CMAKE_OSX_DEPLOYMENT_TARGET}"
+            "-DCMAKE_OSX_SYSROOT:PATH=${CMAKE_OSX_SYSROOT}")
+    endif()
+
+    ExternalProject_Add(
+        ${GROK_UPSTREAM_TARGET}
+        PREFIX "${GROK_EXT_PREFIX}"
+        SOURCE_DIR "${TR_THIRD_PARTY_SOURCE_DIR}/grok"
+        BINARY_DIR "${GROK_EXT_BINARY_DIR}"
+        INSTALL_DIR "${GROK_EXT_PREFIX}/pfx"
+        CMAKE_ARGS
+            -Wno-dev # We don't want to be warned over unused variables
+            --no-warn-unused-cli
+            "-DCMAKE_TOOLCHAIN_FILE:PATH=${CMAKE_TOOLCHAIN_FILE}"
+            "-DCMAKE_USER_MAKE_RULES_OVERRIDE=${CMAKE_USER_MAKE_RULES_OVERRIDE}"
+            "-DCMAKE_C_COMPILER=${CMAKE_C_COMPILER}"
+            "-DCMAKE_C_FLAGS:STRING=${CMAKE_C_FLAGS}"
+            "-DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}"
+            "-DCMAKE_CXX_FLAGS:STRING=${CMAKE_CXX_FLAGS}"
+            "-DCMAKE_BUILD_TYPE:STRING=${CMAKE_BUILD_TYPE}"
+            "-DCMAKE_INSTALL_PREFIX:PATH=<INSTALL_DIR>"
+            "-DCMAKE_INSTALL_LIBDIR:STRING=lib"
+            ${GROK_EXT_PROJ_CMAKE_ARGS}
+            -DBUILD_SHARED_LIBS=OFF
+            -DGRK_BUILD_CODEC=OFF
+            -DGRK_BUILD_CORE_EXAMPLES=OFF
+            -DGRK_BUILD_CODEC_EXAMPLES=OFF
+            -DGRK_BUILD_DOC=OFF
+            -DBUILD_TESTING=OFF
+            -DGRK_BUILD_CORE_SWIG_BINDINGS=OFF
+            -DGRK_BUILD_LIBPNG=OFF
+            -DGRK_BUILD_LIBTIFF=OFF
+            -DGRK_BUILD_JPEG=OFF
+            -DGRK_ENABLE_EXIFTOOL=OFF
+            -DGRK_ENABLE_LIBCURL=OFF
+            -DGRK_BUILD_PLUGIN_LOADER=OFF
+            -DGRK_BUILD_DCI=OFF
+            -DBUILD_LUTS_GENERATOR=OFF
+            -DHWY_ENABLE_TESTS=OFF
+            -DHWY_ENABLE_EXAMPLES=OFF
+            -DHWY_ENABLE_CONTRIB=OFF
+            -DHWY_ENABLE_INSTALL=OFF
+            -DHWY_FORCE_STATIC_LIBS=ON
+        BUILD_BYPRODUCTS
+            ${GROK_LIBRARIES})
+
+    set_property(TARGET ${GROK_UPSTREAM_TARGET} PROPERTY FOLDER "${TR_THIRD_PARTY_DIR_NAME}")
+
+    add_library(grok::grokj2k INTERFACE IMPORTED)
+    target_include_directories(grok::grokj2k
+        INTERFACE
+            ${GROK_INCLUDE_DIRS})
+    target_link_libraries(grok::grokj2k
+        INTERFACE
+            ${GROK_LIBRARIES})
+    add_dependencies(grok::grokj2k ${GROK_UPSTREAM_TARGET})
+
+    # Imported target requires include dirs at configure time
+    file(MAKE_DIRECTORY ${GROK_INCLUDE_DIRS})
+endif()
+
 tr_add_external_auto_library(DHT dht dht
     TARGET dht::dht)
 

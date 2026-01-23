@@ -476,16 +476,11 @@ static CGFloat const kPlayButtonVerticalPadding = 4.0;
             groupCell.fGroupTitleField.stringValue = groupName;
         }
 
-        groupCell.fGroupDownloadField.stringValue = [NSString stringForSpeed:group.downloadRate];
-        groupCell.fGroupDownloadView.image = [NSImage imageNamed:@"DownArrowGroupTemplate"];
-
-        NSString* tooltipDownload = NSLocalizedString(@"Download speed", "Torrent table -> group row -> tooltip");
-        groupCell.fGroupDownloadField.toolTip = tooltipDownload;
-        groupCell.fGroupDownloadView.toolTip = tooltipDownload;
-
         BOOL displayGroupRowRatio = self.fDisplayGroupRowRatio;
-        groupCell.fGroupDownloadField.hidden = displayGroupRowRatio;
-        groupCell.fGroupDownloadView.hidden = displayGroupRowRatio;
+        
+        // Always hide speed indicators - they're broken and global speed is shown elsewhere
+        groupCell.fGroupDownloadField.hidden = YES;
+        groupCell.fGroupDownloadView.hidden = YES;
 
         if (displayGroupRowRatio)
         {
@@ -497,17 +492,15 @@ static CGFloat const kPlayButtonVerticalPadding = 4.0;
             NSString* tooltipRatio = NSLocalizedString(@"Ratio", "Torrent table -> group row -> tooltip");
             groupCell.fGroupUploadAndRatioField.toolTip = tooltipRatio;
             groupCell.fGroupUploadAndRatioView.toolTip = tooltipRatio;
+            
+            groupCell.fGroupUploadAndRatioField.hidden = NO;
+            groupCell.fGroupUploadAndRatioView.hidden = NO;
         }
         else
         {
-            groupCell.fGroupUploadAndRatioView.image = [NSImage imageNamed:@"UpArrowGroupTemplate"];
-            groupCell.fGroupUploadAndRatioView.image.accessibilityDescription = NSLocalizedString(@"UL", "Torrent -> status image");
-
-            groupCell.fGroupUploadAndRatioField.stringValue = [NSString stringForSpeed:group.uploadRate];
-
-            NSString* tooltipUpload = NSLocalizedString(@"Upload speed", "Torrent table -> group row -> tooltip");
-            groupCell.fGroupUploadAndRatioField.toolTip = tooltipUpload;
-            groupCell.fGroupUploadAndRatioView.toolTip = tooltipUpload;
+            // Hide upload speed indicator when not showing ratio
+            groupCell.fGroupUploadAndRatioField.hidden = YES;
+            groupCell.fGroupUploadAndRatioView.hidden = YES;
         }
 
         NSString* tooltipGroup;

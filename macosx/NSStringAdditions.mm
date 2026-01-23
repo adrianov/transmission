@@ -551,6 +551,97 @@
     return result.length > 0 ? result : self;
 }
 
+- (NSString*)humanReadableFileName
+{
+    if (self.length == 0)
+    {
+        return @"Unknown";
+    }
+
+    NSString* name = self.lastPathComponent;
+    if (name.length == 0)
+    {
+        return @"Unknown";
+    }
+
+    NSUInteger whitespaceCount = 0;
+    NSUInteger dotCount = 0;
+    NSUInteger hyphenCount = 0;
+    NSUInteger underscoreCount = 0;
+
+    NSCharacterSet* whitespace = NSCharacterSet.whitespaceAndNewlineCharacterSet;
+    for (NSUInteger i = 0; i < name.length; ++i)
+    {
+        unichar const c = [name characterAtIndex:i];
+        if ([whitespace characterIsMember:c])
+        {
+            ++whitespaceCount;
+        }
+        else if (c == '.')
+        {
+            ++dotCount;
+        }
+        else if (c == '-')
+        {
+            ++hyphenCount;
+        }
+        else if (c == '_')
+        {
+            ++underscoreCount;
+        }
+    }
+
+    NSUInteger const separatorCount = dotCount + hyphenCount + underscoreCount;
+    BOOL const noSpaces = whitespaceCount == 0;
+    BOOL const shouldReplaceSeparators = (separatorCount >= 3 && separatorCount > whitespaceCount) ||
+        (noSpaces && (underscoreCount > 0 || dotCount >= 2 || hyphenCount >= 2));
+
+    if (!shouldReplaceSeparators)
+    {
+        return name;
+    }
+
+    NSMutableString* out = [NSMutableString stringWithCapacity:name.length];
+    NSCharacterSet* digits = NSCharacterSet.decimalDigitCharacterSet;
+
+    for (NSUInteger i = 0; i < name.length; ++i)
+    {
+        unichar const c = [name characterAtIndex:i];
+        unichar const prev = i > 0 ? [name characterAtIndex:i - 1] : 0;
+        unichar const next = i + 1 < name.length ? [name characterAtIndex:i + 1] : 0;
+        BOOL const betweenDigits = i > 0 && i + 1 < name.length && [digits characterIsMember:prev] && [digits characterIsMember:next];
+
+        if (c == '_')
+        {
+            [out appendString:@" "];
+        }
+        else if (c == '.')
+        {
+            [out appendString:betweenDigits ? @"." : @" "];
+        }
+        else if (c == '-')
+        {
+            BOOL const spacedDash = prev == ' ' && next == ' ';
+            if (betweenDigits || spacedDash)
+            {
+                [out appendFormat:@"%C", c];
+            }
+            else
+            {
+                [out appendString:@" "];
+            }
+        }
+        else
+        {
+            [out appendFormat:@"%C", c];
+        }
+    }
+
+    NSArray<NSString*>* parts = [out nonEmptyComponentsSeparatedByCharactersInSet:whitespace];
+    NSString* normalized = [parts componentsJoinedByString:@" "];
+    return normalized.length > 0 ? normalized : name;
+}
+
 - (NSString*)humanReadableEpisodeName
 {
     NSString* filename = self.lastPathComponent;

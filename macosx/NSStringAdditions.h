@@ -42,6 +42,14 @@
 @property(nonatomic, readonly, copy) NSString* humanReadableTitle;
 
 /**
+ * Converts a filename or folder name to a lightweight human-readable display name.
+ *
+ * This intentionally does not extract years/dates or strip technical tags.
+ * It only replaces separator-heavy names ('.', '-', '_') with spaces.
+ */
+@property(nonatomic, readonly, copy) NSString* humanReadableFileName;
+
+/**
  * Converts a filename to a human-readable episode name.
  *
  * Examples:

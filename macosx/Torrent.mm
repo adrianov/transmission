@@ -87,44 +87,79 @@ typedef NS_ENUM(NSInteger, TorrentMediaType) {
 
 @end
 
+static NSImage* pdfTypeIcon()
+{
+    static NSImage* icon = nil;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        // Try modern API first
+        icon = [NSWorkspace.sharedWorkspace iconForContentType:UTTypePDF];
+        if (!icon)
+        {
+// Fallback to deprecated API
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+            icon = [NSWorkspace.sharedWorkspace iconForFileType:@"pdf"];
+#pragma clang diagnostic pop
+        }
+    });
+    return icon;
+}
+
 static NSImage* iconForBookExtension(NSString* ext)
 {
-    if (ext.length == 0)
+    NSString* lowerExt = ext.lowercaseString;
+    if (lowerExt.length == 0)
     {
-        return nil;
+        return pdfTypeIcon();
     }
 
-    // Use PDF icon for DJVU files (book format without good system icon)
-    BOOL isDjvu = [ext isEqualToString:@"djvu"] || [ext isEqualToString:@"djv"];
-    UTType* contentType = isDjvu ? UTTypePDF : [UTType typeWithFilenameExtension:ext];
+    // Formats without good macOS icons - use PDF icon (looks like a document/book)
+    static NSSet<NSString*>* pdfFallbackExtensions;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        pdfFallbackExtensions = [NSSet setWithArray:@[ @"djvu", @"djv", @"fb2", @"mobi" ]];
+    });
 
+    if ([pdfFallbackExtensions containsObject:lowerExt])
+    {
+        return pdfTypeIcon();
+    }
+
+    // For epub/pdf, get the proper system icon
+    UTType* contentType = [UTType typeWithFilenameExtension:lowerExt];
     NSImage* icon = contentType ? [NSWorkspace.sharedWorkspace iconForContentType:contentType] : nil;
 
     if (!icon)
     {
-        if (@available(macOS 11.0, *))
-        {
-            icon = [NSImage imageWithSystemSymbolName:@"book" accessibilityDescription:nil];
-        }
-        if (!icon)
-        {
-            icon = [NSImage imageNamed:NSImageNameBookmarksTemplate];
-        }
+// Fallback to deprecated API
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+        icon = [NSWorkspace.sharedWorkspace iconForFileType:lowerExt];
+#pragma clang diagnostic pop
     }
 
-    return icon;
+    // Fallback to PDF icon if no icon found
+    return icon ?: pdfTypeIcon();
 }
 
 static NSImage* iconForBookPathOrExtension(NSString* path, NSString* ext, BOOL isComplete)
 {
-    // DJVU files don't have good system icons, use PDF icon instead
-    BOOL isDjvu = [ext.lowercaseString isEqualToString:@"djvu"] || [ext.lowercaseString isEqualToString:@"djv"];
-    if (isDjvu)
+    NSString* lowerExt = ext.lowercaseString;
+
+    // Formats without good macOS file icons - use extension-based icon (PDF icon)
+    static NSSet<NSString*>* pdfFallbackExtensions;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        pdfFallbackExtensions = [NSSet setWithArray:@[ @"djvu", @"djv", @"fb2", @"mobi" ]];
+    });
+
+    if ([pdfFallbackExtensions containsObject:lowerExt])
     {
-        return iconForBookExtension(ext);
+        return iconForBookExtension(lowerExt);
     }
 
-    // Only use file-based icon if file exists AND torrent is complete
+    // For epub/pdf: use file-based icon if file exists AND torrent is complete
     // (iconForFile: returns generic icon for non-existent or partial files)
     if (isComplete && path.length > 0 && [NSFileManager.defaultManager fileExistsAtPath:path])
     {
@@ -135,11 +170,51 @@ static NSImage* iconForBookPathOrExtension(NSString* path, NSString* ext, BOOL i
         }
     }
 
-    return iconForBookExtension(ext);
+    return iconForBookExtension(lowerExt);
 }
 
-static NSString* firstRegisteredBookPath(Torrent* torrent)
+/// Returns the full path for the first file matching `wantedExt` (by torrent file order).
+static NSString* bookPathWithExtension(Torrent* torrent, NSString* wantedExt)
 {
+    NSUInteger const count = torrent.fileCount;
+    for (NSUInteger i = 0; i < count; i++)
+    {
+        auto const file = tr_torrentFile(torrent.fHandle, i);
+        NSString* fileName = @(file.name);
+        if (![fileName.pathExtension.lowercaseString isEqualToString:wantedExt])
+            continue;
+
+        auto const location = tr_torrentFindFile(torrent.fHandle, i);
+        if (!std::empty(location))
+            return @(location.c_str());
+        return [torrent.currentDirectory stringByAppendingPathComponent:fileName];
+    }
+
+    return nil;
+}
+
+static NSString* preferredBookPath(Torrent* torrent, NSString** outExt)
+{
+    // Prefer formats with well-defined system icons.
+    NSString* ext = @"epub";
+    NSString* path = bookPathWithExtension(torrent, ext);
+    if (path != nil)
+    {
+        if (outExt)
+            *outExt = ext;
+        return path;
+    }
+
+    ext = @"pdf";
+    path = bookPathWithExtension(torrent, ext);
+    if (path != nil)
+    {
+        if (outExt)
+            *outExt = ext;
+        return path;
+    }
+
+    // Otherwise, use the first book file in the torrent.
     static NSSet<NSString*>* bookExtensions;
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
@@ -151,24 +226,18 @@ static NSString* firstRegisteredBookPath(Torrent* torrent)
     {
         auto const file = tr_torrentFile(torrent.fHandle, i);
         NSString* fileName = @(file.name);
-        NSString* ext = fileName.pathExtension.lowercaseString;
-        if (![bookExtensions containsObject:ext])
+        NSString* fileExt = fileName.pathExtension.lowercaseString;
+        if (![bookExtensions containsObject:fileExt])
         {
             continue;
         }
-        if (@available(macOS 11.0, *))
-        {
-            if ([UTType typeWithFilenameExtension:ext] == nil)
-            {
-                continue;
-            }
-        }
+
+        if (outExt)
+            *outExt = fileExt;
 
         auto const location = tr_torrentFindFile(torrent.fHandle, i);
         if (!std::empty(location))
-        {
             return @(location.c_str());
-        }
         return [torrent.currentDirectory stringByAppendingPathComponent:fileName];
     }
 
@@ -806,8 +875,9 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
             {
                 if (self.fMediaType == TorrentMediaTypeBooks)
                 {
-                    NSString* bookPath = firstRegisteredBookPath(self);
-                    baseIcon = iconForBookPathOrExtension(bookPath, self.fMediaExtension, self.allDownloaded);
+                    NSString* bookExt = nil;
+                    NSString* bookPath = preferredBookPath(self, &bookExt);
+                    baseIcon = iconForBookPathOrExtension(bookPath, bookExt ?: @"pdf", self.allDownloaded);
                 }
                 else
                 {
@@ -972,10 +1042,10 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
                     }
                 }
 
-                // Humanize disc folder names (e.g., "Movie.Name.2020" -> "Movie Name")
+                // Humanize disc folder names (e.g., "Movie.Name.2020" -> "Movie Name 2020")
                 if (isDisc && name.length > 0)
                 {
-                    name = name.humanReadableTitle;
+                    name = name.humanReadableFileName;
                 }
 
                 if (name.length == 0)
@@ -1277,26 +1347,15 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
         NSString* displayName = nil;
         if (isDocument)
         {
-            displayName = fileName.lastPathComponent.stringByDeletingPathExtension.humanReadableTitle;
+            displayName = fileName.lastPathComponent.stringByDeletingPathExtension.humanReadableFileName;
         }
         else
         {
             displayName = fileName.lastPathComponent.humanReadableEpisodeName;
             if (!displayName)
             {
-                displayName = fileName.lastPathComponent.stringByDeletingPathExtension.humanReadableTitle;
+                displayName = fileName.lastPathComponent.stringByDeletingPathExtension.humanReadableFileName;
             }
-            // Strip resolution from button titles
-            displayName = [displayName stringByReplacingOccurrencesOfString:@"#2160p" withString:@""
-                                                                    options:NSCaseInsensitiveSearch
-                                                                      range:NSMakeRange(0, displayName.length)];
-            displayName = [displayName stringByReplacingOccurrencesOfString:@"#1080p" withString:@""
-                                                                    options:NSCaseInsensitiveSearch
-                                                                      range:NSMakeRange(0, displayName.length)];
-            displayName = [displayName stringByReplacingOccurrencesOfString:@"#720p" withString:@""
-                                                                    options:NSCaseInsensitiveSearch
-                                                                      range:NSMakeRange(0, displayName.length)];
-            displayName = [displayName stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet];
         }
 
         // Use companion PDF opens in Books, original external documents need external apps
@@ -1346,7 +1405,7 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
         if (progress < 0)
             progress = 0;
 
-        NSString* displayName = baseName.lastPathComponent.humanReadableTitle;
+        NSString* displayName = baseName.lastPathComponent.humanReadableFileName;
         if (!displayName || displayName.length == 0)
             displayName = baseName.lastPathComponent;
 
@@ -2507,6 +2566,29 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
 
 - (NSString*)statusString
 {
+    // Check for active DJVU to PDF conversion first
+    NSString* failedConversionFileName = [DjvuConverter failedConversionFileNameForTorrent:self];
+    if (failedConversionFileName)
+    {
+        return [NSString stringWithFormat:NSLocalizedString(@"Error: %@ cannot be converted to PDF", "Torrent -> status string"),
+                                         failedConversionFileName];
+    }
+
+    NSString* convertingFileName = [DjvuConverter convertingFileNameForTorrent:self];
+    if (convertingFileName)
+    {
+        // Ensure conversion is actually dispatched (recovery if it wasn't)
+        [DjvuConverter ensureConversionDispatchedForTorrent:self];
+        NSString* progress = [DjvuConverter convertingProgressForTorrent:self];
+        if (progress.length > 0)
+        {
+            return [NSString stringWithFormat:NSLocalizedString(@"Converting %@ (%@) to PDF for compatibility reading…", "Torrent -> status string"),
+                                             convertingFileName,
+                                             progress];
+        }
+        return [NSString stringWithFormat:NSLocalizedString(@"Converting %@ to PDF for compatibility reading…", "Torrent -> status string"), convertingFileName];
+    }
+
     NSString* string;
 
     if (self.anyErrorOrWarning)

@@ -435,12 +435,21 @@ target_link_libraries(${TR_NAME}-mac
         "-weak_framework Sparkle"
         "-weak_framework UserNotifications")
 
-# Link bundled libjpeg-turbo (static)
-target_include_directories(${TR_NAME}-mac PRIVATE ${TURBOJPEG_INCLUDE_DIRS})
-target_link_libraries(${TR_NAME}-mac PRIVATE ${TURBOJPEG_LIBRARIES})
-target_compile_definitions(${TR_NAME}-mac PRIVATE HAVE_TURBOJPEG=1)
-if(TURBOJPEG_UPSTREAM_TARGET)
-    add_dependencies(${TR_NAME}-mac ${TURBOJPEG_UPSTREAM_TARGET})
+# DjVu→PDF conversion deps (static)
+target_link_libraries(${TR_NAME}-mac
+    PRIVATE
+        grok::grokj2k
+        leptonica::leptonica
+        jbig2enc::jbig2enc)
+
+if(GROK_UPSTREAM_TARGET)
+    add_dependencies(${TR_NAME}-mac ${GROK_UPSTREAM_TARGET})
+endif()
+if(LEPTONICA_UPSTREAM_TARGET)
+    add_dependencies(${TR_NAME}-mac ${LEPTONICA_UPSTREAM_TARGET})
+endif()
+if(JBIG2ENC_UPSTREAM_TARGET)
+    add_dependencies(${TR_NAME}-mac ${JBIG2ENC_UPSTREAM_TARGET})
 endif()
 
 if(NOT CMAKE_GENERATOR STREQUAL Xcode)

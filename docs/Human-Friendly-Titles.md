@@ -175,7 +175,7 @@ Media torrents display Play buttons below the status line for quick access to do
 - **Episode detection:** Files with `S01E05` or `1x05` patterns show as `▶ E1`, `▶ E2`, etc.
 - **Season grouping:** Multiple seasons show headers (`Season 1:`, `Season 2:`) followed by episode buttons
 - **Single season:** No header shown, just episode buttons (`▶ E1`, `▶ E2`, ...)
-- **Non-episode files:** Show humanized filename without resolution tags (e.g., `▶ Artist - Track Name`)
+- **Non-episode files:** Show lightly humanized filename (separator cleanup) (e.g., `▶ Artist Track Name`)
 - **CUE file support:** If a `.cue` file exists alongside an audio file, the `.cue` is opened instead
 - **DVD/Blu-ray support:** Torrents with `VIDEO_TS` or `BDMV` folders are detected as disc media
 - **Multi-disc torrents:** Torrents with multiple discs (e.g., `Disk.1/VIDEO_TS`, `Disk.2/VIDEO_TS`) show individual play buttons for each disc
@@ -186,12 +186,11 @@ Media torrents display Play buttons below the status line for quick access to do
 Button titles for individual files follow these rules:
 
 1. **Episode files** (`S01E05`, `1x05` patterns): Show as `▶ E5`, `▶ E12`, etc.
-2. **Non-episode files**: Show humanized filename with technical tags AND resolution stripped
-   - Resolution suffixes (`#2160p`, `#1080p`, etc.) are removed from button titles
-   - All technical tags (codecs, sources, etc.) are removed
-   - Example: `Artist.Track.2160p.FLAC.flac` → `▶ Artist Track`
-3. **Bracketed dates** (`[25.12.2025]`): Parsed as dates and shown as `(... )` in the title
-4. **Clean titles shortcut:** If a name contains only letters/digits, spaces, commas, brackets `[]`, parentheses `()`, braces `{}`, hyphens `-`, colons `:`, and semicolons `;`, it is used as-is (no humanizing).
+2. **Non-episode files**: Show filename with lightweight separator normalization
+   - If the name is separator-heavy (lots of `.` / `-` / `_` and few/no spaces), separators are replaced with spaces
+   - Numeric separators inside dates/ranges are preserved (e.g., `25.04.14`, `2000-2003`)
+   - Years/dates/resolution/technical tags are not extracted (that logic is reserved for torrent title humanization)
+3. **Readable titles shortcut:** If a name already has spaces (or is not separator-heavy), it is used as-is (no extra parsing).
 
 ### DVD/Blu-ray Disc Support
 
@@ -241,15 +240,15 @@ Filenames are converted to readable episode names:
 | `Show.S1.E12.HDTV.mp4` | `▶ E12` |
 | `Show.1x05.720p.mkv` | `▶ E5` |
 | `Artist.Track.Name.mp3` | `▶ Artist Track Name` |
-| `Concert.2160p.FLAC.flac` | `▶ Concert` |
+| `Concert.2160p.FLAC.flac` | `▶ Concert 2160p FLAC` |
 
 ## Implementation
 
 The transformation is implemented in:
 
-- **macOS:** `NSStringAdditions.mm` - `humanReadableTitle` and `humanReadableEpisodeName` properties on `NSString`
+- **macOS:** `NSStringAdditions.mm` - `humanReadableTitle`, `humanReadableFileName`, and `humanReadableEpisodeName` properties on `NSString`
 - **macOS:** `Torrent.mm` - `playableFiles` property for media file detection
 - **macOS:** `TorrentTableView.mm` - Play button UI and dynamic row height
-- **Web UI:** `formatter.js` - `Formatter.humanTitle()` function
+- **Web UI:** `formatter.js` - `Formatter.humanTitle()` (torrent list) and `Formatter.humanFileName()` (file list)
 
 The original technical name remains available via the `name` property and is shown in the Inspector (detail view) where the exact filename may be needed.

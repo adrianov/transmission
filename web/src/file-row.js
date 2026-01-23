@@ -144,7 +144,7 @@ export class FileRow extends EventTarget {
     e = document.createElement('label');
     e.className = 'inspector-torrent-file-list-entry-name';
     e.setAttribute('for', check_id);
-    setTextContent(e, subtree.name);
+    setTextContent(e, Formatter.humanFileName(subtree.name));
     root.append(e);
     root.name_container = e;
 

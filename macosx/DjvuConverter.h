@@ -18,7 +18,18 @@
 /// Clear conversion tracking for a torrent (call when torrent is removed).
 + (void)clearTrackingForTorrent:(Torrent*)torrent;
 
-/// Check if a PDF file is valid (can be opened and has readable pages).
-+ (BOOL)isValidPdf:(NSString*)path;
+/// Get the filename of the first file being converted for a torrent, or nil if none.
+/// Used to display conversion status in the UI.
++ (NSString*)convertingFileNameForTorrent:(Torrent*)torrent;
+
+/// Ensure conversion is dispatched for any queued files that need it.
+/// Call this to recover if conversion was not started properly.
++ (void)ensureConversionDispatchedForTorrent:(Torrent*)torrent;
+
+/// Get the filename of a DJVU that failed to convert, if any.
++ (NSString*)failedConversionFileNameForTorrent:(Torrent*)torrent;
+
+/// Get the page progress string ("X of Y pages") for current conversion.
++ (NSString*)convertingProgressForTorrent:(Torrent*)torrent;
 
 @end
