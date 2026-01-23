@@ -1118,6 +1118,8 @@ static NSString* folderForPlayButton(NSButton* sender, Torrent* torrent)
     {
         state = [NSMutableArray arrayWithCapacity:playableFiles.count];
         BOOL singleItem = playableFiles.count == 1;
+        BOOL isAudio = [torrent.detectedMediaCategory isEqualToString:@"audio"];
+        NSString* icon = isAudio ? @"♫" : @"⏵";
         for (NSDictionary* fileInfo in playableFiles)
         {
             NSMutableDictionary* entry = [fileInfo mutableCopy];
@@ -1126,12 +1128,16 @@ static NSString* folderForPlayButton(NSButton* sender, Torrent* torrent)
                 if ([entry[@"type"] hasPrefix:@"document"])
                     entry[@"baseTitle"] = @"Read";
                 else
-                    entry[@"baseTitle"] = @"▶ Play";
+                    entry[@"baseTitle"] = [NSString stringWithFormat:@"%@ Play", icon];
             }
             else
             {
-                // Multiple items: use display name from file info
-                entry[@"baseTitle"] = entry[@"name"] ?: @"";
+                // Multiple items: use baseTitle from Torrent (already includes icon)
+                // Fall back to name with icon if baseTitle not set
+                if (!entry[@"baseTitle"])
+                {
+                    entry[@"baseTitle"] = [NSString stringWithFormat:@"%@ %@", icon, entry[@"name"] ?: @""];
+                }
             }
             if ([entry[@"type"] hasPrefix:@"document"])
             {
