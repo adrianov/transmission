@@ -562,9 +562,8 @@
     NSTextCheckingResult* seMatch = [seasonEpisodeRegex firstMatchInString:filename options:0 range:NSMakeRange(0, filename.length)];
     if (seMatch && seMatch.numberOfRanges >= 3)
     {
-        NSInteger season = [[filename substringWithRange:[seMatch rangeAtIndex:1]] integerValue];
         NSInteger episode = [[filename substringWithRange:[seMatch rangeAtIndex:2]] integerValue];
-        return [NSString stringWithFormat:@"Season %ld, Episode %ld", (long)season, (long)episode];
+        return [NSString stringWithFormat:@"E%ld", (long)episode];
     }
 
     // Try 1x05 pattern (alternative TV format)
@@ -574,9 +573,8 @@
     NSTextCheckingResult* altMatch = [altSeasonRegex firstMatchInString:filename options:0 range:NSMakeRange(0, filename.length)];
     if (altMatch && altMatch.numberOfRanges >= 3)
     {
-        NSInteger season = [[filename substringWithRange:[altMatch rangeAtIndex:1]] integerValue];
         NSInteger episode = [[filename substringWithRange:[altMatch rangeAtIndex:2]] integerValue];
-        return [NSString stringWithFormat:@"Season %ld, Episode %ld", (long)season, (long)episode];
+        return [NSString stringWithFormat:@"E%ld", (long)episode];
     }
 
     // No episode pattern found - return nil to use humanized filename instead
