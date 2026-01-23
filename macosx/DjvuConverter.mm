@@ -65,30 +65,35 @@ static void ensureGrokInitialized()
     });
 }
 
-struct DjvuPdfBackground
+enum class DjvuPdfImageKind
 {
+    None,
+    Jp2,
+    Jbig2
+};
+
+struct DjvuPdfImageInfo
+{
+    DjvuPdfImageKind kind = DjvuPdfImageKind::None;
     bool gray = false;
     int w = 0;
     int h = 0;
-    std::vector<uint8_t> jp2;
+
+    // Placement in PDF user space (points).
+    double x = 0.0;
+    double y = 0.0;
+    double pdfW = 0.0;
+    double pdfH = 0.0;
+
+    // Encoded bytes. For JP2: JPXDecode stream. For JBIG2: JBIG2Decode page stream.
+    std::vector<uint8_t> bytes;
 };
 
 struct DjvuPdfPageInfo
 {
-    int pageWidth = 0;
-    int pageHeight = 0;
-    int pageDpi = 0;
-    ddjvu_page_type_t pageType = DDJVU_PAGETYPE_BITONAL;
-
     double pdfWidth = 0.0;
     double pdfHeight = 0.0;
-
-    bool hasBackground = false;
-    DjvuPdfBackground background;
-
-    bool hasMask = false;
-    int maskW = 0;
-    int maskH = 0;
+    DjvuPdfImageInfo image;
 };
 
 static bool isGrayscaleRgb24(unsigned char const* rgb, int width, int height, size_t rowBytes)
@@ -179,6 +184,111 @@ static bool isBitonalGray8(unsigned char const* gray, int width, int height, siz
         return false;
 
     return (double)high / (double)low >= MinRatio;
+}
+
+struct CropRect
+{
+    int x0 = 0;
+    int y0 = 0;
+    int x1 = 0; // exclusive
+    int y1 = 0; // exclusive
+};
+
+static void padCropRect(CropRect* r, int pad, int w, int h)
+{
+    if (r == nullptr)
+        return;
+
+    r->x0 = MAX(0, r->x0 - pad);
+    r->y0 = MAX(0, r->y0 - pad);
+    r->x1 = MIN(w, r->x1 + pad);
+    r->y1 = MIN(h, r->y1 + pad);
+}
+
+static bool findGrayContentRect(unsigned char const* gray, int w, int h, size_t rowBytes, unsigned char threshold, CropRect* out)
+{
+    if (gray == nullptr || out == nullptr || w <= 0 || h <= 0 || rowBytes == 0)
+        return false;
+
+    int x0 = w;
+    int y0 = h;
+    int x1 = 0;
+    int y1 = 0;
+
+    for (int y = 0; y < h; ++y)
+    {
+        auto const* row = gray + (size_t)y * rowBytes;
+        for (int x = 0; x < w; ++x)
+        {
+            if (row[x] < threshold)
+            {
+                x0 = MIN(x0, x);
+                y0 = MIN(y0, y);
+                x1 = MAX(x1, x + 1);
+                y1 = MAX(y1, y + 1);
+            }
+        }
+    }
+
+    if (x1 <= x0 || y1 <= y0)
+        return false;
+
+    out->x0 = x0;
+    out->y0 = y0;
+    out->x1 = x1;
+    out->y1 = y1;
+    return true;
+}
+
+static bool findRgbContentRect(unsigned char const* rgb, int w, int h, size_t rowBytes, unsigned char threshold, CropRect* out)
+{
+    if (rgb == nullptr || out == nullptr || w <= 0 || h <= 0 || rowBytes == 0)
+        return false;
+
+    int x0 = w;
+    int y0 = h;
+    int x1 = 0;
+    int y1 = 0;
+
+    for (int y = 0; y < h; ++y)
+    {
+        auto const* row = rgb + (size_t)y * rowBytes;
+        for (int x = 0; x < w; ++x)
+        {
+            unsigned char const r = row[x * 3 + 0];
+            unsigned char const g = row[x * 3 + 1];
+            unsigned char const b = row[x * 3 + 2];
+            if (r < threshold || g < threshold || b < threshold)
+            {
+                x0 = MIN(x0, x);
+                y0 = MIN(y0, y);
+                x1 = MAX(x1, x + 1);
+                y1 = MAX(y1, y + 1);
+            }
+        }
+    }
+
+    if (x1 <= x0 || y1 <= y0)
+        return false;
+
+    out->x0 = x0;
+    out->y0 = y0;
+    out->x1 = x1;
+    out->y1 = y1;
+    return true;
+}
+
+static void setPdfPlacementForCrop(DjvuPdfImageInfo* img, int fullW, int fullH, CropRect const& r, double pagePdfW, double pagePdfH)
+{
+    if (img == nullptr || fullW <= 0 || fullH <= 0)
+        return;
+
+    int const w = r.x1 - r.x0;
+    int const h = r.y1 - r.y0;
+    img->x = (double)r.x0 * pagePdfW / (double)fullW;
+    img->y = (double)(fullH - r.y1) * pagePdfH / (double)fullH;
+    img->pdfW = (double)w * pagePdfW / (double)fullW;
+    img->pdfH = (double)h * pagePdfH / (double)fullH;
 }
 
 static NSData* pbmP4DataFromBits(int w, int h, size_t rowBytes, unsigned char const* bits)
@@ -396,11 +506,7 @@ static bool encodeJp2Grok(std::vector<uint8_t>* out, unsigned char const* pixels
     return ok;
 }
 
-static bool writePdfDeterministic(
-    NSString* tmpPdfPath,
-    std::vector<DjvuPdfPageInfo> const& pages,
-    std::vector<uint8_t> const* jbig2Globals,
-    std::vector<std::vector<uint8_t>> const* jbig2Pages)
+static bool writePdfDeterministic(NSString* tmpPdfPath, std::vector<DjvuPdfPageInfo> const& pages, std::vector<uint8_t> const* jbig2Globals)
 {
     if (tmpPdfPath == nil || pages.empty())
         return false;
@@ -416,8 +522,7 @@ static bool writePdfDeterministic(
 
     struct PageObjs
     {
-        int bg = 0;
-        int mask = 0;
+        int img = 0;
         int contents = 0;
         int page = 0;
     };
@@ -427,14 +532,12 @@ static bool writePdfDeterministic(
     int nextObj = 1;
     int const catalogObj = nextObj++;
     int const pagesObj = nextObj++;
-    int const jbig2GlobalsObj = (jbig2Globals != nullptr) ? nextObj++ : 0;
+    int const jbig2GlobalsObj = (jbig2Globals != nullptr && !jbig2Globals->empty()) ? nextObj++ : 0;
 
     for (size_t i = 0; i < pages.size(); ++i)
     {
-        if (pages[i].hasBackground)
-            pageObjs[i].bg = nextObj++;
-        if (pages[i].hasMask)
-            pageObjs[i].mask = nextObj++;
+        if (pages[i].image.kind != DjvuPdfImageKind::None && !pages[i].image.bytes.empty())
+            pageObjs[i].img = nextObj++;
         pageObjs[i].contents = nextObj++;
         pageObjs[i].page = nextObj++;
     }
@@ -487,45 +590,40 @@ static bool writePdfDeterministic(
     {
         DjvuPdfPageInfo const& p = pages[i];
         PageObjs const& o = pageObjs[i];
-
-        if (p.hasBackground)
+        DjvuPdfImageInfo const& img = p.image;
+        if (o.img != 0)
         {
-            DjvuPdfBackground const& bg = p.background;
-            char const* cs = bg.gray ? "/DeviceGray" : "/DeviceRGB";
-            writeObjBegin(o.bg);
-            fprintf(
-                fp,
-                "<< /Type /XObject /Subtype /Image /Width %d /Height %d /ColorSpace %s /BitsPerComponent 8 /Filter /JPXDecode /Length %zu >>\nstream\n",
-                bg.w,
-                bg.h,
-                cs,
-                bg.jp2.size());
-            fwrite(bg.jp2.data(), 1, bg.jp2.size(), fp);
-            fputs("\nendstream\n", fp);
-            writeObjEnd();
-        }
-
-        if (p.hasMask)
-        {
-            if (jbig2Pages == nullptr || jbig2GlobalsObj == 0 || i >= jbig2Pages->size())
-                return false;
-
-            auto const& maskBytes = (*jbig2Pages)[i];
-            writeObjBegin(o.mask);
-            fprintf(
-                fp,
-                p.hasBackground ?
-                    // JBIG2Decode output uses 0=black, 1=white. For an ImageMask,
-                    // we want 0 (black/text) to paint and 1 (white/background) to be transparent.
-                    "<< /Type /XObject /Subtype /Image /Width %d /Height %d /BitsPerComponent 1 /ImageMask true /Decode [0 1] /Filter /JBIG2Decode /DecodeParms << /JBIG2Globals %d 0 R >> /Length %zu >>\nstream\n" :
-                    // For standalone bitonal pages, store as a normal bilevel grayscale image.
-                    // JBIG2Decode output uses 0=black, 1=white, which matches the default /Decode [0 1].
+            writeObjBegin(o.img);
+            if (img.kind == DjvuPdfImageKind::Jp2)
+            {
+                char const* cs = img.gray ? "/DeviceGray" : "/DeviceRGB";
+                fprintf(
+                    fp,
+                    "<< /Type /XObject /Subtype /Image /Width %d /Height %d /ColorSpace %s /BitsPerComponent 8 /Filter /JPXDecode /Length %zu >>\nstream\n",
+                    img.w,
+                    img.h,
+                    cs,
+                    img.bytes.size());
+            }
+            else if (img.kind == DjvuPdfImageKind::Jbig2)
+            {
+                if (jbig2GlobalsObj == 0)
+                    return false;
+                fprintf(
+                    fp,
                     "<< /Type /XObject /Subtype /Image /Width %d /Height %d /ColorSpace /DeviceGray /BitsPerComponent 1 /Filter /JBIG2Decode /DecodeParms << /JBIG2Globals %d 0 R >> /Length %zu >>\nstream\n",
-                p.maskW,
-                p.maskH,
-                jbig2GlobalsObj,
-                maskBytes.size());
-            fwrite(maskBytes.data(), 1, maskBytes.size(), fp);
+                    img.w,
+                    img.h,
+                    jbig2GlobalsObj,
+                    img.bytes.size());
+            }
+            else
+            {
+                writeObjEnd();
+                return false;
+            }
+
+            fwrite(img.bytes.data(), 1, img.bytes.size(), fp);
             fputs("\nendstream\n", fp);
             writeObjEnd();
         }
@@ -533,14 +631,12 @@ static bool writePdfDeterministic(
         // Contents stream
         std::string contents;
         contents.reserve(128);
-        char tmp[256];
-        snprintf(tmp, sizeof(tmp), "q\n%g 0 0 %g 0 0 cm\n", p.pdfWidth, p.pdfHeight);
-        contents.append(tmp);
-        if (p.hasBackground)
-            contents.append("/ImBg Do\n");
-        if (p.hasMask)
-            contents.append(p.hasBackground ? "0 g\n/ImM Do\n" : "/ImM Do\n");
-        contents.append("Q\n");
+        if (o.img != 0)
+        {
+            char tmp[256];
+            snprintf(tmp, sizeof(tmp), "q\n%g 0 0 %g %g %g cm\n/Im Do\nQ\n", img.pdfW, img.pdfH, img.x, img.y);
+            contents.append(tmp);
+        }
 
         writeStreamObj(o.contents, "<< ", (uint8_t const*)contents.data(), contents.size());
 
@@ -548,13 +644,10 @@ static bool writePdfDeterministic(
         writeObjBegin(o.page);
         fprintf(fp, "<< /Type /Page /Parent %d 0 R /MediaBox [0 0 %g %g] ", pagesObj, p.pdfWidth, p.pdfHeight);
         fputs("/Resources << ", fp);
-        if (p.hasBackground || p.hasMask)
+        if (o.img != 0)
         {
             fputs("/XObject << ", fp);
-            if (p.hasBackground)
-                fprintf(fp, "/ImBg %d 0 R ", o.bg);
-            if (p.hasMask)
-                fprintf(fp, "/ImM %d 0 R ", o.mask);
+            fprintf(fp, "/Im %d 0 R ", o.img);
             fputs(">> ", fp);
         }
         fprintf(fp, ">> /Contents %d 0 R >>\n", o.contents);
@@ -653,19 +746,8 @@ static BOOL convertDjvuFileDeterministic(NSString* djvuPath, NSString* tmpPdfPat
     dispatch_semaphore_t sem = dispatch_semaphore_create(maxConcurrent);
 
     bool ok = true;
-    jbig2ctx* jb = nullptr;
-
-    auto addBlankJbig2Page = [&]() -> bool
-    {
-        unsigned char zero = 0;
-        NSData* pbm = pbmP4DataFromBits(1, 1, 1, &zero);
-        PIX* pix = pixReadMemPnm((l_uint8 const*)pbm.bytes, pbm.length);
-        if (pix == nullptr)
-            return false;
-        jbig2_add_page(jb, pix);
-        pixDestroy(&pix);
-        return true;
-    };
+    std::vector<PIX*> bitonalPixes;
+    std::vector<int> bitonalPageNums;
 
     for (int pageNum = 0; pageNum < pageCount && ok; ++pageNum)
     {
@@ -707,330 +789,228 @@ static BOOL convertDjvuFileDeterministic(NSString* djvuPath, NSString* tmpPdfPat
             }
 
             DjvuPdfPageInfo& p = pagesPtr[pageNum];
-            p.pageWidth = pageWidth;
-            p.pageHeight = pageHeight;
-            p.pageDpi = pageDpi;
-            p.pageType = pageType;
             p.pdfWidth = (double)pageWidth * 72.0 / (double)pageDpi;
             p.pdfHeight = (double)pageHeight * 72.0 / (double)pageDpi;
 
-            int constexpr BgMaxDpi = 200;
-            int constexpr MaskMaxDpi = 300;
-
-            int bgDpi = MIN(BgMaxDpi, pageDpi);
-            int maskDpi = MIN(MaskMaxDpi, pageDpi);
-
-            bool wantBg = (pageType == DDJVU_PAGETYPE_PHOTO || pageType == DDJVU_PAGETYPE_COMPOUND);
-            bool wantMask = (pageType == DDJVU_PAGETYPE_BITONAL || pageType == DDJVU_PAGETYPE_COMPOUND);
-
-            // ddjvu can report UNKNOWN even after decoding is done.
-            // For UNKNOWN pages, we'll try multiple render modes to find the content.
-            bool isUnknownType = (pageType == DDJVU_PAGETYPE_UNKNOWN);
-            if (isUnknownType)
+            int constexpr MaxRenderDpi = 300;
+            int renderDpi = MIN(MaxRenderDpi, pageDpi);
+            int renderW = 0;
+            int renderH = 0;
+            computeRenderDimensions(pageWidth, pageHeight, pageDpi, renderDpi, &renderW, &renderH);
+            if (renderW <= 0 || renderH <= 0)
             {
-                wantBg = true;
-                wantMask = false;
-                pageType = DDJVU_PAGETYPE_PHOTO;
-                p.pageType = pageType;
+                ddjvu_page_release(page);
+                ok = false;
+                break;
             }
 
-            // Some DjVu "compound" pages are effectively just a single image page (no text).
-            // If the mask is empty or dense, treat it as a PHOTO page: render full color and skip the mask.
-            NSData* compoundMaskPbm = nil;
-            int compoundMaskW = 0;
-            int compoundMaskH = 0;
-            if (pageType == DDJVU_PAGETYPE_COMPOUND)
-            {
-                computeRenderDimensions(pageWidth, pageHeight, pageDpi, maskDpi, &compoundMaskW, &compoundMaskH);
-                bool const preferBitonal = (maskDpi == pageDpi) && (compoundMaskW == pageWidth) && (compoundMaskH == pageHeight);
+            size_t rowBytes = (size_t)renderW * 3U;
+            auto rgb = std::make_shared<std::vector<uint8_t>>(rowBytes * (size_t)renderH, (uint8_t)0xFF);
+            ddjvu_rect_t rect = { 0, 0, (unsigned int)renderW, (unsigned int)renderH };
 
-                double coverage = 0.0;
-                compoundMaskPbm = renderDjvuMaskPbmData(page, grey8, msb, compoundMaskW, compoundMaskH, preferBitonal, &coverage);
-                if (compoundMaskPbm == nil || compoundMaskPbm.length == 0)
-                {
-                    NSLog(
-                        @"DjvuConverter ERROR: failed to render compound mask for page %d (type=%d w=%d h=%d) in %@",
-                        pageNum,
-                        (int)pageType,
-                        compoundMaskW,
-                        compoundMaskH,
-                        djvuPath);
-                    ddjvu_page_release(page);
-                    ok = false;
+            std::vector<ddjvu_render_mode_t> modesToTry = { DDJVU_RENDER_COLOR };
+            if (pageType == DDJVU_PAGETYPE_UNKNOWN)
+            {
+                modesToTry = { DDJVU_RENDER_COLOR, DDJVU_RENDER_BLACK, DDJVU_RENDER_COLORONLY, DDJVU_RENDER_FOREGROUND, DDJVU_RENDER_BACKGROUND };
+            }
+
+            int rendered = 0;
+            for (auto mode : modesToTry)
+            {
+                std::fill(rgb->begin(), rgb->end(), (uint8_t)0xFF);
+                rendered = ddjvu_page_render(page, mode, &rect, &rect, rgb24, (unsigned long)rowBytes, (char*)rgb->data());
+                if (rendered)
                     break;
-                }
-
-                // Only skip mask if it's completely empty (< 0.01% coverage).
-                // Preserve the two-layer structure for better fidelity to the original DjVu.
-                double constexpr MinTextCoverage = 0.0001; // 0.01%
-                if (coverage < MinTextCoverage)
-                {
-                    wantMask = false;
-                    pageType = DDJVU_PAGETYPE_PHOTO;
-                    p.pageType = pageType;
-                    compoundMaskPbm = nil;
-                }
             }
 
-            // Some DjVu files report BITONAL but actually contain grayscale/color data.
-            // If it's not truly bitonal, treat it as a PHOTO page to avoid blank output.
-            std::shared_ptr<std::vector<uint8_t>> bitonalProbe;
-            int probeW = 0;
-            int probeH = 0;
-            bool probeIsGray = false;
-            std::vector<uint8_t> probeGray;
-            if (pageType == DDJVU_PAGETYPE_BITONAL)
+            // If scaled render failed, try native resolution and scale down.
+            if (!rendered && (renderW != pageWidth || renderH != pageHeight))
             {
-                computeRenderDimensions(pageWidth, pageHeight, pageDpi, bgDpi, &probeW, &probeH);
-                size_t rowBytes = (size_t)probeW * 3;
-                bitonalProbe = std::make_shared<std::vector<uint8_t>>(rowBytes * (size_t)probeH, (uint8_t)0xFF);
-                ddjvu_rect_t rect = { 0, 0, (unsigned int)probeW, (unsigned int)probeH };
-                int const rendered = ddjvu_page_render(
-                    page,
-                    DDJVU_RENDER_COLOR,
-                    &rect,
-                    &rect,
-                    rgb24,
-                    (unsigned long)rowBytes,
-                    (char*)bitonalProbe->data());
+                size_t nativeRowBytes = (size_t)pageWidth * 3U;
+                auto nativeRgb = std::make_shared<std::vector<uint8_t>>(nativeRowBytes * (size_t)pageHeight, (uint8_t)0xFF);
+                ddjvu_rect_t nativeRect = { 0, 0, (unsigned int)pageWidth, (unsigned int)pageHeight };
+
+                for (auto mode : modesToTry)
+                {
+                    std::fill(nativeRgb->begin(), nativeRgb->end(), (uint8_t)0xFF);
+                    rendered = ddjvu_page_render(
+                        page,
+                        mode,
+                        &nativeRect,
+                        &nativeRect,
+                        rgb24,
+                        (unsigned long)nativeRowBytes,
+                        (char*)nativeRgb->data());
+                    if (rendered)
+                        break;
+                }
+
                 if (rendered)
                 {
-                    probeIsGray = isGrayscaleRgb24(bitonalProbe->data(), probeW, probeH, rowBytes);
-                    if (probeIsGray)
+                    double scaleX = (double)pageWidth / (double)renderW;
+                    double scaleY = (double)pageHeight / (double)renderH;
+                    for (int y = 0; y < renderH; ++y)
                     {
-                        probeGray.resize((size_t)probeW * (size_t)probeH);
-                        for (int y = 0; y < probeH; ++y)
+                        int srcY = MIN((int)(y * scaleY), pageHeight - 1);
+                        auto const* srcRow = nativeRgb->data() + (size_t)srcY * nativeRowBytes;
+                        auto* dstRow = rgb->data() + (size_t)y * rowBytes;
+                        for (int x = 0; x < renderW; ++x)
                         {
-                            auto const* srcRow = bitonalProbe->data() + (size_t)y * rowBytes;
-                            auto* dst = probeGray.data() + (size_t)y * (size_t)probeW;
-                            for (int x = 0; x < probeW; ++x)
-                                dst[x] = srcRow[x * 3 + 0];
+                            int srcX = MIN((int)(x * scaleX), pageWidth - 1);
+                            auto const* src = srcRow + (size_t)srcX * 3U;
+                            auto* dst = dstRow + (size_t)x * 3U;
+                            dst[0] = src[0];
+                            dst[1] = src[1];
+                            dst[2] = src[2];
                         }
-                    }
-
-                    bool const trulyBitonal = probeIsGray && isBitonalGray8(probeGray.data(), probeW, probeH, (size_t)probeW);
-                    if (!trulyBitonal)
-                    {
-                        wantBg = true;
-                        wantMask = false;
-                        pageType = DDJVU_PAGETYPE_PHOTO;
-                        p.pageType = pageType;
                     }
                 }
             }
 
-            // Background: always JPEG2000 (JP2)
-            if (wantBg)
+            if (rendered)
             {
-                int bgW = 0;
-                int bgH = 0;
-                computeRenderDimensions(pageWidth, pageHeight, pageDpi, bgDpi, &bgW, &bgH);
+                bool const gray = isGrayscaleRgb24(rgb->data(), renderW, renderH, rowBytes);
+                unsigned char constexpr CropThreshold = 245;
+                int constexpr CropPad = 4;
 
-                size_t rowBytes = (size_t)bgW * 3;
-                std::shared_ptr<std::vector<uint8_t>> rgb;
-
-                if (bitonalProbe && bgW == probeW && bgH == probeH)
+                if (gray)
                 {
-                    rgb = bitonalProbe;
-                }
-                else
-                {
-                    rgb = std::make_shared<std::vector<uint8_t>>(rowBytes * (size_t)bgH, (uint8_t)0xFF);
-                    ddjvu_rect_t rect = { 0, 0, (unsigned int)bgW, (unsigned int)bgH };
-
-                    // Try different render modes until one succeeds.
-                    // For UNKNOWN pages, try all modes; for known types, use appropriate mode.
-                    std::vector<ddjvu_render_mode_t> modesToTry;
-                    if (pageType == DDJVU_PAGETYPE_COMPOUND)
+                    std::vector<unsigned char> grayBuf((size_t)renderW * (size_t)renderH);
+                    for (int y = 0; y < renderH; ++y)
                     {
-                        modesToTry = { DDJVU_RENDER_BACKGROUND, DDJVU_RENDER_COLOR };
-                    }
-                    else if (isUnknownType)
-                    {
-                        // For UNKNOWN type, try ALL possible modes
-                        modesToTry = { DDJVU_RENDER_COLOR,    DDJVU_RENDER_BLACK,      DDJVU_RENDER_COLORONLY,
-                                       DDJVU_RENDER_MASKONLY, DDJVU_RENDER_FOREGROUND, DDJVU_RENDER_BACKGROUND };
-                    }
-                    else
-                    {
-                        modesToTry = { DDJVU_RENDER_COLOR };
+                        auto const* srcRow = rgb->data() + (size_t)y * rowBytes;
+                        auto* dst = grayBuf.data() + (size_t)y * (size_t)renderW;
+                        for (int x = 0; x < renderW; ++x)
+                            dst[x] = srcRow[x * 3 + 0];
                     }
 
-                    int rendered = 0;
-                    for (auto tryMode : modesToTry)
+                    bool const bitonal = isBitonalGray8(grayBuf.data(), renderW, renderH, (size_t)renderW);
+                    if (bitonal)
                     {
-                        // Clear buffer to white before each attempt
-                        std::fill(rgb->begin(), rgb->end(), (uint8_t)0xFF);
-                        rendered = ddjvu_page_render(page, tryMode, &rect, &rect, rgb24, (unsigned long)rowBytes, (char*)rgb->data());
-                        if (rendered)
-                            break;
-                    }
-
-                    // If scaled render failed, try at native resolution and scale down ourselves.
-                    if (!rendered && (bgW != pageWidth || bgH != pageHeight))
-                    {
-                        size_t nativeRowBytes = (size_t)pageWidth * 3;
-                        auto nativeRgb = std::make_shared<std::vector<uint8_t>>(nativeRowBytes * (size_t)pageHeight, (uint8_t)0xFF);
-                        ddjvu_rect_t nativeRect = { 0, 0, (unsigned int)pageWidth, (unsigned int)pageHeight };
-
-                        for (auto tryMode : modesToTry)
+                        bool const preferBitonal = (renderDpi == pageDpi) && (renderW == pageWidth) && (renderH == pageHeight);
+                        NSData* pbm = renderDjvuMaskPbmData(page, grey8, msb, renderW, renderH, preferBitonal, nullptr);
+                        PIX* pix = (pbm != nil && pbm.length != 0) ? pixReadMemPnm((l_uint8 const*)pbm.bytes, pbm.length) : nullptr;
+                        if (pix != nullptr)
                         {
-                            rendered = ddjvu_page_render(
-                                page,
-                                tryMode,
-                                &nativeRect,
-                                &nativeRect,
-                                rgb24,
-                                (unsigned long)nativeRowBytes,
-                                (char*)nativeRgb->data());
-                            if (rendered)
-                                break;
-                        }
-
-                        if (rendered)
-                        {
-                            // Scale down using nearest-neighbor sampling.
-                            double scaleX = (double)pageWidth / bgW;
-                            double scaleY = (double)pageHeight / bgH;
-                            for (int y = 0; y < bgH; ++y)
+                            BOX* box = nullptr;
+                            if (pixClipToForeground(pix, nullptr, &box) == 0 && box != nullptr)
                             {
-                                for (int x = 0; x < bgW; ++x)
+                                l_int32 bx = 0;
+                                l_int32 by = 0;
+                                l_int32 bw = 0;
+                                l_int32 bh = 0;
+                                boxGetGeometry(box, &bx, &by, &bw, &bh);
+
+                                int x0 = MAX(0, (int)bx - CropPad);
+                                int y0 = MAX(0, (int)by - CropPad);
+                                int x1 = MIN(renderW, (int)bx + (int)bw + CropPad);
+                                int y1 = MIN(renderH, (int)by + (int)bh + CropPad);
+                                CropRect const cr{ x0, y0, x1, y1 };
+
+                                BOX* clipBox = boxCreate(x0, y0, x1 - x0, y1 - y0);
+                                PIX* pixCropped = clipBox != nullptr ? pixClipRectangle(pix, clipBox, nullptr) : nullptr;
+                                boxDestroy(&clipBox);
+                                boxDestroy(&box);
+                                pixDestroy(&pix);
+
+                                if (pixCropped != nullptr && pixGetWidth(pixCropped) > 0 && pixGetHeight(pixCropped) > 0)
                                 {
-                                    int srcX = MIN((int)(x * scaleX), pageWidth - 1);
-                                    int srcY = MIN((int)(y * scaleY), pageHeight - 1);
-                                    auto const* src = nativeRgb->data() + (size_t)srcY * nativeRowBytes + (size_t)srcX * 3;
-                                    auto* dst = rgb->data() + (size_t)y * rowBytes + (size_t)x * 3;
-                                    dst[0] = src[0];
-                                    dst[1] = src[1];
-                                    dst[2] = src[2];
+                                    p.image.kind = DjvuPdfImageKind::Jbig2;
+                                    p.image.w = pixGetWidth(pixCropped);
+                                    p.image.h = pixGetHeight(pixCropped);
+                                    setPdfPlacementForCrop(&p.image, renderW, renderH, cr, p.pdfWidth, p.pdfHeight);
+                                    bitonalPageNums.push_back(pageNum);
+                                    bitonalPixes.push_back(pixCropped);
+                                }
+                                else if (pixCropped != nullptr)
+                                {
+                                    pixDestroy(&pixCropped);
                                 }
                             }
-                        }
-                    }
-
-                    // If still not rendered, page has no image content - use blank (white) page.
-                    // This can happen with annotation-only pages or intentionally blank pages.
-                }
-
-                bool const gray = isGrayscaleRgb24(rgb->data(), bgW, bgH, rowBytes);
-                p.hasBackground = true;
-                p.background.w = bgW;
-                p.background.h = bgH;
-                p.background.gray = gray;
-
-                dispatch_group_async(encGroup, encQ, ^{
-                    @autoreleasepool
-                    {
-                        dispatch_semaphore_wait(sem, DISPATCH_TIME_FOREVER);
-
-                        std::vector<uint8_t> jp2;
-                        if (gray)
-                        {
-                            std::vector<uint8_t> grayBuf;
-                            grayBuf.resize((size_t)bgW * (size_t)bgH);
-                            for (int y = 0; y < bgH; ++y)
+                            else
                             {
-                                auto const* srcRow = rgb->data() + (size_t)y * rowBytes;
-                                auto* dst = grayBuf.data() + (size_t)y * (size_t)bgW;
-                                for (int x = 0; x < bgW; ++x)
-                                    dst[x] = srcRow[x * 3 + 0];
+                                if (box != nullptr)
+                                    boxDestroy(&box);
+                                pixDestroy(&pix);
                             }
-                            (void)encodeJp2Grok(&jp2, grayBuf.data(), bgW, bgH, (size_t)bgW, true);
                         }
-                        else
-                        {
-                            (void)encodeJp2Grok(&jp2, rgb->data(), bgW, bgH, rowBytes, false);
-                        }
-
-                        if (!jp2.empty())
-                            pagesPtr[pageNum].background.jp2 = std::move(jp2);
-
-                        dispatch_semaphore_signal(sem);
                     }
-                });
-            }
 
-            // Mask: JBIG2 (only for bitonal/compound pages)
-            if (wantMask)
-            {
-                if (jb == nullptr)
-                {
-                    // Create JBIG2 context on-demand; backfill earlier pages with blanks.
-                    // Parameters: thresh=0.85 (symbol matching), weight=0.5, no resolution,
-                    // PDF mode (no full headers), refinement disabled (upstream refinement is unreliable).
-                    jb = jbig2_init(0.85f, 0.5f, 0, 0, false, -1);
-                    if (jb == nullptr)
+                    if (p.image.kind == DjvuPdfImageKind::None)
                     {
-                        NSLog(@"DjvuConverter ERROR: jbig2_init failed for %@", djvuPath);
-                        ddjvu_page_release(page);
-                        ok = false;
-                        break;
-                    }
-
-                    for (int i = 0; i < pageNum; ++i)
-                    {
-                        if (!addBlankJbig2Page())
+                        CropRect cr{};
+                        if (findGrayContentRect(grayBuf.data(), renderW, renderH, (size_t)renderW, CropThreshold, &cr))
                         {
-                            NSLog(@"DjvuConverter ERROR: failed to add blank JBIG2 page %d for %@", i, djvuPath);
-                            ddjvu_page_release(page);
-                            ok = false;
-                            break;
+                            padCropRect(&cr, CropPad, renderW, renderH);
+                            int cropW = cr.x1 - cr.x0;
+                            int cropH = cr.y1 - cr.y0;
+                            if (cropW > 0 && cropH > 0)
+                            {
+                                auto pixels = std::make_shared<std::vector<unsigned char>>((size_t)cropW * (size_t)cropH);
+                                for (int y = 0; y < cropH; ++y)
+                                {
+                                    auto const* srcRow = grayBuf.data() + (size_t)(cr.y0 + y) * (size_t)renderW + (size_t)cr.x0;
+                                    memcpy(pixels->data() + (size_t)y * (size_t)cropW, srcRow, (size_t)cropW);
+                                }
+
+                                p.image.kind = DjvuPdfImageKind::Jp2;
+                                p.image.gray = true;
+                                p.image.w = cropW;
+                                p.image.h = cropH;
+                                setPdfPlacementForCrop(&p.image, renderW, renderH, cr, p.pdfWidth, p.pdfHeight);
+
+                                dispatch_group_async(encGroup, encQ, ^{
+                                    @autoreleasepool
+                                    {
+                                        dispatch_semaphore_wait(sem, DISPATCH_TIME_FOREVER);
+                                        std::vector<uint8_t> jp2;
+                                        (void)encodeJp2Grok(&jp2, pixels->data(), cropW, cropH, (size_t)cropW, true);
+                                        if (!jp2.empty())
+                                            pagesPtr[pageNum].image.bytes = std::move(jp2);
+                                        dispatch_semaphore_signal(sem);
+                                    }
+                                });
+                            }
                         }
                     }
-                    if (!ok)
-                        break;
-                }
-
-                int maskW = 0;
-                int maskH = 0;
-                NSData* pbm = nil;
-                if (pageType == DDJVU_PAGETYPE_COMPOUND && compoundMaskPbm != nil)
-                {
-                    maskW = compoundMaskW;
-                    maskH = compoundMaskH;
-                    pbm = compoundMaskPbm;
                 }
                 else
                 {
-                    computeRenderDimensions(pageWidth, pageHeight, pageDpi, maskDpi, &maskW, &maskH);
-                    // Only attempt direct 1-bit when unscaled at source resolution.
-                    bool const preferBitonal = (maskDpi == pageDpi) && (maskW == pageWidth) && (maskH == pageHeight);
-                    pbm = renderDjvuMaskPbmData(page, grey8, msb, maskW, maskH, preferBitonal, nullptr);
-                }
+                    CropRect cr{};
+                    if (findRgbContentRect(rgb->data(), renderW, renderH, rowBytes, CropThreshold, &cr))
+                    {
+                        padCropRect(&cr, CropPad, renderW, renderH);
+                        int cropW = cr.x1 - cr.x0;
+                        int cropH = cr.y1 - cr.y0;
+                        if (cropW > 0 && cropH > 0)
+                        {
+                            size_t const cropRowBytes = (size_t)cropW * 3U;
+                            auto pixels = std::make_shared<std::vector<unsigned char>>(cropRowBytes * (size_t)cropH);
+                            for (int y = 0; y < cropH; ++y)
+                            {
+                                auto const* srcRow = rgb->data() + (size_t)(cr.y0 + y) * rowBytes + (size_t)cr.x0 * 3U;
+                                memcpy(pixels->data() + (size_t)y * cropRowBytes, srcRow, cropRowBytes);
+                            }
 
-                if (pbm == nil || pbm.length == 0)
-                {
-                    NSLog(@"DjvuConverter ERROR: failed to render mask PBM for page %d (type=%d w=%d h=%d) in %@", pageNum, (int)pageType, maskW, maskH, djvuPath);
-                    ddjvu_page_release(page);
-                    ok = false;
-                    break;
-                }
+                            p.image.kind = DjvuPdfImageKind::Jp2;
+                            p.image.gray = false;
+                            p.image.w = cropW;
+                            p.image.h = cropH;
+                            setPdfPlacementForCrop(&p.image, renderW, renderH, cr, p.pdfWidth, p.pdfHeight);
 
-                PIX* pix = pixReadMemPnm((l_uint8 const*)pbm.bytes, pbm.length);
-                if (pix == nullptr)
-                {
-                    NSLog(@"DjvuConverter ERROR: failed to parse mask PBM for page %d in %@", pageNum, djvuPath);
-                    ddjvu_page_release(page);
-                    ok = false;
-                    break;
-                }
-
-                jbig2_add_page(jb, pix);
-                pixDestroy(&pix);
-
-                p.hasMask = true;
-                p.maskW = maskW;
-                p.maskH = maskH;
-            }
-            else if (jb != nullptr)
-            {
-                // Keep page index alignment for jbig2enc outputs.
-                if (!addBlankJbig2Page())
-                {
-                    NSLog(@"DjvuConverter ERROR: failed to add blank JBIG2 page %d (alignment) for %@", pageNum, djvuPath);
-                    ddjvu_page_release(page);
-                    ok = false;
-                    break;
+                            dispatch_group_async(encGroup, encQ, ^{
+                                @autoreleasepool
+                                {
+                                    dispatch_semaphore_wait(sem, DISPATCH_TIME_FOREVER);
+                                    std::vector<uint8_t> jp2;
+                                    (void)encodeJp2Grok(&jp2, pixels->data(), cropW, cropH, cropRowBytes, false);
+                                    if (!jp2.empty())
+                                        pagesPtr[pageNum].image.bytes = std::move(jp2);
+                                    dispatch_semaphore_signal(sem);
+                                }
+                            });
+                        }
+                    }
                 }
             }
 
@@ -1046,7 +1026,7 @@ static BOOL convertDjvuFileDeterministic(NSString* djvuPath, NSString* tmpPdfPat
     {
         for (int i = 0; i < pageCount && ok; ++i)
         {
-            if (pagesPtr[i].hasBackground && pagesPtr[i].background.jp2.empty())
+            if (pagesPtr[i].image.kind == DjvuPdfImageKind::Jp2 && pagesPtr[i].image.bytes.empty())
             {
                 NSLog(@"DjvuConverter ERROR: JP2 encoding failed for page %d in %@", i, djvuPath);
                 ok = false;
@@ -1055,54 +1035,70 @@ static BOOL convertDjvuFileDeterministic(NSString* djvuPath, NSString* tmpPdfPat
     }
 
     std::vector<uint8_t> globals;
-    std::vector<std::vector<uint8_t>> jbig2Pages;
-    if (ok && jb != nullptr)
+    if (ok && !bitonalPixes.empty())
     {
-        int globalsLen = 0;
-        uint8_t* globalsBuf = jbig2_pages_complete(jb, &globalsLen);
-        if (globalsBuf == nullptr || globalsLen <= 0)
+        jbig2ctx* jb2 = jbig2_init(0.85f, 0.5f, 0, 0, false, -1);
+        if (jb2 == nullptr)
         {
-            NSLog(@"DjvuConverter ERROR: jbig2_pages_complete failed for %@", djvuPath);
+            NSLog(@"DjvuConverter ERROR: jbig2_init failed for %@", djvuPath);
             ok = false;
-        }
-        else
-        {
-            globals.assign(globalsBuf, globalsBuf + (size_t)globalsLen);
-            free(globalsBuf);
         }
 
         if (ok)
         {
-            jbig2Pages.resize((size_t)pageCount);
-            for (int i = 0; i < pageCount && ok; ++i)
+            for (auto* pix : bitonalPixes)
+                jbig2_add_page(jb2, pix);
+
+            int globalsLen = 0;
+            uint8_t* globalsBuf = jbig2_pages_complete(jb2, &globalsLen);
+            if (globalsBuf == nullptr || globalsLen <= 0)
             {
-                int len = 0;
-                uint8_t* pageBuf = jbig2_produce_page(jb, i, -1, -1, &len);
-                if (pageBuf == nullptr || len <= 0)
+                NSLog(@"DjvuConverter ERROR: jbig2_pages_complete failed for %@", djvuPath);
+                ok = false;
+            }
+            else
+            {
+                globals.assign(globalsBuf, globalsBuf + (size_t)globalsLen);
+                free(globalsBuf);
+            }
+
+            if (ok)
+            {
+                for (size_t i = 0; i < bitonalPageNums.size() && ok; ++i)
                 {
-                    NSLog(@"DjvuConverter ERROR: jbig2_produce_page failed for page %d in %@", i, djvuPath);
-                    ok = false;
-                    break;
+                    int len = 0;
+                    uint8_t* pageBuf = jbig2_produce_page(jb2, (int)i, -1, -1, &len);
+                    if (pageBuf == nullptr || len <= 0)
+                    {
+                        NSLog(@"DjvuConverter ERROR: jbig2_produce_page failed for bitonal index %zu in %@", i, djvuPath);
+                        ok = false;
+                        break;
+                    }
+
+                    int const pageIndex = bitonalPageNums[i];
+                    pagesPtr[pageIndex].image.bytes.assign(pageBuf, pageBuf + (size_t)len);
+                    free(pageBuf);
+                    if (pagesPtr[pageIndex].image.bytes.empty())
+                        ok = false;
                 }
-                jbig2Pages[(size_t)i].assign(pageBuf, pageBuf + (size_t)len);
-                free(pageBuf);
             }
         }
 
-        jbig2_destroy(jb);
-        jb = nullptr;
+        if (jb2 != nullptr)
+            jbig2_destroy(jb2);
     }
+
+    for (auto*& pix : bitonalPixes)
+        pixDestroy(&pix);
+    bitonalPixes.clear();
 
     if (ok)
     {
-        bool const haveJbig2 = !globals.empty() && !jbig2Pages.empty();
-        ok = writePdfDeterministic(tmpPdfPath, pages, haveJbig2 ? &globals : nullptr, haveJbig2 ? &jbig2Pages : nullptr);
+        bool const haveJbig2 = !globals.empty();
+        ok = writePdfDeterministic(tmpPdfPath, pages, haveJbig2 ? &globals : nullptr);
         if (!ok)
             NSLog(@"DjvuConverter ERROR: writePdfDeterministic failed for %@", djvuPath);
     }
-
-    if (jb != nullptr)
-        jbig2_destroy(jb);
 
     ddjvu_format_release(rgb24);
     ddjvu_format_release(grey8);
