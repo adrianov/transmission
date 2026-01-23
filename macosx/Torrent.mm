@@ -240,6 +240,13 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
     timeMachineExcludeQueue = dispatch_queue_create("updateTimeMachineExclude", DISPATCH_QUEUE_SERIAL);
 }
 
+- (void)dealloc
+{
+    // Remove all notification observers to prevent crashes when notifications fire after dealloc
+    [NSNotificationCenter.defaultCenter removeObserver:self];
+    // Note: Don't call DjvuConverter clearTrackingForTorrent here - it accesses fHandle which may be invalid
+}
+
 - (instancetype)initWithPath:(NSString*)path
                     location:(NSString*)location
            deleteTorrentFile:(BOOL)torrentDelete
@@ -953,13 +960,30 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
             else
             {
                 name = folder.lastPathComponent;
+                NSArray<NSString*>* parts = [folder pathComponents];
+
+                // For VIDEO_TS or BDMV folders, use parent folder name instead
+                if (isDisc && parts.count >= 2)
+                {
+                    NSString* upperName = name.uppercaseString;
+                    if ([upperName isEqualToString:@"VIDEO_TS"] || [upperName isEqualToString:@"BDMV"])
+                    {
+                        name = parts[parts.count - 2];
+                    }
+                }
+
+                // Humanize disc folder names (e.g., "Movie.Name.2020" -> "Movie Name")
+                if (isDisc && name.length > 0)
+                {
+                    name = name.humanReadableTitle;
+                }
+
                 if (name.length == 0)
                 {
                     name = [NSString stringWithFormat:@"%@ %lu", (isDisc ? @"Disc" : @"Album"), (unsigned long)(i + 1)];
                 }
                 else
                 {
-                    NSArray<NSString*>* parts = [folder pathComponents];
                     if (parts.count >= 2)
                     {
                         NSRegularExpression* cdRegex = [NSRegularExpression regularExpressionWithPattern:@"^(CD|Disc)\\s*\\d+$"
@@ -988,7 +1012,8 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
                 }
             }
 
-            NSString* baseTitle = [NSString stringWithFormat:@"▶ %@", name];
+            BOOL isAudio = [type isEqualToString:@"album"];
+            NSString* baseTitle = [NSString stringWithFormat:@"%@ %@", (isAudio ? @"♫" : @"⏵"), name];
 
             [entries addObject:@{
                 @"type" : type,
@@ -1192,7 +1217,7 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
         }
 
         BOOL const isDjvu = [ext isEqualToString:@"djvu"] || [ext isEqualToString:@"djv"];
-        
+
         // Skip DJVU files if the torrent already contains a PDF with the same base name
         if (isDjvu)
         {
@@ -1222,8 +1247,9 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
         if (isDjvu)
         {
             companionPdfPath = [path.stringByDeletingPathExtension stringByAppendingPathExtension:@"pdf"];
-            // Only use companion PDF if it exists and is valid (not damaged)
-            if ([NSFileManager.defaultManager fileExistsAtPath:companionPdfPath] && [DjvuConverter isValidPdf:companionPdfPath])
+            // Only use companion PDF if it exists.
+            // DjvuConverter writes PDFs atomically (temp file + rename), so partial PDFs won't be visible.
+            if ([NSFileManager.defaultManager fileExistsAtPath:companionPdfPath])
             {
                 useCompanionPdf = YES;
                 path = companionPdfPath;
@@ -1351,6 +1377,8 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
 
     // Build final entries with titles
     NSMutableArray<NSDictionary*>* result = [NSMutableArray arrayWithCapacity:playable.count];
+    BOOL isAudio = (self.fMediaType == TorrentMediaTypeAudio);
+    NSString* icon = isAudio ? @"♫" : @"⏵";
     for (NSDictionary* fileInfo in playable)
     {
         NSString* baseTitle;
@@ -1360,11 +1388,11 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
         }
         else if (hasSeasonInfo && [fileInfo[@"season"] integerValue] > 0)
         {
-            baseTitle = [NSString stringWithFormat:@"▶ E%@", fileInfo[@"episode"]];
+            baseTitle = [NSString stringWithFormat:@"%@ E%@", icon, fileInfo[@"episode"]];
         }
         else
         {
-            baseTitle = [NSString stringWithFormat:@"▶ %@", fileInfo[@"name"]];
+            baseTitle = [NSString stringWithFormat:@"%@ %@", icon, fileInfo[@"name"]];
         }
 
         NSMutableDictionary* entry = [fileInfo mutableCopy];
@@ -2883,7 +2911,7 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
         self.cachedPlayButtonState = nil;
         self.cachedPlayButtonSource = nil;
         self.cachedPlayButtonLayout = nil;
-        
+
         // Trigger UI refresh
         [NSNotificationCenter.defaultCenter postNotificationName:@"UpdateUI" object:nil];
     }
