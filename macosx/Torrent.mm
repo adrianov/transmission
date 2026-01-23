@@ -1130,7 +1130,19 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
         }
     }
 
-    // Second pass: collect playable files
+    // Second pass: collect PDF base names in the torrent (to skip DJVU files that have matching PDFs)
+    NSMutableSet<NSString*>* pdfBaseNames = [NSMutableSet set];
+    for (NSUInteger i = 0; i < count; i++)
+    {
+        auto const file = tr_torrentFile(self.fHandle, i);
+        NSString* fileName = @(file.name);
+        if ([fileName.pathExtension.lowercaseString isEqualToString:@"pdf"])
+        {
+            [pdfBaseNames addObject:fileName.stringByDeletingPathExtension.lowercaseString];
+        }
+    }
+
+    // Third pass: collect playable files
     NSMutableDictionary<NSString*, NSNumber*>* cueProgress = [NSMutableDictionary dictionary];
     for (NSUInteger i = 0; i < count; i++)
     {
@@ -1179,6 +1191,19 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
             }
         }
 
+        BOOL const isDjvu = [ext isEqualToString:@"djvu"] || [ext isEqualToString:@"djv"];
+        
+        // Skip DJVU files if the torrent already contains a PDF with the same base name
+        if (isDjvu)
+        {
+            NSString* baseName = fileName.stringByDeletingPathExtension.lowercaseString;
+            if ([pdfBaseNames containsObject:baseName])
+            {
+                // Torrent has both DJVU and PDF - skip DJVU, PDF will be shown separately
+                continue;
+            }
+        }
+
         CGFloat progress = tr_torrentFileConsecutiveProgress(self.fHandle, i);
         if (progress < 0)
         {
@@ -1192,7 +1217,6 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
         BOOL const isDocument = [documentExtensions containsObject:ext];
         BOOL useCompanionPdf = NO;
         NSString* companionPdfPath = nil;
-        BOOL const isDjvu = [ext isEqualToString:@"djvu"] || [ext isEqualToString:@"djv"];
 
         // Check for companion PDF for DJVU files (created by DjvuConverter)
         if (isDjvu)
@@ -2859,6 +2883,9 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
         self.cachedPlayButtonState = nil;
         self.cachedPlayButtonSource = nil;
         self.cachedPlayButtonLayout = nil;
+        
+        // Trigger UI refresh
+        [NSNotificationCenter.defaultCenter postNotificationName:@"UpdateUI" object:nil];
     }
 }
 

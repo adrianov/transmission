@@ -53,7 +53,7 @@
 	<key>DoneScriptEnabled</key>
 	<false/>
 	<key>AutoConvertDjvu</key>
-	<false/>
+	<true/>
 	<key>DownloadAsk</key>
 	<true/>
 	<key>DownloadAskManual</key>
@@ -157,11 +157,11 @@
 	<key>SmallView</key>
 	<false/>
 	<key>Sort</key>
-	<string>Order</string>
+	<string>Date</string>
 	<key>SortByGroup</key>
-	<false/>
+	<true/>
 	<key>SortReverse</key>
-	<false/>
+	<true/>
 	<key>SpeedLimit</key>
 	<false/>
 	<key>SpeedLimitAuto</key>

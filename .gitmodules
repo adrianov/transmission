@@ -67,3 +67,6 @@
 [submodule "third-party/djvulibre"]
 	path = third-party/djvulibre
 	url = https://github.com/acmepjz/djvulibre.git
+[submodule "third-party/libjpeg-turbo"]
+	path = third-party/libjpeg-turbo
+	url = https://github.com/libjpeg-turbo/libjpeg-turbo.git

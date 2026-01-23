@@ -97,7 +97,7 @@ extern NSString* const kTorrentDidChangeGroupNotification;
 
 /// Array of playable media files. Each entry is a dictionary with keys:
 /// - "index": NSNumber file index
-/// - "name": NSString humanized display name (e.g., "Season 1, Episode 5")
+/// - "name": NSString humanized display name (e.g., "E5" for episodes)
 /// - "path": NSString file path on disk (nil if not downloaded)
 /// Only includes files that are video/audio and exist on disk.
 @property(nonatomic, readonly) NSArray<NSDictionary*>* playableFiles;

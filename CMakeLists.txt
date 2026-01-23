@@ -588,6 +588,19 @@ tr_add_external_auto_library(CRC32C crc32c crc32c
         -DCRC32C_USE_GLOG=OFF
         -DCRC32C_INSTALL=ON)
 
+tr_add_external_auto_library(TURBOJPEG libjpeg-turbo turbojpeg
+    TARGET libjpeg-turbo::turbojpeg
+    CMAKE_ARGS
+        -DENABLE_SHARED=OFF
+        -DENABLE_STATIC=ON
+        -DWITH_TURBOJPEG=ON
+        -DWITH_JPEG8=ON
+        -DWITH_SIMD=ON
+        -DWITH_TOOLS=OFF
+        -DWITH_TESTS=OFF
+        -DWITH_FUZZ=OFF
+        -DCMAKE_INSTALL_LIBDIR=lib)
+
 set(TR_WEB_ASSETS ${PROJECT_SOURCE_DIR}/web/public_html)
 if(REBUILD_WEB)
     tr_get_required_flag(REBUILD_WEB NPM_IS_REQUIRED)

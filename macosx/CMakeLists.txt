@@ -435,6 +435,14 @@ target_link_libraries(${TR_NAME}-mac
         "-weak_framework Sparkle"
         "-weak_framework UserNotifications")
 
+# Link bundled libjpeg-turbo (static)
+target_include_directories(${TR_NAME}-mac PRIVATE ${TURBOJPEG_INCLUDE_DIRS})
+target_link_libraries(${TR_NAME}-mac PRIVATE ${TURBOJPEG_LIBRARIES})
+target_compile_definitions(${TR_NAME}-mac PRIVATE HAVE_TURBOJPEG=1)
+if(TURBOJPEG_UPSTREAM_TARGET)
+    add_dependencies(${TR_NAME}-mac ${TURBOJPEG_UPSTREAM_TARGET})
+endif()
+
 if(NOT CMAKE_GENERATOR STREQUAL Xcode)
     add_custom_command(
         TARGET ${TR_NAME}-mac
