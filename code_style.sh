@@ -11,6 +11,8 @@ PATH="${PATH}:/usr/local/bin"
 # for Apple Silicon Mac
 PATH="${PATH}:/opt/homebrew/bin"
 
+exitcode=0
+
 if [[ "x$1" == *"check"* ]]; then
   echo "checking code format"
 else
@@ -87,8 +89,23 @@ npm_lint_args="$([ -n "$fix" ] && echo 'lint:fix' || echo 'lint')"
 if ! npm ci --no-audit --no-fund --no-progress &>/dev/null; then
   [ -n "$fix" ] || echo 'JS code could not be checked -- "npm ci" failed'
   exitcode=1
-elif ! npm run --silent $npm_lint_args; then
-  [ -n "$fix" ] || echo 'JS code needs formatting'
+else
+  if [ -n "$fix" ]; then
+    if ! npm run --silent lint:eslint:fix -- "src/**/*.js"; then
+      echo 'JS code could not be auto-fixed by eslint'
+      exitcode=1
+    fi
+  fi
+
+  if ! npm run --silent $npm_lint_args; then
+    [ -n "$fix" ] || echo 'JS code needs formatting'
+    exitcode=1
+  fi
+fi
+
+prettier_args="$([ -n "$fix" ] && echo '--write' || echo '--check')"
+if ! npx prettier --log-level warn $prettier_args "src/**/*.js"; then
+  [ -n "$fix" ] || echo 'JS code needs prettier formatting'
   exitcode=1
 fi
 
