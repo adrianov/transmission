@@ -340,14 +340,28 @@ function formatHumanFileName(name) {
   let hyphenCount = 0;
   let underscoreCount = 0;
   for (const ch of base) {
-    if (ch === ' ') {
-      whitespaceCount += 1;
-    } else if (ch === '.') {
-      dotCount += 1;
-    } else if (ch === '-') {
-      hyphenCount += 1;
-    } else if (ch === '_') {
-      underscoreCount += 1;
+    switch (ch) {
+      case ' ': {
+        whitespaceCount += 1;
+
+        break;
+      }
+      case '.': {
+        dotCount += 1;
+
+        break;
+      }
+      case '-': {
+        hyphenCount += 1;
+
+        break;
+      }
+      case '_': {
+        underscoreCount += 1;
+
+        break;
+      }
+      // No default
     }
   }
 
@@ -368,15 +382,26 @@ function formatHumanFileName(name) {
     const next = i + 1 < base.length ? base[i + 1] : '';
     const betweenDigits = /\d/.test(prev) && /\d/.test(next);
 
-    if (c === '_') {
-      out += ' ';
-    } else if (c === '.') {
-      out += betweenDigits ? '.' : ' ';
-    } else if (c === '-') {
-      const spacedDash = prev === ' ' && next === ' ';
-      out += betweenDigits || spacedDash ? '-' : ' ';
-    } else {
-      out += c;
+    switch (c) {
+      case '_': {
+        out += ' ';
+
+        break;
+      }
+      case '.': {
+        out += betweenDigits ? '.' : ' ';
+
+        break;
+      }
+      case '-': {
+        const spacedDash = prev === ' ' && next === ' ';
+        out += betweenDigits || spacedDash ? '-' : ' ';
+
+        break;
+      }
+      default: {
+        out += c;
+      }
     }
   }
 
@@ -399,14 +424,14 @@ export const Formatter = {
     return `${this.number(n)} ${this.ngettext(msgid, msgid_plural, n)}`;
   },
 
-  /** Converts technical torrent name to human-friendly title */
-  humanTitle(name) {
-    return formatHumanTitle(name);
-  },
-
   /** Converts a filename/folder name to a lightweight human-friendly label */
   humanFileName(name) {
     return formatHumanFileName(name);
+  },
+
+  /** Converts technical torrent name to human-friendly title */
+  humanTitle(name) {
+    return formatHumanTitle(name);
   },
 
   // Formats a memory size into a human-readable string
