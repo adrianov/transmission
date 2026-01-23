@@ -34,6 +34,11 @@ static NSMutableDictionary<NSString*, NSMutableSet<NSString*>*>* sConversionQueu
 static NSMutableDictionary<NSString*, NSNumber*>* sLastScanTime = nil;
 static dispatch_queue_t sConversionDispatchQueue = nil;
 
+// Forward declarations for per-file page tracking helpers (used by conversion backends)
+static void setTotalPagesForPath(NSString* djvuPath, int total);
+static void incrementDonePagesForPath(NSString* djvuPath);
+static void clearPageTrackingForPath(NSString* djvuPath);
+
 static void computeRenderDimensions(int pageWidth, int pageHeight, int pageDpi, int targetDpi, int* outWidth, int* outHeight)
 {
     int renderWidth = (int)((double)pageWidth * targetDpi / pageDpi);
@@ -185,14 +190,7 @@ static NSData* pbmP4DataFromBits(int w, int h, size_t rowBytes, unsigned char co
     return data;
 }
 
-static NSData* renderDjvuMaskPbmData(
-    ddjvu_page_t* page,
-    ddjvu_format_t* grey8,
-    ddjvu_format_t* msb,
-    int renderWidth,
-    int renderHeight,
-    bool preferBitonal,
-    double* outCoverage)
+static NSData* renderDjvuMaskPbmData(ddjvu_page_t* page, ddjvu_format_t* grey8, ddjvu_format_t* msb, int renderWidth, int renderHeight, bool preferBitonal, double* outCoverage)
 {
     if (outCoverage != nullptr)
         *outCoverage = 0.0;
@@ -435,16 +433,19 @@ static bool writePdfDeterministic(
     int const objCount = nextObj - 1;
     std::vector<uint64_t> offsets((size_t)objCount + 1U, 0);
 
-    auto writeObjBegin = [&](int objNum) {
+    auto writeObjBegin = [&](int objNum)
+    {
         offsets[(size_t)objNum] = (uint64_t)ftello(fp);
         fprintf(fp, "%d 0 obj\n", objNum);
     };
 
-    auto writeObjEnd = [&]() {
+    auto writeObjEnd = [&]()
+    {
         fputs("endobj\n", fp);
     };
 
-    auto writeStreamObj = [&](int objNum, char const* dictPrefix, uint8_t const* bytes, size_t len) {
+    auto writeStreamObj = [&](int objNum, char const* dictPrefix, uint8_t const* bytes, size_t len)
+    {
         writeObjBegin(objNum);
         fprintf(fp, "%s/Length %zu >>\nstream\n", dictPrefix, len);
         if (len != 0)
@@ -630,7 +631,8 @@ static BOOL convertDjvuFileDeterministic(NSString* djvuPath, NSString* tmpPdfPat
     bool ok = true;
     jbig2ctx* jb = nullptr;
 
-    auto addBlankJbig2Page = [&]() -> bool {
+    auto addBlankJbig2Page = [&]() -> bool
+    {
         unsigned char zero = 0;
         NSData* pbm = pbmP4DataFromBits(1, 1, 1, &zero);
         PIX* pix = pixReadMemPnm((l_uint8 const*)pbm.bytes, pbm.length);
@@ -723,7 +725,7 @@ static BOOL convertDjvuFileDeterministic(NSString* djvuPath, NSString* tmpPdfPat
                 }
 
                 double constexpr MinTextCoverage = 0.001; // 0.1%
-                double constexpr MaxTextCoverage = 0.25;  // 25%
+                double constexpr MaxTextCoverage = 0.25; // 25%
                 bool const looksLikeTextMask = (coverage >= MinTextCoverage) && (coverage <= MaxTextCoverage);
                 if (!looksLikeTextMask)
                 {
@@ -747,7 +749,14 @@ static BOOL convertDjvuFileDeterministic(NSString* djvuPath, NSString* tmpPdfPat
                 size_t rowBytes = (size_t)probeW * 3;
                 bitonalProbe = std::make_shared<std::vector<uint8_t>>(rowBytes * (size_t)probeH, (uint8_t)0xFF);
                 ddjvu_rect_t rect = { 0, 0, (unsigned int)probeW, (unsigned int)probeH };
-                int const rendered = ddjvu_page_render(page, DDJVU_RENDER_COLOR, &rect, &rect, rgb24, (unsigned long)rowBytes, (char*)bitonalProbe->data());
+                int const rendered = ddjvu_page_render(
+                    page,
+                    DDJVU_RENDER_COLOR,
+                    &rect,
+                    &rect,
+                    rgb24,
+                    (unsigned long)rowBytes,
+                    (char*)bitonalProbe->data());
                 if (rendered)
                 {
                     probeIsGray = isGrayscaleRgb24(bitonalProbe->data(), probeW, probeH, rowBytes);
@@ -804,7 +813,14 @@ static BOOL convertDjvuFileDeterministic(NSString* djvuPath, NSString* tmpPdfPat
                     if (!rendered && pageType == DDJVU_PAGETYPE_COMPOUND)
                     {
                         // Some files don't expose background separately; fall back to full render.
-                        rendered = ddjvu_page_render(page, DDJVU_RENDER_COLOR, &rect, &rect, rgb24, (unsigned long)rowBytes, (char*)rgb->data());
+                        rendered = ddjvu_page_render(
+                            page,
+                            DDJVU_RENDER_COLOR,
+                            &rect,
+                            &rect,
+                            rgb24,
+                            (unsigned long)rowBytes,
+                            (char*)rgb->data());
                     }
 
                     if (!rendered)
@@ -1578,13 +1594,16 @@ static bool writePdfMuPdf(
 
     NSString* torrentHash = torrent.hashString;
     NSMutableSet<NSString*>* queuedFiles = sConversionQueue[torrentHash];
-    
+
     if (!queuedFiles || queuedFiles.count == 0)
         return nil;
 
-    // Find the first file that is queued but PDF doesn't exist yet (conversion in progress)
+    // Find the first file that is actively converting and PDF doesn't exist yet
     for (NSString* djvuPath in queuedFiles)
     {
+        if (![sActiveConversions containsObject:djvuPath])
+            continue;
+
         NSString* pdfPath = [djvuPath.stringByDeletingPathExtension stringByAppendingPathExtension:@"pdf"];
         if (![NSFileManager.defaultManager fileExistsAtPath:pdfPath])
         {
@@ -1605,6 +1624,11 @@ static NSMutableDictionary<NSString*, NSMutableSet<NSString*>*>* sFailedConversi
 // Track per-file page progress (djvu path -> counts)
 static NSMutableDictionary<NSString*, NSNumber*>* sConversionTotalPages = nil;
 static NSMutableDictionary<NSString*, NSNumber*>* sConversionDonePages = nil;
+
+// Forward declarations for per-file page tracking helpers
+static void setTotalPagesForPath(NSString* djvuPath, int total);
+static void incrementDonePagesForPath(NSString* djvuPath);
+static void clearPageTrackingForPath(NSString* djvuPath);
 
 static void setTotalPagesForPath(NSString* djvuPath, int total)
 {
@@ -1655,7 +1679,7 @@ static void clearPageTrackingForPath(NSString* djvuPath)
 
     if (!sConversionQueue || !sConversionDispatchQueue)
         return;
-    
+
     if (!sActiveConversions)
         sActiveConversions = [NSMutableSet set];
     if (!sFailedConversions)
@@ -1669,7 +1693,7 @@ static void clearPageTrackingForPath(NSString* djvuPath)
 
     NSString* torrentHash = torrent.hashString;
     NSMutableSet<NSString*>* queuedFiles = sConversionQueue[torrentHash];
-    
+
     if (!queuedFiles || queuedFiles.count == 0)
         return;
 
@@ -1682,11 +1706,11 @@ static void clearPageTrackingForPath(NSString* djvuPath)
 
     // Find files that are queued but not actively being converted
     NSMutableArray<NSDictionary*>* filesToDispatch = [NSMutableArray array];
-    
+
     for (NSString* djvuPath in queuedFiles)
     {
         NSString* pdfPath = [djvuPath.stringByDeletingPathExtension stringByAppendingPathExtension:@"pdf"];
-        
+
         // Skip if PDF already exists or conversion is already active/pending
         if ([NSFileManager.defaultManager fileExistsAtPath:pdfPath])
             continue;
@@ -1696,7 +1720,7 @@ static void clearPageTrackingForPath(NSString* djvuPath)
             continue;
         if ([failedForTorrent containsObject:djvuPath])
             continue;
-        
+
         [sPendingConversions addObject:djvuPath];
         [filesToDispatch addObject:@{ @"djvu" : djvuPath, @"pdf" : pdfPath }];
     }
@@ -1705,7 +1729,7 @@ static void clearPageTrackingForPath(NSString* djvuPath)
         return;
 
     NSString* notificationObject = [torrentHash copy];
-    
+
     dispatch_group_t group = dispatch_group_create();
     for (NSDictionary* file in filesToDispatch)
     {
@@ -1725,7 +1749,7 @@ static void clearPageTrackingForPath(NSString* djvuPath)
                 {
                     success = [self convertDjvuFile:djvuPath toPdf:pdfPath];
                 }
-                
+
                 // Remove from active set when done
                 dispatch_async(dispatch_get_main_queue(), ^{
                     [sActiveConversions removeObject:djvuPath];
@@ -1789,12 +1813,15 @@ static void clearPageTrackingForPath(NSString* djvuPath)
 
     NSString* torrentHash = torrent.hashString;
     NSMutableSet<NSString*>* queuedFiles = sConversionQueue[torrentHash];
-    
+
     if (!queuedFiles || queuedFiles.count == 0)
         return nil;
 
     for (NSString* djvuPath in queuedFiles)
     {
+        if (![sActiveConversions containsObject:djvuPath])
+            continue;
+
         NSNumber* total = nil;
         NSNumber* done = nil;
         @synchronized(sConversionTotalPages)
