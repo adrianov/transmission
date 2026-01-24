@@ -181,8 +181,7 @@ static bool isBitonalGray8(unsigned char const* gray, int width, int height, siz
     if (low == 0)
         return false;
 
-    // Reject "photo-like" pages with localized dense dark regions:
-    // a small dark picture can satisfy the global ratio, but would get destroyed by 1-bit thresholding.
+    // Reject "photo-like" pages with localized dense dark regions
     double maxTile = 0.0;
     for (size_t i = 0; i < (size_t)TileCount * (size_t)TileCount; ++i)
     {
@@ -596,79 +595,6 @@ static std::vector<OutlineNode> readDjvuOutline(ddjvu_context_t* ctx, ddjvu_docu
     return outline;
 }
 
-static bool findGrayContentRect(unsigned char const* gray, int w, int h, size_t rowBytes, unsigned char threshold, CropRect* out)
-{
-    if (gray == nullptr || out == nullptr || w <= 0 || h <= 0 || rowBytes == 0)
-        return false;
-
-    int x0 = w;
-    int y0 = h;
-    int x1 = 0;
-    int y1 = 0;
-
-    for (int y = 0; y < h; ++y)
-    {
-        auto const* row = gray + (size_t)y * rowBytes;
-        for (int x = 0; x < w; ++x)
-        {
-            if (row[x] < threshold)
-            {
-                x0 = MIN(x0, x);
-                y0 = MIN(y0, y);
-                x1 = MAX(x1, x + 1);
-                y1 = MAX(y1, y + 1);
-            }
-        }
-    }
-
-    if (x1 <= x0 || y1 <= y0)
-        return false;
-
-    out->x0 = x0;
-    out->y0 = y0;
-    out->x1 = x1;
-    out->y1 = y1;
-    return true;
-}
-
-static bool findRgbContentRect(unsigned char const* rgb, int w, int h, size_t rowBytes, unsigned char threshold, CropRect* out)
-{
-    if (rgb == nullptr || out == nullptr || w <= 0 || h <= 0 || rowBytes == 0)
-        return false;
-
-    int x0 = w;
-    int y0 = h;
-    int x1 = 0;
-    int y1 = 0;
-
-    for (int y = 0; y < h; ++y)
-    {
-        auto const* row = rgb + (size_t)y * rowBytes;
-        for (int x = 0; x < w; ++x)
-        {
-            unsigned char const r = row[x * 3 + 0];
-            unsigned char const g = row[x * 3 + 1];
-            unsigned char const b = row[x * 3 + 2];
-            if (r < threshold || g < threshold || b < threshold)
-            {
-                x0 = MIN(x0, x);
-                y0 = MIN(y0, y);
-                x1 = MAX(x1, x + 1);
-                y1 = MAX(y1, y + 1);
-            }
-        }
-    }
-
-    if (x1 <= x0 || y1 <= y0)
-        return false;
-
-    out->x0 = x0;
-    out->y0 = y0;
-    out->x1 = x1;
-    out->y1 = y1;
-    return true;
-}
-
 // Use Otsu adaptive threshold to find content bounds (better than fixed threshold for light content)
 static bool findContentRectOtsu(unsigned char const* gray, int w, int h, size_t rowBytes, CropRect* out)
 {
@@ -826,7 +752,48 @@ static NSData* renderDjvuMaskPbmData(ddjvu_page_t* page, ddjvu_format_t* grey8, 
     return pbm;
 }
 
-static bool encodeJp2Grok(std::vector<uint8_t>* out, unsigned char const* pixels, int w, int h, size_t stride, bool gray)
+// Quality levels for JP2 encoding (PSNR in dB)
+enum class Jp2Quality
+{
+    Background, // 40 dB - compound page backgrounds (behind text, can be lower)
+    Photo, // 42 dB - smooth photographs
+    Document, // 46 dB - document scans, mixed content
+    Sharp // 50 dB - near-bitonal, sharp edges
+};
+
+static double jp2QualityToPsnr(Jp2Quality q)
+{
+    switch (q)
+    {
+    case Jp2Quality::Background:
+        return 40.0;
+    case Jp2Quality::Photo:
+        return 42.0;
+    case Jp2Quality::Document:
+        return 46.0;
+    case Jp2Quality::Sharp:
+        return 50.0;
+    }
+    return 44.0;
+}
+
+// Map DjVu page type to JP2 quality
+static Jp2Quality pageTypeToQuality(ddjvu_page_type_t pageType)
+{
+    switch (pageType)
+    {
+    case DDJVU_PAGETYPE_BITONAL:
+        return Jp2Quality::Sharp; // Near-bitonal that didn't go to JBIG2
+    case DDJVU_PAGETYPE_PHOTO:
+        return Jp2Quality::Photo;
+    case DDJVU_PAGETYPE_COMPOUND:
+        return Jp2Quality::Document; // Mixed content
+    default:
+        return Jp2Quality::Document;
+    }
+}
+
+static bool encodeJp2Grok(std::vector<uint8_t>* out, unsigned char const* pixels, int w, int h, size_t stride, bool gray, Jp2Quality quality = Jp2Quality::Document)
 {
     if (out == nullptr || pixels == nullptr || w <= 0 || h <= 0 || stride == 0)
         return false;
@@ -897,13 +864,11 @@ static bool encodeJp2Grok(std::vector<uint8_t>* out, unsigned char const* pixels
     params.verbose = false;
 
     // Use lossy compression with quality-based (PSNR) allocation.
-    // PSNR of 44 dB gives excellent visual quality with adaptive compression -
-    // complex images get more bytes, simple images compress more.
-    // DjVu backgrounds are already lossy (IW44), so lossless JP2 is overkill.
+    // Quality is adaptive based on content type analysis.
     params.irreversible = true;
     params.allocation_by_quality = true;
     params.numlayers = 1;
-    params.layer_distortion[0] = 44.0; // PSNR in dB
+    params.layer_distortion[0] = jp2QualityToPsnr(quality);
     params.num_threads = 2; // Use 2 threads per encode for better throughput
 
     size_t rawSize = stride * (size_t)h;
@@ -1767,7 +1732,8 @@ static BOOL convertDjvuFileDeterministic(NSString* djvuPath, NSString* tmpPdfPat
                                     {
                                         dispatch_semaphore_wait(sem, DISPATCH_TIME_FOREVER);
                                         std::vector<uint8_t> jp2;
-                                        (void)encodeJp2Grok(&jp2, grayBuf->data(), bgCropW, bgCropH, (size_t)bgCropW, true);
+                                        // Background layer - can use lower quality since it's behind text
+                                        (void)encodeJp2Grok(&jp2, grayBuf->data(), bgCropW, bgCropH, (size_t)bgCropW, true, Jp2Quality::Background);
                                         if (!jp2.empty())
                                             pagesPtr[pageNum].bgImage.bytes = std::move(jp2);
                                         dispatch_semaphore_signal(sem);
@@ -1788,7 +1754,8 @@ static BOOL convertDjvuFileDeterministic(NSString* djvuPath, NSString* tmpPdfPat
                                     {
                                         dispatch_semaphore_wait(sem, DISPATCH_TIME_FOREVER);
                                         std::vector<uint8_t> jp2;
-                                        (void)encodeJp2Grok(&jp2, croppedBg->data(), bgCropW, bgCropH, bgCropRowBytes, false);
+                                        // Background layer - can use lower quality since it's behind text
+                                        (void)encodeJp2Grok(&jp2, croppedBg->data(), bgCropW, bgCropH, bgCropRowBytes, false, Jp2Quality::Background);
                                         if (!jp2.empty())
                                             pagesPtr[pageNum].bgImage.bytes = std::move(jp2);
                                         dispatch_semaphore_signal(sem);
@@ -1905,7 +1872,6 @@ static BOOL convertDjvuFileDeterministic(NSString* djvuPath, NSString* tmpPdfPat
             if (rendered)
             {
                 bool const gray = isGrayscaleRgb24(rgb->data(), renderW, renderH, rowBytes);
-                unsigned char constexpr CropThreshold = 245;
                 int constexpr CropPad = 4;
 
                 if (gray)
@@ -1975,40 +1941,45 @@ static BOOL convertDjvuFileDeterministic(NSString* djvuPath, NSString* tmpPdfPat
 
                     if (p.image.kind == DjvuPdfImageKind::None)
                     {
-                        CropRect cr{};
-                        if (findContentRectOtsu(grayBuf.data(), renderW, renderH, (size_t)renderW, &cr))
+                        // Try Otsu cropping, fallback to full page if it fails
+                        CropRect cr = { 0, 0, renderW, renderH };
+                        CropRect otsuCrop{};
+                        if (findContentRectOtsu(grayBuf.data(), renderW, renderH, (size_t)renderW, &otsuCrop))
                         {
-                            padCropRect(&cr, CropPad, renderW, renderH);
-                            int cropW = cr.x1 - cr.x0;
-                            int cropH = cr.y1 - cr.y0;
-                            if (cropW > 0 && cropH > 0)
-                            {
-                                auto pixels = std::make_shared<std::vector<unsigned char>>((size_t)cropW * (size_t)cropH);
-                                for (int y = 0; y < cropH; ++y)
-                                {
-                                    auto const* srcRow = grayBuf.data() + (size_t)(cr.y0 + y) * (size_t)renderW + (size_t)cr.x0;
-                                    memcpy(pixels->data() + (size_t)y * (size_t)cropW, srcRow, (size_t)cropW);
-                                }
-
-                                p.image.kind = DjvuPdfImageKind::Jp2;
-                                p.image.gray = true;
-                                p.image.w = cropW;
-                                p.image.h = cropH;
-                                setPdfPlacementForCrop(&p.image, renderW, renderH, cr, p.pdfWidth, p.pdfHeight);
-
-                                dispatch_group_async(encGroup, encQ, ^{
-                                    @autoreleasepool
-                                    {
-                                        dispatch_semaphore_wait(sem, DISPATCH_TIME_FOREVER);
-                                        std::vector<uint8_t> jp2;
-                                        (void)encodeJp2Grok(&jp2, pixels->data(), cropW, cropH, (size_t)cropW, true);
-                                        if (!jp2.empty())
-                                            pagesPtr[pageNum].image.bytes = std::move(jp2);
-                                        dispatch_semaphore_signal(sem);
-                                    }
-                                });
-                            }
+                            padCropRect(&otsuCrop, CropPad, renderW, renderH);
+                            if (otsuCrop.x1 - otsuCrop.x0 > 0 && otsuCrop.y1 - otsuCrop.y0 > 0)
+                                cr = otsuCrop;
                         }
+
+                        int cropW = cr.x1 - cr.x0;
+                        int cropH = cr.y1 - cr.y0;
+                        auto pixels = std::make_shared<std::vector<unsigned char>>((size_t)cropW * (size_t)cropH);
+                        for (int y = 0; y < cropH; ++y)
+                        {
+                            auto const* srcRow = grayBuf.data() + (size_t)(cr.y0 + y) * (size_t)renderW + (size_t)cr.x0;
+                            memcpy(pixels->data() + (size_t)y * (size_t)cropW, srcRow, (size_t)cropW);
+                        }
+
+                        p.image.kind = DjvuPdfImageKind::Jp2;
+                        p.image.gray = true;
+                        p.image.w = cropW;
+                        p.image.h = cropH;
+                        setPdfPlacementForCrop(&p.image, renderW, renderH, cr, p.pdfWidth, p.pdfHeight);
+
+                        // Use DjVu page type for quality selection
+                        Jp2Quality quality = pageTypeToQuality(pageType);
+
+                        dispatch_group_async(encGroup, encQ, ^{
+                            @autoreleasepool
+                            {
+                                dispatch_semaphore_wait(sem, DISPATCH_TIME_FOREVER);
+                                std::vector<uint8_t> jp2;
+                                (void)encodeJp2Grok(&jp2, pixels->data(), cropW, cropH, (size_t)cropW, true, quality);
+                                if (!jp2.empty())
+                                    pagesPtr[pageNum].image.bytes = std::move(jp2);
+                                dispatch_semaphore_signal(sem);
+                            }
+                        });
                     }
                 }
                 else
@@ -2029,41 +2000,46 @@ static BOOL convertDjvuFileDeterministic(NSString* djvuPath, NSString* tmpPdfPat
                         }
                     }
 
-                    CropRect cr{};
-                    if (findContentRectOtsu(grayForCrop.data(), renderW, renderH, (size_t)renderW, &cr))
+                    // Try Otsu cropping, fallback to full page if it fails
+                    CropRect cr = { 0, 0, renderW, renderH };
+                    CropRect otsuCrop{};
+                    if (findContentRectOtsu(grayForCrop.data(), renderW, renderH, (size_t)renderW, &otsuCrop))
                     {
-                        padCropRect(&cr, CropPad, renderW, renderH);
-                        int cropW = cr.x1 - cr.x0;
-                        int cropH = cr.y1 - cr.y0;
-                        if (cropW > 0 && cropH > 0)
-                        {
-                            size_t const cropRowBytes = (size_t)cropW * 3U;
-                            auto pixels = std::make_shared<std::vector<unsigned char>>(cropRowBytes * (size_t)cropH);
-                            for (int y = 0; y < cropH; ++y)
-                            {
-                                auto const* srcRow = rgb->data() + (size_t)(cr.y0 + y) * rowBytes + (size_t)cr.x0 * 3U;
-                                memcpy(pixels->data() + (size_t)y * cropRowBytes, srcRow, cropRowBytes);
-                            }
-
-                            p.image.kind = DjvuPdfImageKind::Jp2;
-                            p.image.gray = false;
-                            p.image.w = cropW;
-                            p.image.h = cropH;
-                            setPdfPlacementForCrop(&p.image, renderW, renderH, cr, p.pdfWidth, p.pdfHeight);
-
-                            dispatch_group_async(encGroup, encQ, ^{
-                                @autoreleasepool
-                                {
-                                    dispatch_semaphore_wait(sem, DISPATCH_TIME_FOREVER);
-                                    std::vector<uint8_t> jp2;
-                                    (void)encodeJp2Grok(&jp2, pixels->data(), cropW, cropH, cropRowBytes, false);
-                                    if (!jp2.empty())
-                                        pagesPtr[pageNum].image.bytes = std::move(jp2);
-                                    dispatch_semaphore_signal(sem);
-                                }
-                            });
-                        }
+                        padCropRect(&otsuCrop, CropPad, renderW, renderH);
+                        if (otsuCrop.x1 - otsuCrop.x0 > 0 && otsuCrop.y1 - otsuCrop.y0 > 0)
+                            cr = otsuCrop;
                     }
+
+                    int cropW = cr.x1 - cr.x0;
+                    int cropH = cr.y1 - cr.y0;
+                    size_t const cropRowBytes = (size_t)cropW * 3U;
+                    auto pixels = std::make_shared<std::vector<unsigned char>>(cropRowBytes * (size_t)cropH);
+                    for (int y = 0; y < cropH; ++y)
+                    {
+                        auto const* srcRow = rgb->data() + (size_t)(cr.y0 + y) * rowBytes + (size_t)cr.x0 * 3U;
+                        memcpy(pixels->data() + (size_t)y * cropRowBytes, srcRow, cropRowBytes);
+                    }
+
+                    p.image.kind = DjvuPdfImageKind::Jp2;
+                    p.image.gray = false;
+                    p.image.w = cropW;
+                    p.image.h = cropH;
+                    setPdfPlacementForCrop(&p.image, renderW, renderH, cr, p.pdfWidth, p.pdfHeight);
+
+                    // Use DjVu page type for quality selection
+                    Jp2Quality quality = pageTypeToQuality(pageType);
+
+                    dispatch_group_async(encGroup, encQ, ^{
+                        @autoreleasepool
+                        {
+                            dispatch_semaphore_wait(sem, DISPATCH_TIME_FOREVER);
+                            std::vector<uint8_t> jp2;
+                            (void)encodeJp2Grok(&jp2, pixels->data(), cropW, cropH, cropRowBytes, false, quality);
+                            if (!jp2.empty())
+                                pagesPtr[pageNum].image.bytes = std::move(jp2);
+                            dispatch_semaphore_signal(sem);
+                        }
+                    });
                 }
             }
 
