@@ -866,6 +866,9 @@ void onTorrentCompletenessChanged(tr_torrent* tor, tr_completeness status, bool 
 
     [nc addObserver:self selector:@selector(updateWindowAfterToolbarChange) name:@"ToolbarDidChange" object:nil];
 
+    [nc addObserver:self selector:@selector(applicationDidBecomeActive:) name:NSApplicationDidBecomeActiveNotification object:nil];
+    [nc addObserver:self selector:@selector(applicationDidResignActive:) name:NSApplicationDidResignActiveNotification object:nil];
+
     [self updateMainWindow];
 
     // Check all torrents for DJVU/FB2 files that need conversion on startup
@@ -1956,6 +1959,11 @@ static NSTimeInterval const kLowPriorityDelay = 15.0;
 {
     for (Torrent* torrent in torrents)
     {
+        // Verify partial local data before resuming
+        if (torrent.haveVerified > 0 && torrent.haveVerified < torrent.haveTotal)
+        {
+            [torrent resetCache];
+        }
         [torrent startTransfer];
     }
 
@@ -1984,9 +1992,13 @@ static NSTimeInterval const kLowPriorityDelay = 15.0;
 
 - (void)resumeTorrentsNoWait:(NSArray<Torrent*>*)torrents
 {
-    //iterate through instead of all at once to ensure no conflicts
+    // Iterate through to verify partial data before starting
     for (Torrent* torrent in torrents)
     {
+        if (torrent.haveVerified > 0 && torrent.haveVerified < torrent.haveTotal)
+        {
+            [torrent resetCache];
+        }
         [torrent startTransferNoQueue];
     }
 
