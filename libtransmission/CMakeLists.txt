@@ -156,11 +156,9 @@ target_sources(${TR_NAME}
         tr-strbuf.h
         tr-udp.cc
         tr-utp.cc
-        tr-utp.h
-        transmission.h
+        utils.cc
         utils-ev.cc
         utils-ev.h
-        utils.cc
         utils.h
         $<$<BOOL:${IS_APPLE_CLANG}>:utils.mm>
         variant-benc.cc
