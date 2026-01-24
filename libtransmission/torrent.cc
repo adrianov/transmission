@@ -1031,10 +1031,12 @@ void tr_torrent::init(tr_ctor const& ctor)
     }
 
     auto has_any_local_data = std::optional<bool>{};
-    if ((loaded & tr_resume::Progress) != 0)
+    // only scan the filesystem for existing data when no resume-file progress was loaded
+    // (if resume progress is already known, skip the on-startup scan entirely)
+    // only scan the filesystem for existing data when the resume file
+    // didn't record any progress OR it recorded zero verified blocks
+    if (((loaded & tr_resume::Progress) == 0) || this->has_none())
     {
-        // if tr_resume::load() loaded progress info, then initCheckedPieces()
-        // has already looked for local data on the filesystem
         has_any_local_data = std::any_of(
             std::begin(file_mtimes_),
             std::end(file_mtimes_),
@@ -1086,6 +1088,13 @@ void tr_torrent::init(tr_ctor const& ctor)
     else
     {
         set_local_error_if_files_disappeared(this, has_any_local_data);
+
+        // Auto-verify incomplete torrents on startup if they have existing data
+        // This helps recover from cases where files were downloaded but resume state is incorrect
+        if (!is_new_torrent && this->has_metainfo() && !is_done() && has_any_local_data && *has_any_local_data && !is_running())
+        {
+            tr_torrentVerify(this);
+        }
     }
 
     // Recover from the bug reported at https://github.com/transmission/transmission/issues/6899
