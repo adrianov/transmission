@@ -51,6 +51,17 @@ Bitonal detection is based on the rendered grayscale content, not `ddjvu_page_ge
      - **JP2** via Grok for grayscale/color pages.
    - Writes to a temp file, then atomically renames to the final path on success.
 
+3. **Write the PDF** (`writePdfDeterministic`)
+   - Writes PDF objects and XRef manually to avoid non-deterministic encoders.
+   - Each page is a single image XObject + a tiny content stream to place it.
+   - JBIG2 pages reference `/JBIG2Globals` objects for better compression.
+
+4. **Update UI caches and status**
+   - Conversion status uses per-torrent tracking:
+     - `sActiveConversions`, `sPendingConversions`, `sFailedConversions`.
+   - Per-file page progress is tracked so the status string can report `"X of Y pages"`.
+   - On completion, a `DjvuConversionComplete` notification invalidates cached playable files and triggers a UI refresh in `Torrent.mm`.
+
 ### PDF page sizing
 
 PDF page size is computed from the DjVu’s pixel dimensions and DPI:
@@ -62,7 +73,16 @@ The image XObject is placed at the computed crop rectangle in PDF space, so the 
 
 ### Document outline (Contents)
 
-If the DjVu file contains an outline (bookmarks), it is copied into the PDF’s `/Outlines` tree. Only entries that reference a page (`#<page>` form) are preserved.
+If the DjVu file contains an outline (bookmarks), it is copied into the PDF’s `/Outlines` tree.
+
+Outline parsing behavior:
+
+- Reads DjVu outline entries via `miniexp` and keeps only valid entries.
+- Resolves targets using:
+  - file info names/titles (`ddjvu_document_get_fileinfo`) and
+  - `ddjvu_document_search_pageno()` for named targets.
+- When the target resolves to a page number, it is converted to a 0‑based index for the PDF.
+- Invalid entries are dropped; valid entries keep their child hierarchy.
 
 ### Notes
 
