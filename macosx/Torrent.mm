@@ -76,6 +76,9 @@ typedef NS_ENUM(NSInteger, TorrentMediaType) {
 
 @property(nonatomic) BOOL fResumeOnWake;
 @property(nonatomic) BOOL fPausedForDiskSpace;
+@property(nonatomic) uint64_t fDiskSpaceNeeded;
+@property(nonatomic) uint64_t fDiskSpaceAvailable;
+@property(nonatomic) uint64_t fDiskSpaceTotal;
 
 - (void)renameFinished:(BOOL)success
                  nodes:(NSArray<FileListNode*>*)nodes
@@ -832,9 +835,16 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
     if ((systemAttributes = [NSFileManager.defaultManager attributesOfFileSystemForPath:downloadFolder error:NULL]))
     {
         uint64_t const remainingSpace = ((NSNumber*)systemAttributes[NSFileSystemFreeSize]).unsignedLongLongValue;
+        uint64_t const totalSpace = ((NSNumber*)systemAttributes[NSFileSystemSize]).unsignedLongLongValue;
+        uint64_t const neededSpace = self.sizeLeft;
+
+        // Store disk space info for status message
+        self.fDiskSpaceNeeded = neededSpace;
+        self.fDiskSpaceAvailable = remainingSpace;
+        self.fDiskSpaceTotal = totalSpace;
 
         //if the remaining space is greater than the size left, then there is enough space regardless of preallocation
-        if (remainingSpace < self.sizeLeft && remainingSpace < tr_torrentGetBytesLeftToAllocate(self.fHandle))
+        if (remainingSpace < neededSpace && remainingSpace < tr_torrentGetBytesLeftToAllocate(self.fHandle))
         {
             self.fPausedForDiskSpace = YES;
             return NO;
@@ -1035,6 +1045,34 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
 
             // Progress: use consecutive progress for all folder-based items
             CGFloat progress = [self folderConsecutiveProgress:folder];
+
+            // Check if any file in this folder is wanted
+            NSArray<NSNumber*>* fileIndices = self.fFolderToFiles[folder];
+            BOOL anyFileWanted = NO;
+            if (fileIndices)
+            {
+                for (NSNumber* fileIndex in fileIndices)
+                {
+                    auto const file = tr_torrentFile(self.fHandle, (tr_file_index_t)fileIndex.unsignedIntegerValue);
+                    if (file.wanted)
+                    {
+                        anyFileWanted = YES;
+                        break;
+                    }
+                }
+            }
+
+            // Skip folder if no files are wanted unless fully downloaded
+            if (!anyFileWanted && progress < 1.0)
+            {
+                continue;
+            }
+
+            // Skip folder if any file is wanted but has zero progress
+            if (anyFileWanted && progress == 0.0)
+            {
+                continue;
+            }
 
             // Display name
             NSString* name;
@@ -1336,6 +1374,18 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
             progress = 0;
         }
 
+        // Skip files not wanted unless fully downloaded
+        if (!file.wanted && progress < 1.0)
+        {
+            continue;
+        }
+
+        // Skip wanted files with zero progress
+        if (file.wanted && progress == 0.0)
+        {
+            continue;
+        }
+
         NSString* path;
         auto const location = tr_torrentFindFile(self.fHandle, i);
         path = !std::empty(location) ? @(location.c_str()) : [self.currentDirectory stringByAppendingPathComponent:fileName];
@@ -1454,6 +1504,21 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
                                                    tr_torrentFileConsecutiveProgress(self.fHandle, progressIndex.unsignedIntegerValue);
         if (progress < 0)
             progress = 0;
+
+        // Check if audio file is wanted
+        auto const audioFile = tr_torrentFile(self.fHandle, (tr_file_index_t)progressIndex.unsignedIntegerValue);
+
+        // Skip if audio file not wanted unless fully downloaded
+        if (!audioFile.wanted && progress < 1.0)
+        {
+            continue;
+        }
+
+        // Skip if audio file is wanted but has zero progress
+        if (audioFile.wanted && progress == 0.0)
+        {
+            continue;
+        }
 
         NSString* displayName = baseName.lastPathComponent.humanReadableFileName;
         if (!displayName || displayName.length == 0)
@@ -2446,6 +2511,21 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
     return self.fPausedForDiskSpace;
 }
 
+- (uint64_t)diskSpaceNeeded
+{
+    return self.fDiskSpaceNeeded;
+}
+
+- (uint64_t)diskSpaceAvailable
+{
+    return self.fDiskSpaceAvailable;
+}
+
+- (uint64_t)diskSpaceTotal
+{
+    return self.fDiskSpaceTotal;
+}
+
 - (BOOL)isError
 {
     return self.fStat->error == TR_STAT_LOCAL_ERROR;
@@ -2699,7 +2779,13 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
             }
             else if (self.pausedForDiskSpace)
             {
-                string = NSLocalizedString(@"Not enough disk space", "Torrent -> status string");
+                NSString* neededString = [NSString stringForFileSizeOneDecimal:self.diskSpaceNeeded];
+                NSString* availableString = [NSString stringForFileSizeOneDecimal:self.diskSpaceAvailable];
+                NSString* totalString = [NSString stringForFileSizeOneDecimal:self.diskSpaceTotal];
+                string = [NSString stringWithFormat:NSLocalizedString(@"Not enough disk space. Need %@, Available %@ of %@", "Torrent -> status string"),
+                                                    neededString,
+                                                    availableString,
+                                                    totalString];
             }
             else
             {

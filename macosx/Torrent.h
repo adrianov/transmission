@@ -190,6 +190,9 @@ extern NSString* const kTorrentDidChangeGroupNotification;
 @property(nonatomic, getter=isAnyErrorOrWarning, readonly) BOOL anyErrorOrWarning;
 @property(nonatomic, readonly) NSString* errorMessage;
 @property(nonatomic, getter=isPausedForDiskSpace, readonly) BOOL pausedForDiskSpace;
+@property(nonatomic, readonly) uint64_t diskSpaceNeeded;
+@property(nonatomic, readonly) uint64_t diskSpaceAvailable;
+@property(nonatomic, readonly) uint64_t diskSpaceTotal;
 
 @property(nonatomic, readonly) NSArray<NSDictionary*>* peers;
 
@@ -273,5 +276,8 @@ extern NSString* const kTorrentDidChangeGroupNotification;
 @property(nonatomic, readonly) NSString* trackerSortKey;
 
 @property(nonatomic, readonly) tr_torrent* torrentStruct;
+
+// Tracks whether we've verified partial data before resuming in this session
+@property(nonatomic) BOOL fVerifiedOnResume;
 
 @end
