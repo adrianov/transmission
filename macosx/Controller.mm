@@ -1959,10 +1959,11 @@ static NSTimeInterval const kLowPriorityDelay = 15.0;
 {
     for (Torrent* torrent in torrents)
     {
-        // Verify partial local data before resuming
-        if (torrent.haveVerified > 0 && torrent.haveVerified < torrent.haveTotal)
+        // Verify partial local data before resuming, but only once per session
+        if (torrent.haveVerified > 0 && torrent.haveVerified < torrent.haveTotal && !torrent.fVerifiedOnResume)
         {
             [torrent resetCache];
+            torrent.fVerifiedOnResume = YES;
         }
         [torrent startTransfer];
     }
@@ -1992,12 +1993,13 @@ static NSTimeInterval const kLowPriorityDelay = 15.0;
 
 - (void)resumeTorrentsNoWait:(NSArray<Torrent*>*)torrents
 {
-    // Iterate through to verify partial data before starting
+    // Iterate through to verify partial data before starting, but only once per session
     for (Torrent* torrent in torrents)
     {
-        if (torrent.haveVerified > 0 && torrent.haveVerified < torrent.haveTotal)
+        if (torrent.haveVerified > 0 && torrent.haveVerified < torrent.haveTotal && !torrent.fVerifiedOnResume)
         {
             [torrent resetCache];
+            torrent.fVerifiedOnResume = YES;
         }
         [torrent startTransferNoQueue];
     }
