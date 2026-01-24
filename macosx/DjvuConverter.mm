@@ -101,6 +101,9 @@ struct DjvuPdfPageInfo
     double pdfWidth = 0.0;
     double pdfHeight = 0.0;
     DjvuPdfImageInfo image;
+    // For compound pages: background picture layer + foreground text mask overlay
+    DjvuPdfImageInfo bgImage; // Background: JP2 grayscale/RGB
+    DjvuPdfImageInfo fgMask; // Foreground: JBIG2 ImageMask (transparent bg)
 };
 
 static bool isGrayscaleRgb24(unsigned char const* rgb, int width, int height, size_t rowBytes)
@@ -666,6 +669,51 @@ static bool findRgbContentRect(unsigned char const* rgb, int w, int h, size_t ro
     return true;
 }
 
+// Use Otsu adaptive threshold to find content bounds (better than fixed threshold for light content)
+static bool findContentRectOtsu(unsigned char const* gray, int w, int h, size_t rowBytes, CropRect* out)
+{
+    if (gray == nullptr || out == nullptr || w <= 0 || h <= 0)
+        return false;
+
+    PIX* pix8 = pixCreate(w, h, 8);
+    if (pix8 == nullptr)
+        return false;
+
+    for (int y = 0; y < h; ++y)
+    {
+        auto const* srcRow = gray + (size_t)y * rowBytes;
+        l_uint32* dstRow = pixGetData(pix8) + y * pixGetWpl(pix8);
+        for (int x = 0; x < w; ++x)
+            SET_DATA_BYTE(dstRow, x, srcRow[x]);
+    }
+
+    // Invert so content becomes foreground (bright), then Otsu threshold
+    pixInvert(pix8, pix8);
+    PIX* bin = nullptr;
+    pixOtsuAdaptiveThreshold(pix8, 0, 0, 0, 0, 0.0f, nullptr, &bin);
+    pixDestroy(&pix8);
+
+    if (bin == nullptr)
+        return false;
+
+    BOX* box = nullptr;
+    bool found = (pixClipToForeground(bin, nullptr, &box) == 0 && box != nullptr);
+    pixDestroy(&bin);
+
+    if (!found)
+        return false;
+
+    l_int32 bx, by, bw, bh;
+    boxGetGeometry(box, &bx, &by, &bw, &bh);
+    boxDestroy(&box);
+
+    out->x0 = bx;
+    out->y0 = by;
+    out->x1 = bx + bw;
+    out->y1 = by + bh;
+    return true;
+}
+
 static void setPdfPlacementForCrop(DjvuPdfImageInfo* img, int fullW, int fullH, CropRect const& r, double pagePdfW, double pagePdfH)
 {
     if (img == nullptr || fullW <= 0 || fullH <= 0)
@@ -950,13 +998,25 @@ static bool flushJbig2Batch(Jbig2Batch* batch, std::vector<DjvuPdfPageInfo>* pag
             break;
         }
 
-        int const pageIndex = batch->pageNums[i];
+        int const rawPageNum = batch->pageNums[i];
+        // Negative page numbers indicate foreground masks: actual page = (-1 - rawPageNum)
+        bool const isFgMask = (rawPageNum < 0);
+        int const pageIndex = isFgMask ? (-1 - rawPageNum) : rawPageNum;
         DjvuPdfPageInfo& pageInfo = (*pages)[(size_t)pageIndex];
-        pageInfo.image.bytes.assign(pageBuf, pageBuf + (size_t)len);
-        pageInfo.image.jbig2GlobalsIndex = (int)globalsIndex;
+
+        if (isFgMask)
+        {
+            pageInfo.fgMask.bytes.assign(pageBuf, pageBuf + (size_t)len);
+            pageInfo.fgMask.jbig2GlobalsIndex = (int)globalsIndex;
+        }
+        else
+        {
+            pageInfo.image.bytes.assign(pageBuf, pageBuf + (size_t)len);
+            pageInfo.image.jbig2GlobalsIndex = (int)globalsIndex;
+        }
         free(pageBuf);
 
-        if (pageInfo.image.bytes.empty())
+        if (isFgMask ? pageInfo.fgMask.bytes.empty() : pageInfo.image.bytes.empty())
             ok = false;
     }
 
@@ -1103,7 +1163,9 @@ static bool writePdfDeterministic(
 
     struct PageObjs
     {
-        int img = 0;
+        int img = 0; // Single image (non-compound) or unused for compound
+        int bgImg = 0; // Background image for compound pages
+        int fgMask = 0; // Foreground mask for compound pages
         int contents = 0;
         int page = 0;
     };
@@ -1138,8 +1200,18 @@ static bool writePdfDeterministic(
 
     for (size_t i = 0; i < pages.size(); ++i)
     {
-        if (pages[i].image.kind != DjvuPdfImageKind::None && !pages[i].image.bytes.empty())
+        bool const isCompound =
+            (pages[i].bgImage.kind != DjvuPdfImageKind::None && !pages[i].bgImage.bytes.empty() &&
+             pages[i].fgMask.kind != DjvuPdfImageKind::None && !pages[i].fgMask.bytes.empty());
+        if (isCompound)
+        {
+            pageObjs[i].bgImg = nextObj++;
+            pageObjs[i].fgMask = nextObj++;
+        }
+        else if (pages[i].image.kind != DjvuPdfImageKind::None && !pages[i].image.bytes.empty())
+        {
             pageObjs[i].img = nextObj++;
+        }
         pageObjs[i].contents = nextObj++;
         pageObjs[i].page = nextObj++;
     }
@@ -1251,9 +1323,50 @@ static bool writePdfDeterministic(
     {
         DjvuPdfPageInfo const& p = pages[i];
         PageObjs const& o = pageObjs[i];
-        DjvuPdfImageInfo const& img = p.image;
-        if (o.img != 0)
+        bool const isCompound = (o.bgImg != 0 && o.fgMask != 0);
+
+        if (isCompound)
         {
+            // Write background image (JP2)
+            DjvuPdfImageInfo const& bgImg = p.bgImage;
+            writeObjBegin(o.bgImg);
+            char const* bgCs = bgImg.gray ? "/DeviceGray" : "/DeviceRGB";
+            fprintf(
+                fp,
+                "<< /Type /XObject /Subtype /Image /Width %d /Height %d /ColorSpace %s /BitsPerComponent 8 /Filter /JPXDecode /Length %zu >>\nstream\n",
+                bgImg.w,
+                bgImg.h,
+                bgCs,
+                bgImg.bytes.size());
+            fwrite(bgImg.bytes.data(), 1, bgImg.bytes.size(), fp);
+            fputs("\nendstream\n", fp);
+            writeObjEnd();
+
+            // Write foreground mask (JBIG2 ImageMask)
+            DjvuPdfImageInfo const& fgMask = p.fgMask;
+            if (fgMask.jbig2GlobalsIndex < 0 || (size_t)fgMask.jbig2GlobalsIndex >= jbig2GlobalsObjs.size())
+                return false;
+            int const fgGlobalsObj = jbig2GlobalsObjs[(size_t)fgMask.jbig2GlobalsIndex];
+            if (fgGlobalsObj == 0)
+                return false;
+            writeObjBegin(o.fgMask);
+            // ImageMask: sample 1 paints with fill color, sample 0 is transparent (default Decode [0 1])
+            // JBIG2: 1 = black text, 0 = white background
+            // Result: black text paints, white background is transparent
+            fprintf(
+                fp,
+                "<< /Type /XObject /Subtype /Image /Width %d /Height %d /ImageMask true /BitsPerComponent 1 /Filter /JBIG2Decode /DecodeParms << /JBIG2Globals %d 0 R >> /Length %zu >>\nstream\n",
+                fgMask.w,
+                fgMask.h,
+                fgGlobalsObj,
+                fgMask.bytes.size());
+            fwrite(fgMask.bytes.data(), 1, fgMask.bytes.size(), fp);
+            fputs("\nendstream\n", fp);
+            writeObjEnd();
+        }
+        else if (o.img != 0)
+        {
+            DjvuPdfImageInfo const& img = p.image;
             writeObjBegin(o.img);
             if (img.kind == DjvuPdfImageKind::Jp2)
             {
@@ -1294,9 +1407,22 @@ static bool writePdfDeterministic(
 
         // Contents stream
         std::string contents;
-        contents.reserve(128);
-        if (o.img != 0)
+        contents.reserve(256);
+        if (isCompound)
         {
+            DjvuPdfImageInfo const& bgImg = p.bgImage;
+            DjvuPdfImageInfo const& fgMask = p.fgMask;
+            char tmp[256];
+            // Draw background picture first
+            snprintf(tmp, sizeof(tmp), "q\n%g 0 0 %g %g %g cm\n/BgIm Do\nQ\n", bgImg.pdfW, bgImg.pdfH, bgImg.x, bgImg.y);
+            contents.append(tmp);
+            // Draw foreground text mask on top (black fill color for text)
+            snprintf(tmp, sizeof(tmp), "q\n0 g\n%g 0 0 %g %g %g cm\n/FgMask Do\nQ\n", fgMask.pdfW, fgMask.pdfH, fgMask.x, fgMask.y);
+            contents.append(tmp);
+        }
+        else if (o.img != 0)
+        {
+            DjvuPdfImageInfo const& img = p.image;
             char tmp[256];
             snprintf(tmp, sizeof(tmp), "q\n%g 0 0 %g %g %g cm\n/Im Do\nQ\n", img.pdfW, img.pdfH, img.x, img.y);
             contents.append(tmp);
@@ -1308,7 +1434,13 @@ static bool writePdfDeterministic(
         writeObjBegin(o.page);
         fprintf(fp, "<< /Type /Page /Parent %d 0 R /MediaBox [0 0 %g %g] ", pagesObj, p.pdfWidth, p.pdfHeight);
         fputs("/Resources << ", fp);
-        if (o.img != 0)
+        if (isCompound)
+        {
+            fputs("/XObject << ", fp);
+            fprintf(fp, "/BgIm %d 0 R /FgMask %d 0 R ", o.bgImg, o.fgMask);
+            fputs(">> ", fp);
+        }
+        else if (o.img != 0)
         {
             fputs("/XObject << ", fp);
             fprintf(fp, "/Im %d 0 R ", o.img);
@@ -1471,6 +1603,242 @@ static BOOL convertDjvuFileDeterministic(NSString* djvuPath, NSString* tmpPdfPat
                 break;
             }
 
+            // Handle compound pages (text over picture) specially
+            if (pageType == DDJVU_PAGETYPE_COMPOUND)
+            {
+                // Render foreground text mask FIRST to check if compound mode is worthwhile
+                double maskCoverage = 0.0;
+                bool const preferBitonal = (renderDpi == pageDpi) && (renderW == pageWidth) && (renderH == pageHeight);
+                NSData* fgPbm = renderDjvuMaskPbmData(page, grey8, msb, renderW, renderH, preferBitonal, &maskCoverage);
+                PIX* fgPix = (fgPbm != nil && fgPbm.length != 0) ? pixReadMemPnm((l_uint8 const*)fgPbm.bytes, fgPbm.length) : nullptr;
+
+                // Only proceed with compound rendering if we have meaningful text coverage
+                if (fgPix != nullptr && maskCoverage > 0.001)
+                {
+                    // Render background at lower DPI (DjVu backgrounds are typically 100 DPI)
+                    int constexpr MaxBgDpi = 150;
+                    int bgDpi = MIN(MaxBgDpi, pageDpi);
+                    int bgW = 0;
+                    int bgH = 0;
+                    computeRenderDimensions(pageWidth, pageHeight, pageDpi, bgDpi, &bgW, &bgH);
+
+                    size_t bgRowBytes = (size_t)bgW * 3U;
+                    auto bgRgb = std::make_shared<std::vector<uint8_t>>(bgRowBytes * (size_t)bgH, (uint8_t)0xFF);
+                    ddjvu_rect_t bgRect = { 0, 0, (unsigned int)bgW, (unsigned int)bgH };
+                    int bgRendered = ddjvu_page_render(
+                        page,
+                        DDJVU_RENDER_BACKGROUND,
+                        &bgRect,
+                        &bgRect,
+                        rgb24,
+                        (unsigned long)bgRowBytes,
+                        (char*)bgRgb->data());
+
+                    if (bgRendered)
+                    {
+                        // Process background: determine if grayscale or RGB
+                        bool const bgGray = isGrayscaleRgb24(bgRgb->data(), bgW, bgH, bgRowBytes);
+                        int constexpr CropPad = 4;
+
+                        // Crop each layer independently to its own content bounds
+                        int fgFullW = pixGetWidth(fgPix);
+                        int fgFullH = pixGetHeight(fgPix);
+
+                        // Find foreground text bounds
+                        CropRect fgCrop = { 0, 0, fgFullW, fgFullH };
+                        BOX* fgBox = nullptr;
+                        if (pixClipToForeground(fgPix, nullptr, &fgBox) == 0 && fgBox != nullptr)
+                        {
+                            l_int32 bx, by, bw, bh;
+                            boxGetGeometry(fgBox, &bx, &by, &bw, &bh);
+                            fgCrop = { MAX(0, bx - CropPad), MAX(0, by - CropPad), MIN(fgFullW, bx + bw + CropPad), MIN(fgFullH, by + bh + CropPad) };
+                            boxDestroy(&fgBox);
+                        }
+
+                        // Use Leptonica's adaptive thresholding to find background content bounds
+                        CropRect bgCrop = { 0, 0, bgW, bgH };
+                        PIX* bgPix8 = nullptr;
+                        if (bgGray)
+                        {
+                            // Create grayscale PIX from buffer
+                            bgPix8 = pixCreate(bgW, bgH, 8);
+                            if (bgPix8 != nullptr)
+                            {
+                                for (int y = 0; y < bgH; ++y)
+                                {
+                                    auto const* srcRow = bgRgb->data() + (size_t)y * bgRowBytes;
+                                    l_uint32* dstRow = pixGetData(bgPix8) + y * pixGetWpl(bgPix8);
+                                    for (int x = 0; x < bgW; ++x)
+                                        SET_DATA_BYTE(dstRow, x, srcRow[x * 3]);
+                                }
+                            }
+                        }
+                        else
+                        {
+                            // Convert RGB to grayscale for content detection
+                            PIX* bgPixRgb = pixCreate(bgW, bgH, 32);
+                            if (bgPixRgb != nullptr)
+                            {
+                                for (int y = 0; y < bgH; ++y)
+                                {
+                                    auto const* srcRow = bgRgb->data() + (size_t)y * bgRowBytes;
+                                    l_uint32* dstRow = pixGetData(bgPixRgb) + y * pixGetWpl(bgPixRgb);
+                                    for (int x = 0; x < bgW; ++x)
+                                    {
+                                        l_uint32 r = srcRow[x * 3 + 0];
+                                        l_uint32 g = srcRow[x * 3 + 1];
+                                        l_uint32 b = srcRow[x * 3 + 2];
+                                        dstRow[x] = (r << 24) | (g << 16) | (b << 8) | 0xFF;
+                                    }
+                                }
+                                bgPix8 = pixConvertRGBToGray(bgPixRgb, 0.0f, 0.0f, 0.0f);
+                                pixDestroy(&bgPixRgb);
+                            }
+                        }
+
+                        if (bgPix8 != nullptr)
+                        {
+                            // Invert so content becomes foreground (white), then use Otsu threshold
+                            pixInvert(bgPix8, bgPix8);
+                            PIX* bgBin = nullptr;
+                            pixOtsuAdaptiveThreshold(bgPix8, 0, 0, 0, 0, 0.0f, nullptr, &bgBin);
+                            if (bgBin != nullptr)
+                            {
+                                BOX* bgBox = nullptr;
+                                if (pixClipToForeground(bgBin, nullptr, &bgBox) == 0 && bgBox != nullptr)
+                                {
+                                    l_int32 bx, by, bw, bh;
+                                    boxGetGeometry(bgBox, &bx, &by, &bw, &bh);
+                                    bgCrop = { MAX(0, bx - CropPad), MAX(0, by - CropPad), MIN(bgW, bx + bw + CropPad), MIN(bgH, by + bh + CropPad) };
+                                    boxDestroy(&bgBox);
+                                }
+                                pixDestroy(&bgBin);
+                            }
+                            pixDestroy(&bgPix8);
+                        }
+
+                        int fgCropW = fgCrop.x1 - fgCrop.x0;
+                        int fgCropH = fgCrop.y1 - fgCrop.y0;
+                        int bgCropW = bgCrop.x1 - bgCrop.x0;
+                        int bgCropH = bgCrop.y1 - bgCrop.y0;
+
+                        if (fgCropW <= 0 || fgCropH <= 0 || bgCropW <= 0 || bgCropH <= 0)
+                        {
+                            pixDestroy(&fgPix);
+                            // Fall through to normal rendering
+                        }
+                        else
+                        {
+                            // PDF placement for background (from its own crop bounds)
+                            double bgPdfX = (double)bgCrop.x0 / (double)bgW * p.pdfWidth;
+                            double bgPdfY = (1.0 - (double)bgCrop.y1 / (double)bgH) * p.pdfHeight;
+                            double bgPdfW = (double)bgCropW / (double)bgW * p.pdfWidth;
+                            double bgPdfH = (double)bgCropH / (double)bgH * p.pdfHeight;
+
+                            // PDF placement for foreground (from its own crop bounds)
+                            double fgPdfX = (double)fgCrop.x0 / (double)fgFullW * p.pdfWidth;
+                            double fgPdfY = (1.0 - (double)fgCrop.y1 / (double)fgFullH) * p.pdfHeight;
+                            double fgPdfW = (double)fgCropW / (double)fgFullW * p.pdfWidth;
+                            double fgPdfH = (double)fgCropH / (double)fgFullH * p.pdfHeight;
+
+                            // Set up background image info
+                            p.bgImage.kind = DjvuPdfImageKind::Jp2;
+                            p.bgImage.gray = bgGray;
+                            p.bgImage.w = bgCropW;
+                            p.bgImage.h = bgCropH;
+                            p.bgImage.x = bgPdfX;
+                            p.bgImage.y = bgPdfY;
+                            p.bgImage.pdfW = bgPdfW;
+                            p.bgImage.pdfH = bgPdfH;
+
+                            // Encode cropped background as JP2
+                            if (bgGray)
+                            {
+                                auto grayBuf = std::make_shared<std::vector<unsigned char>>((size_t)bgCropW * (size_t)bgCropH);
+                                for (int y = 0; y < bgCropH; ++y)
+                                {
+                                    auto const* srcRow = bgRgb->data() + (size_t)(bgCrop.y0 + y) * bgRowBytes + (size_t)bgCrop.x0 * 3U;
+                                    auto* dst = grayBuf->data() + (size_t)y * (size_t)bgCropW;
+                                    for (int x = 0; x < bgCropW; ++x)
+                                        dst[x] = srcRow[x * 3];
+                                }
+                                dispatch_group_async(encGroup, encQ, ^{
+                                    @autoreleasepool
+                                    {
+                                        dispatch_semaphore_wait(sem, DISPATCH_TIME_FOREVER);
+                                        std::vector<uint8_t> jp2;
+                                        (void)encodeJp2Grok(&jp2, grayBuf->data(), bgCropW, bgCropH, (size_t)bgCropW, true);
+                                        if (!jp2.empty())
+                                            pagesPtr[pageNum].bgImage.bytes = std::move(jp2);
+                                        dispatch_semaphore_signal(sem);
+                                    }
+                                });
+                            }
+                            else
+                            {
+                                size_t const bgCropRowBytes = (size_t)bgCropW * 3U;
+                                auto croppedBg = std::make_shared<std::vector<uint8_t>>(bgCropRowBytes * (size_t)bgCropH);
+                                for (int y = 0; y < bgCropH; ++y)
+                                {
+                                    auto const* srcRow = bgRgb->data() + (size_t)(bgCrop.y0 + y) * bgRowBytes + (size_t)bgCrop.x0 * 3U;
+                                    memcpy(croppedBg->data() + (size_t)y * bgCropRowBytes, srcRow, bgCropRowBytes);
+                                }
+                                dispatch_group_async(encGroup, encQ, ^{
+                                    @autoreleasepool
+                                    {
+                                        dispatch_semaphore_wait(sem, DISPATCH_TIME_FOREVER);
+                                        std::vector<uint8_t> jp2;
+                                        (void)encodeJp2Grok(&jp2, croppedBg->data(), bgCropW, bgCropH, bgCropRowBytes, false);
+                                        if (!jp2.empty())
+                                            pagesPtr[pageNum].bgImage.bytes = std::move(jp2);
+                                        dispatch_semaphore_signal(sem);
+                                    }
+                                });
+                            }
+
+                            // Crop foreground mask
+                            BOX* fgClipBox = boxCreate(fgCrop.x0, fgCrop.y0, fgCropW, fgCropH);
+                            PIX* fgCropped = fgClipBox != nullptr ? pixClipRectangle(fgPix, fgClipBox, nullptr) : nullptr;
+                            boxDestroy(&fgClipBox);
+                            pixDestroy(&fgPix);
+
+                            if (fgCropped == nullptr || pixGetWidth(fgCropped) <= 0 || pixGetHeight(fgCropped) <= 0)
+                            {
+                                if (fgCropped != nullptr)
+                                    pixDestroy(&fgCropped);
+                                // Fall through to normal rendering
+                            }
+                            else
+                            {
+                                // Set up foreground mask info
+                                p.fgMask.kind = DjvuPdfImageKind::Jbig2;
+                                p.fgMask.w = pixGetWidth(fgCropped);
+                                p.fgMask.h = pixGetHeight(fgCropped);
+                                p.fgMask.x = fgPdfX;
+                                p.fgMask.y = fgPdfY;
+                                p.fgMask.pdfW = fgPdfW;
+                                p.fgMask.pdfH = fgPdfH;
+
+                                // Add foreground mask to JBIG2 batch
+                                jbig2Batch.pageNums.push_back(-1 - pageNum); // Negative to indicate it's a foreground mask
+                                jbig2Batch.pixes.push_back(fgCropped);
+
+                                if ((int)jbig2Batch.pixes.size() >= Jbig2BatchSize)
+                                    ok = flushJbig2Batch(&jbig2Batch, &pages, &jbig2Globals, djvuPath);
+
+                                ddjvu_page_release(page);
+                                incrementDonePagesForPath(djvuPath);
+                                continue; // Skip normal rendering path
+                            }
+                        }
+                    }
+                }
+
+                if (fgPix != nullptr)
+                    pixDestroy(&fgPix);
+                // Fall through to normal rendering if compound rendering didn't work
+            }
+
             size_t rowBytes = (size_t)renderW * 3U;
             auto rgb = std::make_shared<std::vector<uint8_t>>(rowBytes * (size_t)renderH, (uint8_t)0xFF);
             ddjvu_rect_t rect = { 0, 0, (unsigned int)renderW, (unsigned int)renderH };
@@ -1608,7 +1976,7 @@ static BOOL convertDjvuFileDeterministic(NSString* djvuPath, NSString* tmpPdfPat
                     if (p.image.kind == DjvuPdfImageKind::None)
                     {
                         CropRect cr{};
-                        if (findGrayContentRect(grayBuf.data(), renderW, renderH, (size_t)renderW, CropThreshold, &cr))
+                        if (findContentRectOtsu(grayBuf.data(), renderW, renderH, (size_t)renderW, &cr))
                         {
                             padCropRect(&cr, CropPad, renderW, renderH);
                             int cropW = cr.x1 - cr.x0;
@@ -1645,8 +2013,24 @@ static BOOL convertDjvuFileDeterministic(NSString* djvuPath, NSString* tmpPdfPat
                 }
                 else
                 {
+                    // Convert RGB to grayscale for Otsu content detection
+                    std::vector<unsigned char> grayForCrop((size_t)renderW * (size_t)renderH);
+                    for (int y = 0; y < renderH; ++y)
+                    {
+                        auto const* srcRow = rgb->data() + (size_t)y * rowBytes;
+                        auto* dst = grayForCrop.data() + (size_t)y * (size_t)renderW;
+                        for (int x = 0; x < renderW; ++x)
+                        {
+                            // Simple luminance: (R + G + B) / 3
+                            int r = srcRow[x * 3 + 0];
+                            int g = srcRow[x * 3 + 1];
+                            int b = srcRow[x * 3 + 2];
+                            dst[x] = (unsigned char)((r + g + b) / 3);
+                        }
+                    }
+
                     CropRect cr{};
-                    if (findRgbContentRect(rgb->data(), renderW, renderH, rowBytes, CropThreshold, &cr))
+                    if (findContentRectOtsu(grayForCrop.data(), renderW, renderH, (size_t)renderW, &cr))
                     {
                         padCropRect(&cr, CropPad, renderW, renderH);
                         int cropW = cr.x1 - cr.x0;
@@ -1703,7 +2087,14 @@ static BOOL convertDjvuFileDeterministic(NSString* djvuPath, NSString* tmpPdfPat
     {
         for (int i = 0; i < pageCount && ok; ++i)
         {
-            if (pagesPtr[i].image.kind == DjvuPdfImageKind::Jp2 && pagesPtr[i].image.bytes.empty())
+            // Check compound page background encoding
+            if (pagesPtr[i].bgImage.kind == DjvuPdfImageKind::Jp2 && pagesPtr[i].bgImage.bytes.empty())
+            {
+                NSLog(@"DjvuConverter ERROR: JP2 encoding failed for compound page %d background in %@", i, djvuPath);
+                ok = false;
+            }
+            // Check regular page JP2 encoding
+            else if (pagesPtr[i].image.kind == DjvuPdfImageKind::Jp2 && pagesPtr[i].image.bytes.empty())
             {
                 NSLog(@"DjvuConverter ERROR: JP2 encoding failed for page %d in %@", i, djvuPath);
                 ok = false;
@@ -2135,6 +2526,32 @@ static void clearPageTrackingForPath(NSString* djvuPath)
     }
 
     return YES;
+}
+
++ (NSArray<NSString*>*)convertedFilesForTorrent:(Torrent*)torrent
+{
+    if (!torrent || torrent.magnet)
+        return @[];
+
+    NSMutableArray<NSString*>* convertedFiles = [NSMutableArray array];
+    NSArray<FileListNode*>* fileList = torrent.flatFileList;
+
+    for (FileListNode* node in fileList)
+    {
+        NSString* ext = node.name.pathExtension.lowercaseString;
+        if (![ext isEqualToString:@"djvu"] && ![ext isEqualToString:@"djv"])
+            continue;
+
+        NSString* path = [torrent fileLocation:node];
+        if (!path)
+            continue;
+
+        NSString* pdfPath = [path.stringByDeletingPathExtension stringByAppendingPathExtension:@"pdf"];
+        if ([NSFileManager.defaultManager fileExistsAtPath:pdfPath])
+            [convertedFiles addObject:pdfPath];
+    }
+
+    return convertedFiles;
 }
 
 @end

@@ -406,6 +406,15 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
     [NSNotificationCenter.defaultCenter removeObserver:self name:@"DjvuConversionComplete" object:nil];
     [NSNotificationCenter.defaultCenter removeObserver:self name:@"Fb2ConversionComplete" object:nil];
 
+    // Delete converted files (PDF from DJVU, EPUB from FB2) when trashing data
+    if (trashFiles)
+    {
+        for (NSString* path in [DjvuConverter convertedFilesForTorrent:self])
+            [Torrent trashFile:path error:nil];
+        for (NSString* path in [Fb2Converter convertedFilesForTorrent:self])
+            [Torrent trashFile:path error:nil];
+    }
+
     // Clear conversion tracking
     [DjvuConverter clearTrackingForTorrent:self];
     [Fb2Converter clearTrackingForTorrent:self];

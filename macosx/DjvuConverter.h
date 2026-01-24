@@ -35,4 +35,7 @@
 /// Clear failed conversion tracking for a torrent (allows retry).
 + (void)clearFailedConversionsForTorrent:(Torrent*)torrent;
 
+/// Get paths of converted PDF files for a torrent (for deletion when removing torrent with data).
++ (NSArray<NSString*>*)convertedFilesForTorrent:(Torrent*)torrent;
+
 @end

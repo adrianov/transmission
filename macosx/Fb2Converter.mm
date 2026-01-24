@@ -1240,4 +1240,30 @@ static BOOL convertFb2FileInternal(NSString* fb2Path, NSString* tmpEpubPath)
     return YES;
 }
 
++ (NSArray<NSString*>*)convertedFilesForTorrent:(Torrent*)torrent
+{
+    if (!torrent || torrent.magnet)
+        return @[];
+
+    NSMutableArray<NSString*>* convertedFiles = [NSMutableArray array];
+    NSArray<FileListNode*>* fileList = torrent.flatFileList;
+
+    for (FileListNode* node in fileList)
+    {
+        NSString* ext = node.name.pathExtension.lowercaseString;
+        if (![ext isEqualToString:@"fb2"])
+            continue;
+
+        NSString* path = [torrent fileLocation:node];
+        if (!path)
+            continue;
+
+        NSString* epubPath = [path.stringByDeletingPathExtension stringByAppendingPathExtension:@"epub"];
+        if ([NSFileManager.defaultManager fileExistsAtPath:epubPath])
+            [convertedFiles addObject:epubPath];
+    }
+
+    return convertedFiles;
+}
+
 @end
