@@ -10,16 +10,18 @@
 
 #include <miniexp.h>
 
+#include <algorithm>
+#include <atomic>
+#include <cctype>
+#include <climits>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <climits>
-#include <algorithm>
-#include <cctype>
-#include <unordered_map>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <vector>
 
 // macOS defines `fract1` / `fract2` macros via CarbonCore's FixMath.h, which
@@ -127,7 +129,8 @@ static bool isGrayscaleRgb24(unsigned char const* rgb, int width, int height, si
     return true;
 }
 
-static bool isBitonalGray8(unsigned char const* gray, int width, int height, size_t rowBytes)
+// Check if grayscale RGB image is bitonal - reads R channel directly (avoids gray buffer creation)
+static bool isBitonalGrayscaleRgb(unsigned char const* rgb, int width, int height, size_t rowBytes)
 {
     // Heuristic: treat as bitonal when the non-white pixels are mostly near-black.
     unsigned char constexpr WhiteMaxBlackness = 16; // >= 239 treated as white-ish
@@ -149,7 +152,7 @@ static bool isBitonalGray8(unsigned char const* gray, int width, int height, siz
 
     for (int y = 0; y < height; y += stepY)
     {
-        auto const* row = gray + (size_t)y * rowBytes;
+        auto const* row = rgb + (size_t)y * rowBytes;
         int const ty = (y * TileCount) / height;
         for (int x = 0; x < width; x += stepX)
         {
@@ -157,7 +160,8 @@ static bool isBitonalGray8(unsigned char const* gray, int width, int height, siz
             size_t const tileIdx = (size_t)ty * (size_t)TileCount + (size_t)tx;
             ++tileSamples[tileIdx];
 
-            unsigned char const v = row[x];
+            // Read R channel (for grayscale RGB, R=G=B)
+            unsigned char const v = row[x * 3];
             unsigned char const blackness = (unsigned char)(255U - (unsigned)v);
 
             if (blackness <= WhiteMaxBlackness)
@@ -913,86 +917,93 @@ struct Jbig2Batch
     std::vector<int> pageNums;
 };
 
-static bool flushJbig2Batch(Jbig2Batch* batch, std::vector<DjvuPdfPageInfo>* pages, std::vector<std::vector<uint8_t>>* globals, NSString* djvuPath)
+// Async JBIG2 encoding context
+struct Jbig2AsyncContext
 {
-    if (batch == nullptr || pages == nullptr || globals == nullptr)
-        return false;
-    if (batch->pixes.empty())
-        return true;
+    dispatch_group_t group;
+    dispatch_queue_t queue;
+    std::mutex mutex; // Protects pages and globals
+    std::vector<DjvuPdfPageInfo>* pages;
+    std::vector<std::vector<uint8_t>>* globals;
+    std::atomic<bool> ok{ true };
+    NSString* djvuPath;
+};
 
-    jbig2ctx* jb2 = jbig2_init(0.85f, 0.5f, 0, 0, false, -1);
-    if (jb2 == nullptr)
+static void flushJbig2BatchAsync(Jbig2Batch batch, Jbig2AsyncContext* ctx)
+{
+    if (batch.pixes.empty() || ctx == nullptr)
     {
-        NSLog(@"DjvuConverter ERROR: jbig2_init failed for %@", djvuPath);
-        for (auto*& pix : batch->pixes)
+        for (auto*& pix : batch.pixes)
             pixDestroy(&pix);
-        batch->pixes.clear();
-        batch->pageNums.clear();
-        return false;
+        return;
     }
 
-    for (auto* pix : batch->pixes)
-        jbig2_add_page(jb2, pix);
+    dispatch_group_async(ctx->group, ctx->queue, ^{
+        jbig2ctx* jb2 = jbig2_init(0.85f, 0.5f, 0, 0, false, -1);
+        if (jb2 == nullptr)
+        {
+            NSLog(@"DjvuConverter ERROR: jbig2_init failed for %@", ctx->djvuPath);
+            for (auto* pix : batch.pixes)
+                pixDestroy(&pix);
+            ctx->ok = false;
+            return;
+        }
 
-    int globalsLen = 0;
-    uint8_t* globalsBuf = jbig2_pages_complete(jb2, &globalsLen);
-    if (globalsBuf == nullptr || globalsLen <= 0)
-    {
-        NSLog(@"DjvuConverter ERROR: jbig2_pages_complete failed for %@", djvuPath);
+        for (auto* pix : batch.pixes)
+            jbig2_add_page(jb2, pix);
+
+        int globalsLen = 0;
+        uint8_t* globalsBuf = jbig2_pages_complete(jb2, &globalsLen);
+        if (globalsBuf == nullptr || globalsLen <= 0)
+        {
+            NSLog(@"DjvuConverter ERROR: jbig2_pages_complete failed for %@", ctx->djvuPath);
+            jbig2_destroy(jb2);
+            for (auto* pix : batch.pixes)
+                pixDestroy(&pix);
+            ctx->ok = false;
+            return;
+        }
+
+        // Lock for writing to shared globals and pages
+        std::lock_guard<std::mutex> lock(ctx->mutex);
+
+        size_t globalsIndex = ctx->globals->size();
+        ctx->globals->emplace_back(globalsBuf, globalsBuf + (size_t)globalsLen);
+        free(globalsBuf);
+
+        for (size_t i = 0; i < batch.pageNums.size(); ++i)
+        {
+            int len = 0;
+            uint8_t* pageBuf = jbig2_produce_page(jb2, (int)i, -1, -1, &len);
+            if (pageBuf == nullptr || len <= 0)
+            {
+                NSLog(@"DjvuConverter ERROR: jbig2_produce_page failed for batch index %zu in %@", i, ctx->djvuPath);
+                ctx->ok = false;
+                break;
+            }
+
+            int const rawPageNum = batch.pageNums[i];
+            bool const isFgMask = (rawPageNum < 0);
+            int const pageIndex = isFgMask ? (-1 - rawPageNum) : rawPageNum;
+            DjvuPdfPageInfo& pageInfo = (*ctx->pages)[(size_t)pageIndex];
+
+            if (isFgMask)
+            {
+                pageInfo.fgMask.bytes.assign(pageBuf, pageBuf + (size_t)len);
+                pageInfo.fgMask.jbig2GlobalsIndex = (int)globalsIndex;
+            }
+            else
+            {
+                pageInfo.image.bytes.assign(pageBuf, pageBuf + (size_t)len);
+                pageInfo.image.jbig2GlobalsIndex = (int)globalsIndex;
+            }
+            free(pageBuf);
+        }
+
         jbig2_destroy(jb2);
-        for (auto*& pix : batch->pixes)
+        for (auto* pix : batch.pixes)
             pixDestroy(&pix);
-        batch->pixes.clear();
-        batch->pageNums.clear();
-        return false;
-    }
-
-    size_t globalsIndex = globals->size();
-    globals->emplace_back(globalsBuf, globalsBuf + (size_t)globalsLen);
-    free(globalsBuf);
-
-    bool ok = true;
-    for (size_t i = 0; i < batch->pageNums.size() && ok; ++i)
-    {
-        int len = 0;
-        uint8_t* pageBuf = jbig2_produce_page(jb2, (int)i, -1, -1, &len);
-        if (pageBuf == nullptr || len <= 0)
-        {
-            NSLog(@"DjvuConverter ERROR: jbig2_produce_page failed for batch index %zu in %@", i, djvuPath);
-            ok = false;
-            break;
-        }
-
-        int const rawPageNum = batch->pageNums[i];
-        // Negative page numbers indicate foreground masks: actual page = (-1 - rawPageNum)
-        bool const isFgMask = (rawPageNum < 0);
-        int const pageIndex = isFgMask ? (-1 - rawPageNum) : rawPageNum;
-        DjvuPdfPageInfo& pageInfo = (*pages)[(size_t)pageIndex];
-
-        if (isFgMask)
-        {
-            pageInfo.fgMask.bytes.assign(pageBuf, pageBuf + (size_t)len);
-            pageInfo.fgMask.jbig2GlobalsIndex = (int)globalsIndex;
-        }
-        else
-        {
-            pageInfo.image.bytes.assign(pageBuf, pageBuf + (size_t)len);
-            pageInfo.image.jbig2GlobalsIndex = (int)globalsIndex;
-        }
-        free(pageBuf);
-
-        if (isFgMask ? pageInfo.fgMask.bytes.empty() : pageInfo.image.bytes.empty())
-            ok = false;
-    }
-
-    jbig2_destroy(jb2);
-
-    for (auto*& pix : batch->pixes)
-        pixDestroy(&pix);
-    batch->pixes.clear();
-    batch->pageNums.clear();
-
-    return ok;
+    });
 }
 
 struct PdfOutlineItem
@@ -1502,16 +1513,25 @@ static BOOL convertDjvuFileDeterministic(NSString* djvuPath, NSString* tmpPdfPat
     dispatch_queue_t encQ = dispatch_queue_create("transmission.djvu.jp2.encode", DISPATCH_QUEUE_CONCURRENT);
     dispatch_group_t encGroup = dispatch_group_create();
 
-    // Allow more concurrent JP2 encodes. Each encode uses 2 threads internally,
-    // so with 8 cores we can run ~4 concurrent encodes efficiently.
+    // Allow concurrent JP2 encodes. Each encode uses 2 threads (see encodeJp2Grok),
+    // so limit concurrency to cpu/2 for optimal thread utilization.
     NSInteger cpu = NSProcessInfo.processInfo.activeProcessorCount;
-    NSInteger maxConcurrent = MAX(1, cpu / 2);
-    dispatch_semaphore_t sem = dispatch_semaphore_create(maxConcurrent);
+    NSInteger maxJp2Concurrent = MAX(2, cpu / 2);
+    dispatch_semaphore_t sem = dispatch_semaphore_create(maxJp2Concurrent);
 
     bool ok = true;
-    int constexpr Jbig2BatchSize = 20;
+    // Smaller batches = more parallelism, larger = better symbol sharing
+    int const Jbig2BatchSize = MAX(8, MIN(20, pageCount / (int)cpu));
     Jbig2Batch jbig2Batch;
     std::vector<std::vector<uint8_t>> jbig2Globals;
+
+    // Async JBIG2 context - allows overlapping JBIG2 encoding with page rendering
+    Jbig2AsyncContext jbig2Ctx;
+    jbig2Ctx.group = dispatch_group_create();
+    jbig2Ctx.queue = dispatch_queue_create("transmission.djvu.jbig2.encode", DISPATCH_QUEUE_CONCURRENT);
+    jbig2Ctx.pages = &pages;
+    jbig2Ctx.globals = &jbig2Globals;
+    jbig2Ctx.djvuPath = djvuPath;
 
     for (int pageNum = 0; pageNum < pageCount && ok; ++pageNum)
     {
@@ -1791,7 +1811,10 @@ static BOOL convertDjvuFileDeterministic(NSString* djvuPath, NSString* tmpPdfPat
                                 jbig2Batch.pixes.push_back(fgCropped);
 
                                 if ((int)jbig2Batch.pixes.size() >= Jbig2BatchSize)
-                                    ok = flushJbig2Batch(&jbig2Batch, &pages, &jbig2Globals, djvuPath);
+                                {
+                                    flushJbig2BatchAsync(std::move(jbig2Batch), &jbig2Ctx);
+                                    jbig2Batch = Jbig2Batch{};
+                                }
 
                                 ddjvu_page_release(page);
                                 incrementDonePagesForPath(djvuPath);
@@ -1876,16 +1899,10 @@ static BOOL convertDjvuFileDeterministic(NSString* djvuPath, NSString* tmpPdfPat
 
                 if (gray)
                 {
-                    std::vector<unsigned char> grayBuf((size_t)renderW * (size_t)renderH);
-                    for (int y = 0; y < renderH; ++y)
-                    {
-                        auto const* srcRow = rgb->data() + (size_t)y * rowBytes;
-                        auto* dst = grayBuf.data() + (size_t)y * (size_t)renderW;
-                        for (int x = 0; x < renderW; ++x)
-                            dst[x] = srcRow[x * 3 + 0];
-                    }
-
-                    bool const bitonal = isBitonalGray8(grayBuf.data(), renderW, renderH, (size_t)renderW);
+                    // Check bitonal directly from RGB buffer (avoids gray buffer allocation for bitonal pages)
+                    // Skip bitonal check for PHOTO pages - they should stay as JP2
+                    bool const bitonal = (pageType != DDJVU_PAGETYPE_PHOTO) &&
+                        isBitonalGrayscaleRgb(rgb->data(), renderW, renderH, rowBytes);
                     if (bitonal)
                     {
                         bool const preferBitonal = (renderDpi == pageDpi) && (renderW == pageWidth) && (renderH == pageHeight);
@@ -1923,7 +1940,10 @@ static BOOL convertDjvuFileDeterministic(NSString* djvuPath, NSString* tmpPdfPat
                                     jbig2Batch.pageNums.push_back(pageNum);
                                     jbig2Batch.pixes.push_back(pixCropped);
                                     if ((int)jbig2Batch.pixes.size() >= Jbig2BatchSize)
-                                        ok = flushJbig2Batch(&jbig2Batch, &pages, &jbig2Globals, djvuPath);
+                                    {
+                                        flushJbig2BatchAsync(std::move(jbig2Batch), &jbig2Ctx);
+                                        jbig2Batch = Jbig2Batch{};
+                                    }
                                 }
                                 else if (pixCropped != nullptr)
                                 {
@@ -1941,6 +1961,16 @@ static BOOL convertDjvuFileDeterministic(NSString* djvuPath, NSString* tmpPdfPat
 
                     if (p.image.kind == DjvuPdfImageKind::None)
                     {
+                        // Create grayscale buffer only when needed for JP2 (not bitonal)
+                        std::vector<unsigned char> grayBuf((size_t)renderW * (size_t)renderH);
+                        for (int y = 0; y < renderH; ++y)
+                        {
+                            auto const* srcRow = rgb->data() + (size_t)y * rowBytes;
+                            auto* dst = grayBuf.data() + (size_t)y * (size_t)renderW;
+                            for (int x = 0; x < renderW; ++x)
+                                dst[x] = srcRow[x * 3];
+                        }
+
                         // Try Otsu cropping, fallback to full page if it fails
                         CropRect cr = { 0, 0, renderW, renderH };
                         CropRect otsuCrop{};
@@ -2049,8 +2079,10 @@ static BOOL convertDjvuFileDeterministic(NSString* djvuPath, NSString* tmpPdfPat
         }
     }
 
+    // Wait for all JP2 encoding to complete
     dispatch_group_wait(encGroup, DISPATCH_TIME_FOREVER);
 
+    // Clean up PIXes if there was an error
     if (!ok && !jbig2Batch.pixes.empty())
     {
         for (auto*& pix : jbig2Batch.pixes)
@@ -2078,8 +2110,19 @@ static BOOL convertDjvuFileDeterministic(NSString* djvuPath, NSString* tmpPdfPat
         }
     }
 
+    // Flush remaining JBIG2 batch
     if (ok && !jbig2Batch.pixes.empty())
-        ok = flushJbig2Batch(&jbig2Batch, &pages, &jbig2Globals, djvuPath);
+    {
+        flushJbig2BatchAsync(std::move(jbig2Batch), &jbig2Ctx);
+        jbig2Batch = Jbig2Batch{};
+    }
+
+    // Wait for all async JBIG2 encoding to complete
+    dispatch_group_wait(jbig2Ctx.group, DISPATCH_TIME_FOREVER);
+
+    // Check JBIG2 async status
+    if (!jbig2Ctx.ok)
+        ok = false;
 
     if (ok)
     {
