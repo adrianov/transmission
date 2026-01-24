@@ -11,6 +11,7 @@
 
 + (NSString*)stringForFileSize:(uint64_t)size;
 + (NSString*)stringForFilePartialSize:(uint64_t)partialSize fullSize:(uint64_t)fullSize;
++ (NSString*)stringForFileSizeOneDecimal:(uint64_t)size;
 
 // 4 significant digits
 + (NSString*)stringForSpeed:(CGFloat)speed;

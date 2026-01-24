@@ -700,7 +700,7 @@
 "Paused" = "Paused";
 
 /* Torrent -> status string */
-"Not enough disk space" = "Not enough disk space";
+"Not enough disk space. Need %@, Available %@ of %@" = "Not enough disk space. Need %@, Available %@ of %@";
 
 /* Inspector -> peer -> status */
 "Peer is unchoking you, but you are not interested" = "Peer is unchoking you, but you are not interested";

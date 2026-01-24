@@ -79,6 +79,50 @@
     return [self stringForSpeedCompact:speed kb:@"K" mb:@"M" gb:@"G"];
 }
 
++ (NSString*)stringForFileSizeOneDecimal:(uint64_t)size
+{
+    if (size == 0)
+    {
+        return @"0.0 B";
+    }
+
+    NSString* unit;
+    double value;
+    uint64_t const KB = 1024;
+    uint64_t const MB = KB * 1024;
+    uint64_t const GB = MB * 1024;
+    uint64_t const TB = GB * 1024;
+    uint64_t const PB = TB * 1024;
+
+    if (size < MB)
+    {
+        unit = @"KB";
+        value = static_cast<double>(size) / KB;
+    }
+    else if (size < GB)
+    {
+        unit = @"MB";
+        value = static_cast<double>(size) / MB;
+    }
+    else if (size < TB)
+    {
+        unit = @"GB";
+        value = static_cast<double>(size) / GB;
+    }
+    else if (size < PB)
+    {
+        unit = @"TB";
+        value = static_cast<double>(size) / TB;
+    }
+    else
+    {
+        unit = @"PB";
+        value = static_cast<double>(size) / PB;
+    }
+
+    return [NSString stringWithFormat:@"%.1f %@", value, unit];
+}
+
 + (NSString*)stringForRatio:(CGFloat)ratio
 {
     //N/A is different than libtransmission's
