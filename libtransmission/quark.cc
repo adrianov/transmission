@@ -704,6 +704,9 @@ auto constexpr MyStatic = std::array<std::string_view, TR_N_KEYS>{
     "upload_ratio"sv, // rpc
     "upload_slots_per_torrent"sv, // tr_session::Settings
     "upload_speed"sv, // rpc
+    "upload_speed_auto_adjust"sv, // tr_session::Settings
+    "upload_speed_history"sv, // tr_session::Settings
+    "upload_speed_history_enabled"sv, // tr_session::Settings
     "uploaded"sv, // .resume
     "uploaded-bytes"sv, // stats.json
     "uploadedBytes"sv, // rpc
