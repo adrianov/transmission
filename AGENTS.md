@@ -1,98 +1,20 @@
-# WARP.md
+# AGENTS.md
 
-This file provides guidance to WARP (warp.dev) when working with code in this repository.
+This file provides guidance for agentic coding agents working with the Transmission codebase.
 
-## Project Overview
+## Build Commands
 
-Transmission is a fast, easy, and free BitTorrent client with multiple implementations:
-- **macOS GUI** - Native Cocoa application
-- **GTK+ and Qt GUIs** - For Linux, BSD, etc.
-- **Qt Windows GUI** - Windows-compatible application
-- **Daemon** - Headless server daemon (transmission-daemon)
-- **Web UI** - Remote control interface
-- **CLI tools** - transmission-remote, transmission-create, transmission-edit, transmission-show
-
-## Build System
-
-### Building on macOS
-
-**Native macOS app with Xcode:**
+**Clean build from scratch:**
 ```bash
-# Open and run directly
-open Transmission.xcodeproj
+cmake -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo -DENABLE_TESTS=ON
+cmake --build build -j$(nproc)    # Linux
+cmake --build build -j$(sysctl -n hw.ncpu)    # macOS
 ```
 
-**With CMake:**
+**Rebuild after changes:**
 ```bash
-cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo
-# Use -j$(sysctl -n hw.ncpu) for parallel builds (faster)
-# Use tail -5 to save tokens by showing only last 5 lines of output
-cmake --build build -t transmission-mac -j$(sysctl -n hw.ncpu) 2>&1 | tail -5
-open ./build/macosx/Transmission.app
-
-# Reveal built binary in Finder
-open -R ./build/macosx/Transmission.app
+cmake --build build -j$(nproc) 2>&1 | tail -5
 ```
-
-**GTK app on macOS:**
-```bash
-brew install gtk4 gtkmm4
-cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DENABLE_GTK=ON -DENABLE_MAC=OFF
-cmake --build build -t transmission-gtk -j$(sysctl -n hw.ncpu) 2>&1 | tail -5
-./build/gtk/transmission-gtk
-```
-
-**Qt app on macOS:**
-```bash
-brew install qt
-brew services start dbus
-cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DENABLE_QT=ON -DENABLE_MAC=OFF
-cmake --build build -t transmission-qt -j$(sysctl -n hw.ncpu) 2>&1 | tail -5
-./build/qt/transmission-qt
-```
-
-### Building on Unix/Linux
-
-**First time:**
-```bash
-git clone --recurse-submodules https://github.com/transmission/transmission Transmission
-cd Transmission
-cmake -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo
-cd build
-# Use -j$(nproc) for parallel builds (faster)
-cmake --build . -j$(nproc) 2>&1 | tail -5
-sudo cmake --install .
-```
-
-**Updating:**
-```bash
-cd Transmission/build
-cmake --build . -t clean
-git submodule foreach --recursive git clean -xfd
-git pull --rebase --prune
-git submodule update --init --recursive
-# Use -j$(nproc) for parallel builds (faster)
-cmake --build . -j$(nproc) 2>&1 | tail -5
-sudo cmake --install .
-```
-
-### Key CMake Options
-
-Configure which components to build:
-- `-DENABLE_DAEMON=ON` - Build transmission-daemon
-- `-DENABLE_QT=AUTO` - Build Qt client (AUTO/ON/OFF)
-- `-DENABLE_GTK=AUTO` - Build GTK client (AUTO/ON/OFF)
-- `-DENABLE_MAC=AUTO` - Build macOS client (AUTO/ON/OFF)
-- `-DENABLE_UTILS=ON` - Build CLI utilities
-- `-DENABLE_CLI=OFF` - Build transmission-cli (deprecated)
-- `-DENABLE_TESTS=ON` - Build unit tests
-- `-DENABLE_UTP=ON` - Build with µTP support
-- `-USE_QT_VERSION=AUTO` - Qt version (AUTO/5/6)
-- `-USE_GTK_VERSION=AUTO` - GTK version (AUTO/3/4)
-
-## Testing
-
-Tests use Google Test framework.
 
 **Run all tests:**
 ```bash
@@ -106,170 +28,120 @@ cd build
 ./tests/libtransmission/libtransmission-test
 ```
 
+**Run single test (GoogleTest syntax):**
+```bash
+cd build
+./tests/libtransmission/libtransmission-test --gtest_filter=TestSuite.TestCase
+# Examples:
+./tests/libtransmission/libtransmission-test --gtest_filter=AnnounceListTest.canAdd
+./tests/libtransmission/libtransmission-test --gtest_filter=SessionTest.*
+./tests/libtransmission/libtransmission-test --gtest_filter=*canAdd
+```
+
+**List all available tests:**
+```bash
+./tests/libtransmission/libtransmission-test --gtest_list_tests
+```
+
 **Run Qt tests:**
 ```bash
 cd build
 ./tests/qt/transmission-test-qt
 ```
 
-Test files are in `tests/libtransmission/` and `tests/qt/` directories.
-
-## Code Style & Linting
-
-### C++ Formatting
-
-Use clang-format-20 (or clang-format) to format code:
-
+**Build specific target:**
 ```bash
-# Format all code
-./code_style.sh
+cmake --build build -t transmission-mac    # macOS
+cmake --build build -t transmission-daemon
+cmake --build build -t transmission-gtk
+cmake --build build -t transmission-qt
+```
 
-# Check formatting without modifying
+## Lint Commands
+
+**Check C++ formatting:**
+```bash
 ./code_style.sh --check
 ```
 
-The script uses `.clang-format`, `.clang-format-include`, and `.clang-format-ignore` files to determine which files to format.
+**Apply C++ formatting:**
+```bash
+./code_style.sh
+# Or for specific files:
+clang-format -i path/to/file.cc path/to/file.h
+```
 
-### JavaScript/Web Linting
-
+**Web linting (web/ directory):**
 ```bash
 cd web
 npm ci
-npm run lint        # Check
-npm run lint:fix    # Fix
+npm run lint              # Check
+npm run lint:fix          # Fix
 ```
 
-### Code Style Guidelines
+## Code Style Guidelines
 
-- Follow [C++ Core Guidelines](https://isocpp.github.io/CppCoreGuidelines/CppCoreGuidelines)
-- Prefer memory-managed objects over raw pointers
-- Prefer `constexpr` over `#define`
+### Imports and Headers
+
+- Prefer new-style C++ headers: `<cstring>`, `<cstdint>`, `<vector>` over `<string.h>`, `<stdint.h>`
+- Prefer local includes with double quotes: `"libtransmission/transmission.h"`
+- Use `#pragma once` instead of include guards in headers
+- Sort using declarations alphabetically (enforced by clang-format)
+
+### Types and Constants
+
+- C++ standard: C++17, C standard: C11
 - Prefer `enum class` over `enum`
-- Prefer new-style headers (`<cstring>` over `<string.h>`)
-- C++ standard: C++17
-- C standard: C11
-- Fix all warnings before merging
+- Prefer `constexpr` over `#define` for constants
+- Use `uint64_t`, `int64_t` from `<cstdint>` for fixed-width integers
+- Use `size_t`, `time_t` for platform-dependent sizes
+- Use `std::string_view` for read-only string parameters
+- Use `std::optional` instead of pointer-or-sentinel patterns
 
-## Architecture
+### Naming Conventions
 
-### Core Library: libtransmission
+- **Classes/structs:** PascalCase (`class TorrentManager`, `struct tr_torrent`)
+- **Functions/Methods:** camelCase (`void loadFiles()`, `int getPort()`)
+- **Variables:** camelCase for local members (`bool isValid;`), trailing underscore for private members (`bool paused_;`)
+- **Constants:** UPPER_SNAKE_CASE for macros (rarely needed due to `constexpr`)
+- **Test fixtures:** PascalCase with `Test` suffix (`class VariantTest`, `class RenameTest`)
+- **Test cases:** TEST_F(TestFixture, TestCase) pattern (`TEST_F(VariantTest, getType)`)
 
-The heart of Transmission is `libtransmission/`, a C++ library containing all BitTorrent logic. Key components:
+### Memory Management
 
-**Session Management** (`session.cc`, `session.h`)
-- Entry point for all client applications
-- Manages global state and configuration
-- Coordinates all torrents and network activity
+- Prefer memory-managed objects (`std::unique_ptr`, `std::shared_ptr`) over raw pointers
+- Use `[[nodiscard]]` attribute on functions that return values that should be used
+- Use `noexcept` on functions that cannot throw exceptions
 
-**Torrent Management** (`torrent.cc`, `torrent.h`, `torrent-metainfo.cc`)
-- Per-torrent state and operations
-- Metadata parsing and validation
-- File management via `file.h`
+### Error Handling
 
-**Peer Management** (`peer-mgr.cc`, `peer-msgs.cc`)
-- Manages connections to peers
-- Implements BitTorrent protocol
-- Handles piece requests and uploads
+- Use `tr_error` struct from `<libtransmission/error.h>` for errors
+- Error codes are int values, messages are `std::string` or `std::string_view`
+- Use `tr_error::set()` or `tr_error::set_from_errno()` to set errors
+- Check error state with boolean conversion or `has_value()`
 
-**Announcer** (`announcer.cc`, `announcer-udp.cc`)
-- Communicates with trackers
-- HTTP and UDP tracker support
-- DHT integration (`dht.cc`)
+### Formatting
 
-**Network Layer** (`web.cc`, `handshake.cc`)
-- HTTP/HTTPS client
-- Peer handshaking
-- Protocol encryption
+- 4-space indentation (no tabs)
+- 128 column limit
+- clang-format enforces: `AlignAfterOpenBracket: AlwaysBreak`, `PointerAlignment: Left`
+- Use `const` for variables that don't change
+- Place `*` on left side of pointer: `Type* pointer` (not `Type *pointer`)
+- Place `&` on left side of reference: `Type& reference` (not `Type &reference`)
 
-**RPC Server** (`rpc-server.cc`, `rpcimpl.cc`)
-- JSON-RPC API for remote control
-- Used by web UI, transmission-remote, and third-party clients
+### General Guidelines
 
-**Data Structures**
-- `benc.h` - Bencoding (BitTorrent's encoding format)
-- `variant.h` - Type-safe variant type for configuration/RPC
-- `bitfield.h` - Efficient piece tracking
-- `block-info.h` - Piece and block index management
-
-### Client Applications
-
-**daemon/** - Headless daemon with RPC server  
-**macosx/** - Native macOS Cocoa application  
-**gtk/** - GTK+ GUI application  
-**qt/** - Qt cross-platform GUI  
-**cli/** - Deprecated single-torrent CLI  
-**utils/** - Standalone CLI utilities (create, edit, show)  
-**web/** - JavaScript-based web interface
-
-### macOS UI with XIB Files
-
-The macOS client uses XIB (Interface Builder) files for UI layout (`macosx/Base.lproj/*.xib`).
-
-**Guidelines:**
-- When modifying existing windows/views that use XIB, edit the XIB file rather than creating UI programmatically
-- For new windows and components in macOS, prefer XIB-based layout over programmatic creation
-- XIB files can be edited in Xcode Interface Builder or directly as XML
-- See `docs/Editing-XIB-Files.md` for detailed instructions on XIB editing
+- Follow C++ Core Guidelines: https://isocpp.github.io/CppCoreGuidelines/CppCoreGuidelines
+- Fix all warnings before merging code
+- Address compiler warnings that occur during the build process immediately, even if they don't prevent compilation
+- Use standard library containers (`std::vector`, `std::map`) over custom implementations
+- Prefer dependency injection or other decoupling methods for testability
+- KISS principle: Try simpler approaches first in complex codebase
+- New features must be accessible via both C API (`transmission.h`) and RPC/JSON API
 
 ### API Boundaries
 
-All client code interfaces with libtransmission through:
-1. **C API** - `transmission.h` (used by macOS and GTK clients)
-2. **RPC/JSON API** - Used by web UI, transmission-remote, and external apps
-
-New features must be accessible via both APIs.
-
-## Development Workflow
-
-### Making Changes
-
-1. Search codebase for relevant code
-2. Make changes following code style
-3. Format changed C++ files: `clang-format -i <file.cc|file.mm|file.h>`
-4. Build and verify no warnings
-   - Use parallel builds for faster compilation: `-j$(nproc)` on Linux, `-j$(sysctl -n hw.ncpu)` on macOS
-   - Use `2>&1 | tail -5` to save tokens by showing only last 5 lines of build output
-5. Run tests with `ctest`
-6. For GUI changes, consider all three clients (macOS, GTK, Qt)
-
-### Committing
-
-Include co-author attribution in commit messages:
-```
-Co-Authored-By: Warp <agent@warp.dev>
-```
-
-### Git Submodules
-
-Transmission uses submodules for third-party dependencies in `third-party/`. Always use `--recurse-submodules` when cloning.
-
-## Important Files
-
-- `CMakeLists.txt` - Main build configuration
-- `libtransmission/transmission.h` - Public C API
-- `code_style.sh` - Code formatting script
-- `.clang-format` - C++ formatting rules
-- `docs/Building-Transmission.md` - Detailed build instructions
-- `CONTRIBUTING.md` - Contribution guidelines
-
-## CLI Tools
-
-**transmission-remote** - Preferred CLI client for controlling any Transmission instance  
-**transmission-create** - Create .torrent files  
-**transmission-edit** - Edit .torrent files  
-**transmission-show** - Display .torrent file information  
-**transmission-cli** - Deprecated single-torrent client
-
-## Configuration
-
-Default config directory (can be overridden with `TRANSMISSION_HOME`):
-- **macOS:** `~/Library/Application Support/Transmission/`
-- **Linux:** `~/.config/transmission/` or `$XDG_CONFIG_HOME/transmission/`
-- **Windows:** `%APPDATA%/transmission/`
-
-Default download directory: `~/Downloads`
-
-## Key Ports
-
-- **Peer port:** 51413 (default, configurable)
-- **RPC port:** 9091 (default, configurable)
+- **libtransmission** is the core C++ library
+- macOS and GTK clients use C API from `transmission.h`
+- Web UI, transmission-remote, and external apps use RPC/JSON API
+- All new features must work through both APIs
