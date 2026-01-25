@@ -2172,7 +2172,9 @@ static NSTimeInterval const kLowPriorityDelay = 15.0;
     [self confirmRemoveTorrents:torrents deleteData:deleteData completionHandler:nil];
 }
 
-- (void)confirmRemoveTorrents:(NSArray<Torrent*>*)torrents deleteData:(BOOL)deleteData completionHandler:(void (^)(void))completionHandler
+- (void)confirmRemoveTorrents:(NSArray<Torrent*>*)torrents
+                   deleteData:(BOOL)deleteData
+            completionHandler:(void (^)(void))completionHandler
 {
     //miscellaneous
     for (Torrent* torrent in torrents)
@@ -5806,11 +5808,13 @@ static NSTimeInterval const kLowPriorityDelay = 15.0;
 - (void)searchTorrentsWithQuery:(NSString*)query
 {
     // Search URL templates for supported trackers (domain substring -> URL format)
-    NSDictionary<NSString*, NSString*>* searchTemplates = @{
-        @"kinozal.tv" : @"https://kinozal.tv/browse.php?s=%@&t=1",
-        @"rutracker.org" : @"https://rutracker.org/forum/tracker.php?nm=%@&o=10",
-        @"pornolab.net" : @"https://pornolab.net/forum/tracker.php?nm=%@&o=10"
-    };
+    NSMutableDictionary<NSString*, NSString*>* searchTemplates = [@{ @"kinozal.tv" : @"https://kinozal.tv/browse.php?s=%@&t=1" } mutableCopy];
+
+    // Detect tracker links in comments: (https?://[^/]+/forum/)viewtopic.php
+    NSError* error = nil;
+    NSRegularExpression* regex = [NSRegularExpression regularExpressionWithPattern:@"(https?://[^/]+/forum/)viewtopic\\.php"
+                                                                           options:NSRegularExpressionCaseInsensitive
+                                                                             error:&error];
 
     // Count torrents per tracker domain found in comments
     NSCountedSet<NSString*>* domainCounts = [[NSCountedSet alloc] init];
@@ -5822,12 +5826,36 @@ static NSTimeInterval const kLowPriorityDelay = 15.0;
             continue;
         }
 
-        for (NSString* domain in searchTemplates)
+        NSMutableSet<NSString*>* foundInThisTorrent = [NSMutableSet set];
+
+        // Check hardcoded domains
+        for (NSString* domain in searchTemplates.allKeys)
         {
             if ([comment rangeOfString:domain options:NSCaseInsensitiveSearch].location != NSNotFound)
             {
-                [domainCounts addObject:domain];
+                [foundInThisTorrent addObject:domain];
             }
+        }
+
+        // Discover and count dynamic domains
+        [regex enumerateMatchesInString:comment options:0 range:NSMakeRange(0, comment.length)
+                             usingBlock:^(NSTextCheckingResult* result, NSMatchingFlags /*flags*/, BOOL* /*stop*/) {
+                                 NSString* baseUrl = [comment substringWithRange:[result rangeAtIndex:1]];
+                                 NSURL* url = [NSURL URLWithString:baseUrl];
+                                 NSString* domain = url.host.lowercaseString;
+                                 if (domain)
+                                 {
+                                     if (!searchTemplates[domain])
+                                     {
+                                         searchTemplates[domain] = [baseUrl stringByAppendingString:@"tracker.php?nm=%@&o=10"];
+                                     }
+                                     [foundInThisTorrent addObject:domain];
+                                 }
+                             }];
+
+        for (NSString* domain in foundInThisTorrent)
+        {
+            [domainCounts addObject:domain];
         }
     }
 
@@ -5985,14 +6013,17 @@ static NSTimeInterval const kLowPriorityDelay = 15.0;
             // Use max(dateAdded, dateLastPlayed) for sorting
             NSDate* dateA = [a.dateLastPlayed compare:a.dateAdded] == NSOrderedDescending ? a.dateLastPlayed : a.dateAdded;
             NSDate* dateB = [b.dateLastPlayed compare:b.dateAdded] == NSOrderedDescending ? b.dateLastPlayed : b.dateAdded;
-            
-            if (dateA && dateB) {
+
+            if (dateA && dateB)
+            {
                 return [dateA compare:dateB];
             }
-            if (dateA) {
+            if (dateA)
+            {
                 return NSOrderedAscending; // a has date, b doesn't, a should come first
             }
-            if (dateB) {
+            if (dateB)
+            {
                 return NSOrderedDescending; // b has date, a doesn't, b should come first
             }
             return NSOrderedSame;
@@ -6136,14 +6167,17 @@ static NSTimeInterval const kLowPriorityDelay = 15.0;
             // Use max(dateAdded, dateLastPlayed) for sorting
             NSDate* dateA = [a.dateLastPlayed compare:a.dateAdded] == NSOrderedDescending ? a.dateLastPlayed : a.dateAdded;
             NSDate* dateB = [b.dateLastPlayed compare:b.dateAdded] == NSOrderedDescending ? b.dateLastPlayed : b.dateAdded;
-            
-            if (dateA && dateB) {
+
+            if (dateA && dateB)
+            {
                 return [dateA compare:dateB];
             }
-            if (dateA) {
+            if (dateA)
+            {
                 return NSOrderedAscending; // a has date, b doesn't, a should come first
             }
-            if (dateB) {
+            if (dateB)
+            {
                 return NSOrderedDescending; // b has date, a doesn't, b should come first
             }
             return NSOrderedSame;
