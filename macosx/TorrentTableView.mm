@@ -336,6 +336,7 @@ static CGFloat const kPlayButtonVerticalPadding = 4.0;
                     torrentCell.fTorrentStatusField.hidden = YES;
                     torrentCell.fControlButton.hidden = NO;
                     torrentCell.fRevealButton.hidden = NO;
+                    torrentCell.fURLButton.hidden = (torrent.commentURL == nil);
                 }
             }
             else
@@ -343,6 +344,7 @@ static CGFloat const kPlayButtonVerticalPadding = 4.0;
                 torrentCell.fTorrentStatusField.hidden = NO;
                 torrentCell.fControlButton.hidden = YES;
                 torrentCell.fRevealButton.hidden = YES;
+                torrentCell.fURLButton.hidden = YES;
             }
         }
         else
@@ -389,10 +391,16 @@ static CGFloat const kPlayButtonVerticalPadding = 4.0;
 
                 // set torrent title
                 torrentCell.fTorrentTitleField.stringValue = torrent.displayName;
-
-                // set URL button visibility
-                torrentCell.fURLButton.hidden = (torrent.commentURL == nil);
             }
+
+            // set URL button visibility
+            torrentCell.fURLButton.hidden = (torrent.commentURL == nil);
+
+            // show status, control, reveal and icon buttons (they might have been hidden in minimal mode)
+            torrentCell.fTorrentStatusField.hidden = NO;
+            torrentCell.fControlButton.hidden = NO;
+            torrentCell.fRevealButton.hidden = NO;
+            torrentCell.fIconView.hidden = NO;
 
             // Dynamic content - always update
             NSString* progressString = torrent.progressString;
