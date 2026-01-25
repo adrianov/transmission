@@ -598,7 +598,14 @@ static CGFloat const kPlayButtonVerticalPadding = 4.0;
     {
         if (!item || [item isKindOfClass:[Torrent class]])
         {
-            [self.fController showInfo:nil];
+            if (self.fSmallView && item)
+            {
+                [self playTorrentMedia:(Torrent*)item];
+            }
+            else
+            {
+                [self.fController showInfo:nil];
+            }
         }
         else
         {
@@ -662,6 +669,105 @@ static CGFloat const kPlayButtonVerticalPadding = 4.0;
     [self selectRowIndexes:selectedIndexes byExtendingSelection:NO];
 }
 
+- (void)playContextItem:(NSMenuItem*)sender
+{
+    NSDictionary* represented = sender.representedObject;
+    Torrent* torrent = represented[@"torrent"];
+    NSDictionary* item = represented[@"item"];
+    if (torrent && item)
+    {
+        [self playMediaItem:item forTorrent:torrent];
+    }
+}
+
+- (void)updatePlayMenuForItem:(id)item
+{
+    // Remove old play items (tagged with 100)
+    NSArray* items = [self.fContextRow.itemArray copy];
+    for (NSMenuItem* existing in items)
+    {
+        if (existing.tag == 100)
+        {
+            [self.fContextRow removeItem:existing];
+        }
+    }
+
+    if (![item isKindOfClass:[Torrent class]])
+    {
+        return;
+    }
+
+    Torrent* torrent = (Torrent*)item;
+    NSArray<NSDictionary*>* playableFiles = torrent.playableFiles;
+    if (playableFiles.count == 0)
+    {
+        return;
+    }
+
+    BOOL const isAudio = [torrent.detectedMediaCategory isEqualToString:@"audio"];
+    BOOL const isBooks = [torrent.detectedMediaCategory isEqualToString:@"books"];
+    NSString* mainTitle = isBooks ? NSLocalizedString(@"Read", "Context menu") : NSLocalizedString(@"Play", "Context menu");
+    NSImage* icon = nil;
+    if (@available(macOS 11.0, *))
+    {
+        icon = [NSImage imageWithSystemSymbolName:(isBooks ? @"book" : (isAudio ? @"music.note" : @"play.fill")) accessibilityDescription:nil];
+    }
+
+    if (playableFiles.count == 1)
+    {
+        NSMenuItem* playItem = [[NSMenuItem alloc] initWithTitle:mainTitle action:@selector(playContextItem:) keyEquivalent:@""];
+        playItem.target = self;
+        playItem.representedObject = @{ @"torrent" : torrent, @"item" : playableFiles[0] };
+        playItem.image = icon;
+        playItem.tag = 100;
+        [self.fContextRow insertItem:playItem atIndex:0];
+    }
+    else
+    {
+        NSMenu* playSubmenu = [[NSMenu alloc] initWithTitle:mainTitle];
+
+        NSArray<NSDictionary*>* state = [self playButtonStateForTorrent:torrent];
+        NSArray<NSDictionary*>* layout = [self playButtonLayoutForTorrent:torrent state:state];
+
+        NSMenu* currentMenu = playSubmenu;
+        for (NSDictionary* entry in layout)
+        {
+            NSString* kind = entry[@"kind"];
+            if ([kind isEqualToString:@"header"])
+            {
+                NSString* title = entry[@"title"];
+                if ([title hasSuffix:@":"])
+                    title = [title substringToIndex:title.length - 1];
+
+                NSMenuItem* seasonItem = [[NSMenuItem alloc] initWithTitle:title action:nil keyEquivalent:@""];
+                NSMenu* seasonMenu = [[NSMenu alloc] initWithTitle:title];
+                seasonItem.submenu = seasonMenu;
+                [playSubmenu addItem:seasonItem];
+                currentMenu = seasonMenu;
+            }
+            else
+            {
+                NSDictionary* fileItem = entry[@"item"];
+                NSString* title = fileItem[@"title"];
+                NSMenuItem* menuItem = [[NSMenuItem alloc] initWithTitle:title action:@selector(playContextItem:) keyEquivalent:@""];
+                menuItem.target = self;
+                menuItem.representedObject = @{ @"torrent" : torrent, @"item" : fileItem };
+                [currentMenu addItem:menuItem];
+            }
+        }
+
+        NSMenuItem* mainItem = [[NSMenuItem alloc] initWithTitle:mainTitle action:nil keyEquivalent:@""];
+        mainItem.submenu = playSubmenu;
+        mainItem.image = icon;
+        mainItem.tag = 100;
+        [self.fContextRow insertItem:mainItem atIndex:0];
+    }
+
+    NSMenuItem* sep = [NSMenuItem separatorItem];
+    sep.tag = 100;
+    [self.fContextRow insertItem:sep atIndex:1];
+}
+
 - (NSMenu*)menuForEvent:(NSEvent*)event
 {
     NSInteger row = [self rowAtPoint:[self convertPoint:event.locationInWindow fromView:nil]];
@@ -671,6 +777,9 @@ static CGFloat const kPlayButtonVerticalPadding = 4.0;
         {
             [self selectRowIndexes:[NSIndexSet indexSetWithIndex:row] byExtendingSelection:NO];
         }
+
+        [self updatePlayMenuForItem:[self itemAtRow:row]];
+
         return self.fContextRow;
     }
     else
@@ -1523,14 +1632,64 @@ static NSString* folderForPlayButton(NSButton* sender, Torrent* torrent)
     return highIndexes;
 }
 
-- (void)setHighPriorityForButton:(NSButton*)sender
+- (void)playTorrentMedia:(Torrent*)torrent
 {
-    Torrent* torrent = [self itemAtRow:[self rowForView:[sender superview]]];
+    NSArray<NSDictionary*>* playableFiles = torrent.playableFiles;
+    if (playableFiles.count == 0)
+    {
+        [self.fController showInfo:nil];
+        return;
+    }
+
+    // Find the best file to play:
+    // 1. First file that has started downloading (progress > 0)
+    // 2. First file in the list
+    NSDictionary* bestItem = nil;
+    for (NSDictionary* item in playableFiles)
+    {
+        if ([item[@"progress"] doubleValue] > 0)
+        {
+            bestItem = item;
+            break;
+        }
+    }
+
+    if (!bestItem)
+    {
+        bestItem = playableFiles.firstObject;
+    }
+
+    if (bestItem)
+    {
+        [self playMediaItem:bestItem forTorrent:torrent];
+    }
+}
+
+- (NSIndexSet*)targetFileIndexesForPlayItem:(NSDictionary*)item torrent:(Torrent*)torrent isComplete:(BOOL*)isComplete
+{
+    NSNumber* fileIndex = item[@"index"];
+    if (fileIndex && fileIndex.integerValue != NSNotFound)
+    {
+        if (isComplete != NULL)
+            *isComplete = ([torrent fileProgressForIndex:fileIndex.integerValue] >= 1.0);
+        return [NSIndexSet indexSetWithIndex:fileIndex.integerValue];
+    }
+
+    NSString* folder = item[@"folder"];
+    NSIndexSet* fileIndexes = (folder.length > 0) ? [torrent fileIndexesForFolder:folder] : nil;
+    if (isComplete != NULL)
+        *isComplete = (fileIndexes.count == 0) || (folder.length == 0) || ([torrent folderConsecutiveProgress:folder] >= 1.0);
+
+    return fileIndexes;
+}
+
+- (void)setHighPriorityForItem:(NSDictionary*)item forTorrent:(Torrent*)torrent
+{
     if (!torrent)
         return;
 
     BOOL isComplete = NO;
-    NSIndexSet* targetIndexes = [self targetFileIndexesForPlayButton:sender torrent:torrent isComplete:&isComplete];
+    NSIndexSet* targetIndexes = [self targetFileIndexesForPlayItem:item torrent:torrent isComplete:&isComplete];
     if (isComplete || targetIndexes.count == 0)
         return;
 
@@ -1546,23 +1705,18 @@ static NSString* folderForPlayButton(NSButton* sender, Torrent* torrent)
     [torrent setFilePriority:TR_PRI_HIGH forIndexes:targetIndexes];
 }
 
-- (IBAction)playMediaFile:(NSButton*)sender
+- (void)playMediaItem:(NSDictionary*)item forTorrent:(Torrent*)torrent
 {
-    [self setHighPriorityForButton:sender];
+    [self setHighPriorityForItem:item forTorrent:torrent];
 
     // Update last played date for the torrent
-    Torrent* torrent = [self itemAtRow:[self rowForView:[sender superview]]];
-    if (torrent)
-    {
-        tr_torrentSetLastPlayedDate(torrent.torrentStruct, time(nullptr));
-    }
+    tr_torrentSetLastPlayedDate(torrent.torrentStruct, time(nullptr));
 
-    NSString* path = sender.identifier;
+    NSString* path = item[@"path"];
     if (!path)
         return;
 
-    NSString* type = sender.accessibilityHelp;
-
+    NSString* type = item[@"type"];
     NSURL* fileURL = [NSURL fileURLWithPath:path];
 
     if ([type isEqualToString:@"document-books"])
@@ -1647,6 +1801,33 @@ static NSString* folderForPlayButton(NSButton* sender, Torrent* torrent)
 
     // File or fallback: open with default app
     [NSWorkspace.sharedWorkspace openURL:fileURL];
+}
+
+- (void)setHighPriorityForButton:(NSButton*)sender
+{
+    Torrent* torrent = [self itemAtRow:[self rowForView:[sender superview]]];
+    if (!torrent)
+        return;
+
+    NSDictionary* item = @{ @"index" : @(sender.tag), @"folder" : folderForPlayButton(sender, torrent) ?: @"" };
+
+    [self setHighPriorityForItem:item forTorrent:torrent];
+}
+
+- (IBAction)playMediaFile:(NSButton*)sender
+{
+    Torrent* torrent = [self itemAtRow:[self rowForView:[sender superview]]];
+    if (!torrent)
+        return;
+
+    NSDictionary* item = @{
+        @"path" : sender.identifier ?: @"",
+        @"type" : sender.accessibilityHelp ?: @"",
+        @"index" : @(sender.tag),
+        @"folder" : folderForPlayButton(sender, torrent) ?: @""
+    };
+
+    [self playMediaItem:item forTorrent:torrent];
 }
 
 - (IBAction)displayTorrentActionPopover:(id)sender
