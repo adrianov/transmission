@@ -387,11 +387,6 @@ typedef NS_ENUM(NSUInteger, PopupPriority) {
         [Torrent trashFile:self.fTorrentFile error:nil];
     }
 
-    if (self.fStartCheck.state == NSControlStateValueOn)
-    {
-        [self.torrent startTransfer];
-    }
-
     self.fFileController.torrent = nil; //avoid a crash when window tries to update
 
     [self close];
@@ -400,17 +395,7 @@ typedef NS_ENUM(NSUInteger, PopupPriority) {
 
 - (void)confirmAdd
 {
-    if ([NSUserDefaults.standardUserDefaults boolForKey:@"AutoDeleteOldTorrentsOnLowDiskSpace"])
-    {
-        uint64_t neededBytes = (uint64_t)[self.torrent sizeWhenDone];
-        [self.fController autoDeleteOldTorrentsInGroup:self.fGroupValue forBytes:neededBytes completion:^{
-            [self performConfirmAdd];
-        }];
-    }
-    else
-    {
-        [self performConfirmAdd];
-    }
+    [self performConfirmAdd];
 }
 
 - (void)setDestinationPath:(NSString*)destination determinationType:(TorrentDeterminationType)determinationType

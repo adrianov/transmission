@@ -536,7 +536,8 @@
     NSRegularExpression* dashGroupRegex = [NSRegularExpression regularExpressionWithPattern:@"(?:\\s*-\\s*)+" options:0 error:nil];
     title = [dashGroupRegex stringByReplacingMatchesInString:title options:0 range:NSMakeRange(0, title.length)
                                                 withTemplate:dashPlaceholder];
-    NSRegularExpression* spacedDashRegex = [NSRegularExpression regularExpressionWithPattern:@"(?:^|\\s)-(?:\\s|$)" options:0 error:nil];
+    NSRegularExpression* spacedDashRegex = [NSRegularExpression regularExpressionWithPattern:@"(?:^|\\s)-(?:\\s|$)" options:0
+                                                                                       error:nil];
     title = [spacedDashRegex stringByReplacingMatchesInString:title options:0 range:NSMakeRange(0, title.length) withTemplate:@" "];
     title = [title stringByReplacingOccurrencesOfString:dashPlaceholder withString:@" - "];
 
