@@ -26,6 +26,7 @@ extern NSString* const kTorrentDidChangeGroupNotification;
 @property(nonatomic, readonly) NSDictionary* history;
 
 - (void)closeRemoveTorrent:(BOOL)trashFiles;
+- (void)closeRemoveTorrent:(BOOL)trashFiles completionHandler:(void (^)(BOOL succeeded))completionHandler;
 
 - (void)changeDownloadFolderBeforeUsing:(NSString*)folder determinationType:(TorrentDeterminationType)determinationType;
 

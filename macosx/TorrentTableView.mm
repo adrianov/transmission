@@ -1148,11 +1148,13 @@ static NSString* folderForPlayButton(NSButton* sender, Torrent* torrent)
         return state;
     }
 
+    BOOL visibilityChanged = NO;
     for (NSMutableDictionary* entry in state)
     {
         NSString* type = entry[@"type"] ?: @"file";
         NSNumber* index = entry[@"index"];
         CGFloat progress = [entry[@"progress"] doubleValue];
+        BOOL wasVisible = [entry[@"visible"] boolValue];
         CGFloat newProgress = progress;
         if (index)
         {
@@ -1171,6 +1173,10 @@ static NSString* folderForPlayButton(NSButton* sender, Torrent* torrent)
             entry[@"progressPercent"] = @(progressPct);
             BOOL visible = [type hasPrefix:@"document"] ? (progress >= 1.0) : (progress > 0);
             entry[@"visible"] = @(visible);
+            if (visible != wasVisible)
+            {
+                visibilityChanged = YES;
+            }
             NSString* baseTitle = entry[@"baseTitle"] ?: @"";
             NSString* title = baseTitle;
             if (visible && ![type hasPrefix:@"document"] && progress < 1.0 && progressPct < 100)
@@ -1179,6 +1185,11 @@ static NSString* folderForPlayButton(NSButton* sender, Torrent* torrent)
             }
             entry[@"title"] = title;
         }
+    }
+
+    if (visibilityChanged)
+    {
+        torrent.cachedPlayButtonLayout = nil;
     }
 
     torrent.cachedPlayButtonProgressGeneration = statsGeneration;
@@ -1203,6 +1214,24 @@ static NSString* folderForPlayButton(NSButton* sender, Torrent* torrent)
         [layout addObject:@{ @"kind" : @"item", @"item" : state[0] }];
         torrent.cachedPlayButtonLayout = layout;
         return layout;
+    }
+
+    // For multiple items, only show them if at least one has started downloading
+    // or if they are all finished. This prevents showing a single generic "Play"
+    // button when multiple items are planned.
+    BOOL anyVisible = NO;
+    for (NSDictionary* entry in state)
+    {
+        if ([entry[@"visible"] boolValue])
+        {
+            anyVisible = YES;
+            break;
+        }
+    }
+
+    if (!anyVisible)
+    {
+        return nil;
     }
 
     NSMutableDictionary<NSNumber*, NSMutableArray<NSDictionary*>*>* seasonGroups = [NSMutableDictionary dictionary];

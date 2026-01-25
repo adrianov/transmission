@@ -2169,6 +2169,11 @@ static NSTimeInterval const kLowPriorityDelay = 15.0;
 
 - (void)confirmRemoveTorrents:(NSArray<Torrent*>*)torrents deleteData:(BOOL)deleteData
 {
+    [self confirmRemoveTorrents:torrents deleteData:deleteData completionHandler:nil];
+}
+
+- (void)confirmRemoveTorrents:(NSArray<Torrent*>*)torrents deleteData:(BOOL)deleteData completionHandler:(void (^)(void))completionHandler
+{
     //miscellaneous
     for (Torrent* torrent in torrents)
     {
@@ -2201,11 +2206,27 @@ static NSTimeInterval const kLowPriorityDelay = 15.0;
         if (indexesToRemove.count == 0)
         {
             [self fullUpdateUI];
+            if (completionHandler != nil)
+            {
+                completionHandler();
+            }
             return;
         }
     }
 
     [self.fTorrents removeObjectsInArray:torrents];
+
+    // Track completion of all deletions
+    __block NSUInteger remainingDeletions = torrents.count;
+    void (^onDeletionComplete)(void) = ^{
+        if (--remainingDeletions == 0)
+        {
+            if (completionHandler != nil)
+            {
+                completionHandler();
+            }
+        }
+    };
 
     //set up helpers to remove from the table
     __block BOOL beganUpdate = NO;
@@ -2226,7 +2247,17 @@ static NSTimeInterval const kLowPriorityDelay = 15.0;
                 NSAnimationContext.currentContext.completionHandler = ^{
                     for (Torrent* torrent in torrents)
                     {
-                        [torrent closeRemoveTorrent:deleteData];
+                        if (completionHandler != nil)
+                        {
+                            [torrent closeRemoveTorrent:deleteData completionHandler:^(BOOL succeeded) {
+                                (void)succeeded;
+                                onDeletionComplete();
+                            }];
+                        }
+                        else
+                        {
+                            [torrent closeRemoveTorrent:deleteData];
+                        }
                     }
 
                     [self fullUpdateUI];
@@ -2271,7 +2302,17 @@ static NSTimeInterval const kLowPriorityDelay = 15.0;
         //do here if we're not doing it at the end of the animation
         for (Torrent* torrent in torrents)
         {
-            [torrent closeRemoveTorrent:deleteData];
+            if (completionHandler != nil)
+            {
+                [torrent closeRemoveTorrent:deleteData completionHandler:^(BOOL succeeded) {
+                    (void)succeeded;
+                    onDeletionComplete();
+                }];
+            }
+            else
+            {
+                [torrent closeRemoveTorrent:deleteData];
+            }
         }
     }
 }
@@ -6032,17 +6073,17 @@ static NSTimeInterval const kLowPriorityDelay = 15.0;
                 if (response == NSAlertFirstButtonReturn)
                 {
                     torrent.fDiskSpaceDialogShown = NO;
-                    [self removeTorrents:toDelete deleteData:YES];
-
-                    // Give the OS a tiny moment to update free space metadata
-                    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-                        // Force a fresh check and restart if space is now okay
-                        if ([torrent alertForRemainingDiskSpaceBypassThrottle:YES])
-                        {
-                            [torrent startTransfer];
-                        }
-                        [torrent update];
-                    });
+                    [self confirmRemoveTorrents:toDelete deleteData:YES completionHandler:^{
+                        // Give the OS a tiny moment to update free space metadata
+                        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                            // Force a fresh check and restart if space is now okay
+                            if ([torrent alertForRemainingDiskSpaceBypassThrottle:YES])
+                            {
+                                [torrent startTransfer];
+                            }
+                            [torrent update];
+                        });
+                    }];
                 }
             }];
         });

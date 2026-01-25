@@ -228,6 +228,49 @@ static void padCropRect(CropRect* r, int pad, int w, int h)
     r->y1 = MIN(h, r->y1 + pad);
 }
 
+// Convert RGB24 buffer to grayscale (optimized version)
+static std::vector<unsigned char> rgb24ToGrayscale(unsigned char const* rgb, int w, int h, size_t rowBytes)
+{
+    std::vector<unsigned char> gray(w * (size_t)h);
+    for (int y = 0; y < h; ++y)
+    {
+        auto const* srcRow = rgb + (size_t)y * rowBytes;
+        auto* dst = gray.data() + (size_t)y * (size_t)w;
+        for (int x = 0; x < w; ++x)
+            dst[x] = srcRow[x * 3];
+    }
+    return gray;
+}
+
+// Extract cropped region from RGB24 buffer
+static std::vector<uint8_t> extractRgbCrop(unsigned char const* rgb, size_t fullRowBytes, CropRect const& crop)
+{
+    int cropW = crop.x1 - crop.x0;
+    int cropH = crop.y1 - crop.y0;
+    size_t const cropRowBytes = (size_t)cropW * 3U;
+    std::vector<uint8_t> cropped(cropRowBytes * (size_t)cropH);
+    for (int y = 0; y < cropH; ++y)
+    {
+        auto const* srcRow = rgb + (size_t)(crop.y0 + y) * fullRowBytes + (size_t)crop.x0 * 3U;
+        memcpy(cropped.data() + (size_t)y * cropRowBytes, srcRow, cropRowBytes);
+    }
+    return cropped;
+}
+
+// Extract cropped region from grayscale buffer
+static std::vector<uint8_t> extractGrayCrop(unsigned char const* gray, int fullW, CropRect const& crop)
+{
+    int cropW = crop.x1 - crop.x0;
+    int cropH = crop.y1 - crop.y0;
+    std::vector<uint8_t> cropped((size_t)cropW * (size_t)cropH);
+    for (int y = 0; y < cropH; ++y)
+    {
+        auto const* srcRow = gray + (size_t)(crop.y0 + y) * (size_t)fullW + (size_t)crop.x0;
+        memcpy(cropped.data() + (size_t)y * (size_t)cropW, srcRow, (size_t)cropW);
+    }
+    return cropped;
+}
+
 static int parseOutlinePageNumber(std::string_view url)
 {
     size_t const hashPos = url.find('#');
@@ -823,37 +866,26 @@ static bool encodeJp2Grok(std::vector<uint8_t>* out, unsigned char const* pixels
         return false;
 
     // Copy pixels into Grok's planar int32 component buffers.
-    if (gray)
+    for (int y = 0; y < h; ++y)
     {
-        auto* dst = (int32_t*)image->comps[0].data;
-        uint32_t const dstStride = image->comps[0].stride;
-        for (int y = 0; y < h; ++y)
+        auto const* srcRow = pixels + (size_t)y * stride;
+        if (gray)
         {
-            auto const* srcRow = pixels + (size_t)y * stride;
-            auto* dstRow = dst + (uint32_t)y * dstStride;
+            auto* dstRow = (int32_t*)image->comps[0].data + (uint32_t)y * image->comps[0].stride;
             for (int x = 0; x < w; ++x)
                 dstRow[x] = srcRow[x];
         }
-    }
-    else
-    {
-        auto* dstR = (int32_t*)image->comps[0].data;
-        auto* dstG = (int32_t*)image->comps[1].data;
-        auto* dstB = (int32_t*)image->comps[2].data;
-        uint32_t const strideR = image->comps[0].stride;
-        uint32_t const strideG = image->comps[1].stride;
-        uint32_t const strideB = image->comps[2].stride;
-        for (int y = 0; y < h; ++y)
+        else
         {
-            auto const* srcRow = pixels + (size_t)y * stride;
-            auto* rRow = dstR + (uint32_t)y * strideR;
-            auto* gRow = dstG + (uint32_t)y * strideG;
-            auto* bRow = dstB + (uint32_t)y * strideB;
+            auto* dstR = (int32_t*)image->comps[0].data + (uint32_t)y * image->comps[0].stride;
+            auto* dstG = (int32_t*)image->comps[1].data + (uint32_t)y * image->comps[1].stride;
+            auto* dstB = (int32_t*)image->comps[2].data + (uint32_t)y * image->comps[2].stride;
             for (int x = 0; x < w; ++x)
             {
-                rRow[x] = srcRow[x * 3 + 0];
-                gRow[x] = srcRow[x * 3 + 1];
-                bRow[x] = srcRow[x * 3 + 2];
+                int const offset = x * 3;
+                dstR[x] = srcRow[offset];
+                dstG[x] = srcRow[offset + 1];
+                dstB[x] = srcRow[offset + 2];
             }
         }
     }
@@ -866,18 +898,14 @@ static bool encodeJp2Grok(std::vector<uint8_t>* out, unsigned char const* pixels
     grk_compress_set_default_params(&params);
     params.cod_format = GRK_FMT_JP2;
     params.verbose = false;
-
-    // Use lossy compression with quality-based (PSNR) allocation.
-    // Quality is adaptive based on content type analysis.
     params.irreversible = true;
     params.allocation_by_quality = true;
     params.numlayers = 1;
     params.layer_distortion[0] = jp2QualityToPsnr(quality);
-    params.num_threads = 2; // Use 2 threads per encode for better throughput
+    params.num_threads = 2;
 
     size_t rawSize = stride * (size_t)h;
-    size_t cap = rawSize + 1024U * 1024U;
-    cap = MAX(cap, (size_t)64 * 1024);
+    size_t cap = MAX(rawSize + 1024U * 1024U, (size_t)64 * 1024);
 
     for (int attempt = 0; attempt < 3 && !ok; ++attempt)
     {
@@ -900,7 +928,6 @@ static bool encodeJp2Grok(std::vector<uint8_t>* out, unsigned char const* pixels
             break;
         }
 
-        // Retry with larger output buffer.
         cap *= 2;
     }
 
@@ -1608,7 +1635,7 @@ static BOOL convertDjvuFileDeterministic(NSString* djvuPath, NSString* tmpPdfPat
                     computeRenderDimensions(pageWidth, pageHeight, pageDpi, bgDpi, &bgW, &bgH);
 
                     size_t bgRowBytes = (size_t)bgW * 3U;
-                    auto bgRgb = std::make_shared<std::vector<uint8_t>>(bgRowBytes * (size_t)bgH, (uint8_t)0xFF);
+                    std::vector<uint8_t> bgRgb(bgRowBytes * (size_t)bgH, (uint8_t)0xFF);
                     ddjvu_rect_t bgRect = { 0, 0, (unsigned int)bgW, (unsigned int)bgH };
                     int bgRendered = ddjvu_page_render(
                         page,
@@ -1617,12 +1644,12 @@ static BOOL convertDjvuFileDeterministic(NSString* djvuPath, NSString* tmpPdfPat
                         &bgRect,
                         rgb24,
                         (unsigned long)bgRowBytes,
-                        (char*)bgRgb->data());
+                        (char*)bgRgb.data());
 
                     if (bgRendered)
                     {
                         // Process background: determine if grayscale or RGB
-                        bool const bgGray = isGrayscaleRgb24(bgRgb->data(), bgW, bgH, bgRowBytes);
+                        bool const bgGray = isGrayscaleRgb24(bgRgb.data(), bgW, bgH, bgRowBytes);
                         int constexpr CropPad = 4;
 
                         // Crop each layer independently to its own content bounds
@@ -1651,7 +1678,7 @@ static BOOL convertDjvuFileDeterministic(NSString* djvuPath, NSString* tmpPdfPat
                             {
                                 for (int y = 0; y < bgH; ++y)
                                 {
-                                    auto const* srcRow = bgRgb->data() + (size_t)y * bgRowBytes;
+                                    auto const* srcRow = bgRgb.data() + (size_t)y * bgRowBytes;
                                     l_uint32* dstRow = pixGetData(bgPix8) + y * pixGetWpl(bgPix8);
                                     for (int x = 0; x < bgW; ++x)
                                         SET_DATA_BYTE(dstRow, x, srcRow[x * 3]);
@@ -1660,24 +1687,18 @@ static BOOL convertDjvuFileDeterministic(NSString* djvuPath, NSString* tmpPdfPat
                         }
                         else
                         {
-                            // Convert RGB to grayscale for content detection
-                            PIX* bgPixRgb = pixCreate(bgW, bgH, 32);
-                            if (bgPixRgb != nullptr)
+                            // Convert RGB to grayscale for content detection using helper
+                            std::vector<unsigned char> grayBuf = rgb24ToGrayscale(bgRgb.data(), bgW, bgH, bgRowBytes);
+                            bgPix8 = pixCreate(bgW, bgH, 8);
+                            if (bgPix8 != nullptr)
                             {
                                 for (int y = 0; y < bgH; ++y)
                                 {
-                                    auto const* srcRow = bgRgb->data() + (size_t)y * bgRowBytes;
-                                    l_uint32* dstRow = pixGetData(bgPixRgb) + y * pixGetWpl(bgPixRgb);
+                                    auto const* srcRow = grayBuf.data() + (size_t)y * (size_t)bgW;
+                                    l_uint32* dstRow = pixGetData(bgPix8) + y * pixGetWpl(bgPix8);
                                     for (int x = 0; x < bgW; ++x)
-                                    {
-                                        l_uint32 r = srcRow[x * 3 + 0];
-                                        l_uint32 g = srcRow[x * 3 + 1];
-                                        l_uint32 b = srcRow[x * 3 + 2];
-                                        dstRow[x] = (r << 24) | (g << 16) | (b << 8) | 0xFF;
-                                    }
+                                        SET_DATA_BYTE(dstRow, x, srcRow[x]);
                                 }
-                                bgPix8 = pixConvertRGBToGray(bgPixRgb, 0.0f, 0.0f, 0.0f);
-                                pixDestroy(&bgPixRgb);
                             }
                         }
 
@@ -1739,21 +1760,14 @@ static BOOL convertDjvuFileDeterministic(NSString* djvuPath, NSString* tmpPdfPat
                             // Encode cropped background as JP2
                             if (bgGray)
                             {
-                                auto grayBuf = std::make_shared<std::vector<unsigned char>>((size_t)bgCropW * (size_t)bgCropH);
-                                for (int y = 0; y < bgCropH; ++y)
-                                {
-                                    auto const* srcRow = bgRgb->data() + (size_t)(bgCrop.y0 + y) * bgRowBytes + (size_t)bgCrop.x0 * 3U;
-                                    auto* dst = grayBuf->data() + (size_t)y * (size_t)bgCropW;
-                                    for (int x = 0; x < bgCropW; ++x)
-                                        dst[x] = srcRow[x * 3];
-                                }
+                                std::vector<unsigned char> grayBuf = rgb24ToGrayscale(bgRgb.data(), bgW, bgH, bgRowBytes);
+                                std::vector<unsigned char> croppedGray = extractGrayCrop(grayBuf.data(), bgW, bgCrop);
                                 dispatch_group_async(encGroup, encQ, ^{
                                     @autoreleasepool
                                     {
                                         dispatch_semaphore_wait(sem, DISPATCH_TIME_FOREVER);
                                         std::vector<uint8_t> jp2;
-                                        // Background layer - can use lower quality since it's behind text
-                                        (void)encodeJp2Grok(&jp2, grayBuf->data(), bgCropW, bgCropH, (size_t)bgCropW, true, Jp2Quality::Background);
+                                        (void)encodeJp2Grok(&jp2, croppedGray.data(), bgCropW, bgCropH, (size_t)bgCropW, true, Jp2Quality::Background);
                                         if (!jp2.empty())
                                             pagesPtr[pageNum].bgImage.bytes = std::move(jp2);
                                         dispatch_semaphore_signal(sem);
@@ -1762,20 +1776,13 @@ static BOOL convertDjvuFileDeterministic(NSString* djvuPath, NSString* tmpPdfPat
                             }
                             else
                             {
-                                size_t const bgCropRowBytes = (size_t)bgCropW * 3U;
-                                auto croppedBg = std::make_shared<std::vector<uint8_t>>(bgCropRowBytes * (size_t)bgCropH);
-                                for (int y = 0; y < bgCropH; ++y)
-                                {
-                                    auto const* srcRow = bgRgb->data() + (size_t)(bgCrop.y0 + y) * bgRowBytes + (size_t)bgCrop.x0 * 3U;
-                                    memcpy(croppedBg->data() + (size_t)y * bgCropRowBytes, srcRow, bgCropRowBytes);
-                                }
+                                std::vector<uint8_t> croppedBg = extractRgbCrop(bgRgb.data(), bgRowBytes, bgCrop);
                                 dispatch_group_async(encGroup, encQ, ^{
                                     @autoreleasepool
                                     {
                                         dispatch_semaphore_wait(sem, DISPATCH_TIME_FOREVER);
                                         std::vector<uint8_t> jp2;
-                                        // Background layer - can use lower quality since it's behind text
-                                        (void)encodeJp2Grok(&jp2, croppedBg->data(), bgCropW, bgCropH, bgCropRowBytes, false, Jp2Quality::Background);
+                                        (void)encodeJp2Grok(&jp2, croppedBg.data(), bgCropW, bgCropH, (size_t)bgCropW * 3U, false, Jp2Quality::Background);
                                         if (!jp2.empty())
                                             pagesPtr[pageNum].bgImage.bytes = std::move(jp2);
                                         dispatch_semaphore_signal(sem);
@@ -1830,7 +1837,7 @@ static BOOL convertDjvuFileDeterministic(NSString* djvuPath, NSString* tmpPdfPat
             }
 
             size_t rowBytes = (size_t)renderW * 3U;
-            auto rgb = std::make_shared<std::vector<uint8_t>>(rowBytes * (size_t)renderH, (uint8_t)0xFF);
+            std::vector<uint8_t> rgb(rowBytes * (size_t)renderH, (uint8_t)0xFF);
             ddjvu_rect_t rect = { 0, 0, (unsigned int)renderW, (unsigned int)renderH };
 
             std::vector<ddjvu_render_mode_t> modesToTry = { DDJVU_RENDER_COLOR };
@@ -1842,8 +1849,8 @@ static BOOL convertDjvuFileDeterministic(NSString* djvuPath, NSString* tmpPdfPat
             int rendered = 0;
             for (auto mode : modesToTry)
             {
-                std::fill(rgb->begin(), rgb->end(), (uint8_t)0xFF);
-                rendered = ddjvu_page_render(page, mode, &rect, &rect, rgb24, (unsigned long)rowBytes, (char*)rgb->data());
+                std::fill(rgb.begin(), rgb.end(), (uint8_t)0xFF);
+                rendered = ddjvu_page_render(page, mode, &rect, &rect, rgb24, (unsigned long)rowBytes, (char*)rgb.data());
                 if (rendered)
                     break;
             }
@@ -1852,12 +1859,12 @@ static BOOL convertDjvuFileDeterministic(NSString* djvuPath, NSString* tmpPdfPat
             if (!rendered && (renderW != pageWidth || renderH != pageHeight))
             {
                 size_t nativeRowBytes = (size_t)pageWidth * 3U;
-                auto nativeRgb = std::make_shared<std::vector<uint8_t>>(nativeRowBytes * (size_t)pageHeight, (uint8_t)0xFF);
+                std::vector<uint8_t> nativeRgb(nativeRowBytes * (size_t)pageHeight, (uint8_t)0xFF);
                 ddjvu_rect_t nativeRect = { 0, 0, (unsigned int)pageWidth, (unsigned int)pageHeight };
 
                 for (auto mode : modesToTry)
                 {
-                    std::fill(nativeRgb->begin(), nativeRgb->end(), (uint8_t)0xFF);
+                    std::fill(nativeRgb.begin(), nativeRgb.end(), (uint8_t)0xFF);
                     rendered = ddjvu_page_render(
                         page,
                         mode,
@@ -1865,7 +1872,7 @@ static BOOL convertDjvuFileDeterministic(NSString* djvuPath, NSString* tmpPdfPat
                         &nativeRect,
                         rgb24,
                         (unsigned long)nativeRowBytes,
-                        (char*)nativeRgb->data());
+                        (char*)nativeRgb.data());
                     if (rendered)
                         break;
                 }
@@ -1877,8 +1884,8 @@ static BOOL convertDjvuFileDeterministic(NSString* djvuPath, NSString* tmpPdfPat
                     for (int y = 0; y < renderH; ++y)
                     {
                         int srcY = MIN((int)(y * scaleY), pageHeight - 1);
-                        auto const* srcRow = nativeRgb->data() + (size_t)srcY * nativeRowBytes;
-                        auto* dstRow = rgb->data() + (size_t)y * rowBytes;
+                        auto const* srcRow = nativeRgb.data() + (size_t)srcY * nativeRowBytes;
+                        auto* dstRow = rgb.data() + (size_t)y * rowBytes;
                         for (int x = 0; x < renderW; ++x)
                         {
                             int srcX = MIN((int)(x * scaleX), pageWidth - 1);
@@ -1894,7 +1901,7 @@ static BOOL convertDjvuFileDeterministic(NSString* djvuPath, NSString* tmpPdfPat
 
             if (rendered)
             {
-                bool const gray = isGrayscaleRgb24(rgb->data(), renderW, renderH, rowBytes);
+                bool const gray = isGrayscaleRgb24(rgb.data(), renderW, renderH, rowBytes);
                 int constexpr CropPad = 4;
 
                 if (gray)
@@ -1902,7 +1909,7 @@ static BOOL convertDjvuFileDeterministic(NSString* djvuPath, NSString* tmpPdfPat
                     // Check bitonal directly from RGB buffer (avoids gray buffer allocation for bitonal pages)
                     // Skip bitonal check for PHOTO pages - they should stay as JP2
                     bool const bitonal = (pageType != DDJVU_PAGETYPE_PHOTO) &&
-                        isBitonalGrayscaleRgb(rgb->data(), renderW, renderH, rowBytes);
+                        isBitonalGrayscaleRgb(rgb.data(), renderW, renderH, rowBytes);
                     if (bitonal)
                     {
                         bool const preferBitonal = (renderDpi == pageDpi) && (renderW == pageWidth) && (renderH == pageHeight);
@@ -1961,15 +1968,7 @@ static BOOL convertDjvuFileDeterministic(NSString* djvuPath, NSString* tmpPdfPat
 
                     if (p.image.kind == DjvuPdfImageKind::None)
                     {
-                        // Create grayscale buffer only when needed for JP2 (not bitonal)
-                        std::vector<unsigned char> grayBuf((size_t)renderW * (size_t)renderH);
-                        for (int y = 0; y < renderH; ++y)
-                        {
-                            auto const* srcRow = rgb->data() + (size_t)y * rowBytes;
-                            auto* dst = grayBuf.data() + (size_t)y * (size_t)renderW;
-                            for (int x = 0; x < renderW; ++x)
-                                dst[x] = srcRow[x * 3];
-                        }
+                        std::vector<unsigned char> grayBuf = rgb24ToGrayscale(rgb.data(), renderW, renderH, rowBytes);
 
                         // Try Otsu cropping, fallback to full page if it fails
                         CropRect cr = { 0, 0, renderW, renderH };
@@ -1983,12 +1982,7 @@ static BOOL convertDjvuFileDeterministic(NSString* djvuPath, NSString* tmpPdfPat
 
                         int cropW = cr.x1 - cr.x0;
                         int cropH = cr.y1 - cr.y0;
-                        auto pixels = std::make_shared<std::vector<unsigned char>>((size_t)cropW * (size_t)cropH);
-                        for (int y = 0; y < cropH; ++y)
-                        {
-                            auto const* srcRow = grayBuf.data() + (size_t)(cr.y0 + y) * (size_t)renderW + (size_t)cr.x0;
-                            memcpy(pixels->data() + (size_t)y * (size_t)cropW, srcRow, (size_t)cropW);
-                        }
+                        std::vector<uint8_t> pixels = extractGrayCrop(grayBuf.data(), renderW, cr);
 
                         p.image.kind = DjvuPdfImageKind::Jp2;
                         p.image.gray = true;
@@ -2004,7 +1998,7 @@ static BOOL convertDjvuFileDeterministic(NSString* djvuPath, NSString* tmpPdfPat
                             {
                                 dispatch_semaphore_wait(sem, DISPATCH_TIME_FOREVER);
                                 std::vector<uint8_t> jp2;
-                                (void)encodeJp2Grok(&jp2, pixels->data(), cropW, cropH, (size_t)cropW, true, quality);
+                                (void)encodeJp2Grok(&jp2, pixels.data(), cropW, cropH, (size_t)cropW, true, quality);
                                 if (!jp2.empty())
                                     pagesPtr[pageNum].image.bytes = std::move(jp2);
                                 dispatch_semaphore_signal(sem);
@@ -2015,20 +2009,7 @@ static BOOL convertDjvuFileDeterministic(NSString* djvuPath, NSString* tmpPdfPat
                 else
                 {
                     // Convert RGB to grayscale for Otsu content detection
-                    std::vector<unsigned char> grayForCrop((size_t)renderW * (size_t)renderH);
-                    for (int y = 0; y < renderH; ++y)
-                    {
-                        auto const* srcRow = rgb->data() + (size_t)y * rowBytes;
-                        auto* dst = grayForCrop.data() + (size_t)y * (size_t)renderW;
-                        for (int x = 0; x < renderW; ++x)
-                        {
-                            // Simple luminance: (R + G + B) / 3
-                            int r = srcRow[x * 3 + 0];
-                            int g = srcRow[x * 3 + 1];
-                            int b = srcRow[x * 3 + 2];
-                            dst[x] = (unsigned char)((r + g + b) / 3);
-                        }
-                    }
+                    std::vector<unsigned char> grayForCrop = rgb24ToGrayscale(rgb.data(), renderW, renderH, rowBytes);
 
                     // Try Otsu cropping, fallback to full page if it fails
                     CropRect cr = { 0, 0, renderW, renderH };
@@ -2042,13 +2023,7 @@ static BOOL convertDjvuFileDeterministic(NSString* djvuPath, NSString* tmpPdfPat
 
                     int cropW = cr.x1 - cr.x0;
                     int cropH = cr.y1 - cr.y0;
-                    size_t const cropRowBytes = (size_t)cropW * 3U;
-                    auto pixels = std::make_shared<std::vector<unsigned char>>(cropRowBytes * (size_t)cropH);
-                    for (int y = 0; y < cropH; ++y)
-                    {
-                        auto const* srcRow = rgb->data() + (size_t)(cr.y0 + y) * rowBytes + (size_t)cr.x0 * 3U;
-                        memcpy(pixels->data() + (size_t)y * cropRowBytes, srcRow, cropRowBytes);
-                    }
+                    std::vector<uint8_t> pixels = extractRgbCrop(rgb.data(), rowBytes, cr);
 
                     p.image.kind = DjvuPdfImageKind::Jp2;
                     p.image.gray = false;
@@ -2064,7 +2039,7 @@ static BOOL convertDjvuFileDeterministic(NSString* djvuPath, NSString* tmpPdfPat
                         {
                             dispatch_semaphore_wait(sem, DISPATCH_TIME_FOREVER);
                             std::vector<uint8_t> jp2;
-                            (void)encodeJp2Grok(&jp2, pixels->data(), cropW, cropH, cropRowBytes, false, quality);
+                            (void)encodeJp2Grok(&jp2, pixels.data(), cropW, cropH, (size_t)cropW * 3U, false, quality);
                             if (!jp2.empty())
                                 pagesPtr[pageNum].image.bytes = std::move(jp2);
                             dispatch_semaphore_signal(sem);

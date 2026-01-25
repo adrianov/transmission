@@ -418,6 +418,11 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
 
 - (void)closeRemoveTorrent:(BOOL)trashFiles
 {
+    [self closeRemoveTorrent:trashFiles completionHandler:nil];
+}
+
+- (void)closeRemoveTorrent:(BOOL)trashFiles completionHandler:(void (^)(BOOL succeeded))completionHandler
+{
     //allow the file to be indexed by Time Machine
     [self setTimeMachineExclude:NO];
 
@@ -438,7 +443,24 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
     [DjvuConverter clearTrackingForTorrent:self];
     [Fb2Converter clearTrackingForTorrent:self];
 
-    tr_torrentRemove(self.fHandle, trashFiles, trashDataFile, nullptr, nullptr, nullptr);
+    tr_torrent_remove_done_func callback = nullptr;
+    void* callback_user_data = nullptr;
+    
+    if (completionHandler != nil)
+    {
+        // Capture completionHandler in a block that will be called from the session thread
+        void (^completionBlock)(BOOL) = [completionHandler copy];
+        callback = [](tr_torrent_id_t /*id*/, bool succeeded, void* user_data)
+        {
+            void (^block)(BOOL) = (__bridge_transfer void (^)(BOOL))user_data;
+            dispatch_async(dispatch_get_main_queue(), ^{
+                block(succeeded);
+            });
+        };
+        callback_user_data = (__bridge_retained void*)completionBlock;
+    }
+
+    tr_torrentRemove(self.fHandle, trashFiles, trashDataFile, nullptr, callback, callback_user_data);
 }
 
 - (void)changeDownloadFolderBeforeUsing:(NSString*)folder determinationType:(TorrentDeterminationType)determinationType
@@ -1275,11 +1297,8 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
                 continue;
             }
 
-            // Skip folder if any file is wanted but has zero progress
-            if (anyFileWanted && progress == 0.0)
-            {
-                continue;
-            }
+            // Include all wanted folders regardless of progress
+            // (visibility will be controlled by TorrentTableView based on progress)
 
             // Display name
             NSString* name;
@@ -1587,11 +1606,8 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
             continue;
         }
 
-        // Skip wanted files with zero progress
-        if (file.wanted && progress == 0.0)
-        {
-            continue;
-        }
+        // Include all wanted files regardless of progress
+        // (visibility will be controlled by TorrentTableView based on progress)
 
         NSString* path;
         auto const location = tr_torrentFindFile(self.fHandle, i);
@@ -1721,11 +1737,8 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
             continue;
         }
 
-        // Skip if audio file is wanted but has zero progress
-        if (audioFile.wanted && progress == 0.0)
-        {
-            continue;
-        }
+        // Include all wanted CUE files regardless of progress
+        // (visibility will be controlled by TorrentTableView based on progress)
 
         NSString* displayName = baseName.lastPathComponent.humanReadableFileName;
         if (!displayName || displayName.length == 0)
