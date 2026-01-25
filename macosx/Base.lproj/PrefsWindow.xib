@@ -17,6 +17,7 @@
                 <outlet property="fCheckForUpdatesBetaButton" destination="1895" id="2040"/>
                 <outlet property="fCheckForUpdatesButton" destination="650" id="2041"/>
                 <outlet property="fCheckForUpdatesLabel" destination="652" id="2042"/>
+                <outlet property="fAutoDeleteCheckbox" destination="autoDelBtn" id="autoDelOutlet"/>
                 <outlet property="fDoneScriptPopUp" destination="2048" id="2060"/>
                 <outlet property="fDownloadField" destination="154" id="623"/>
                 <outlet property="fFolderPopUp" destination="51" id="98"/>
@@ -592,7 +593,15 @@
                                                             <real key="NSRaisesForNotApplicableKeys" value="1"/>
                                                             <real key="NSValidatesImmediately" value="1"/>
                                                         </dictionary>
-                                                    </binding>
+                                                     </binding>
+                                                 </connections>
+                                             </button>
+                                            <button translatesAutoresizingMaskIntoConstraints="NO" id="autoDelBtn">
+                                                <rect key="frame" x="84" y="206" width="380" height="18"/>
+                                                <buttonCell key="cell" type="check" title="Automatically delete oldest torrents in same category to free space when adding" bezelStyle="regularSquare" imagePosition="left" alignment="left" inset="2" id="autoDelCell"/>
+                                                <connections>
+                                                    <action selector="setAutoDeleteOldTorrentsOnLowDiskSpace:" target="-2" id="autoDelAction"/>
+                                                    <binding destination="365" name="value" keyPath="values.AutoDeleteOldTorrentsOnLowDiskSpace" id="autoDelBind"/>
                                                 </connections>
                                             </button>
                                             <button translatesAutoresizingMaskIntoConstraints="NO" id="1476">
@@ -644,6 +653,8 @@
                                             <constraint firstItem="216" firstAttribute="leading" secondItem="209" secondAttribute="trailing" constant="5" id="LvL-An-mjo"/>
                                             <constraint firstItem="51" firstAttribute="centerY" secondItem="61" secondAttribute="centerY" id="MCU-53-wov"/>
                                             <constraint firstItem="1334" firstAttribute="top" secondItem="537" secondAttribute="bottom" constant="4" id="S8f-0p-r7s"/>
+                                                <constraint firstItem="autoDelBtn" firstAttribute="leading" secondItem="1334" secondAttribute="leading" id="autoDel_c1"/>
+                                                <constraint firstItem="autoDelBtn" firstAttribute="top" secondItem="1334" secondAttribute="bottom" constant="4" id="autoDel_c2"/>
                                             <constraint firstAttribute="trailing" relation="greaterThanOrEqual" secondItem="1293" secondAttribute="trailing" constant="7" id="Uph-oI-iyl"/>
                                             <constraint firstItem="1476" firstAttribute="leading" secondItem="1339" secondAttribute="leading" id="Vke-pV-qLw"/>
                                             <constraint firstItem="1339" firstAttribute="top" secondItem="1293" secondAttribute="bottom" constant="4" id="WQG-hO-ODw"/>

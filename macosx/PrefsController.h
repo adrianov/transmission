@@ -11,6 +11,8 @@
 
 @property(nonatomic, readonly) NSArray<NSString*>* sounds;
 
+@property(nonatomic) IBOutlet NSButton* fAutoDeleteCheckbox;
+
 /// - returns: number of minutes
 + (int)dateToTimeSum:(NSDate*)date;
 

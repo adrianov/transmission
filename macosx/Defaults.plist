@@ -36,6 +36,8 @@
 	<string>~/Desktop</string>
 	<key>DeleteOriginalTorrent</key>
 	<false/>
+	<key>AutoDeleteOldTorrentsOnLowDiskSpace</key>
+	<true/>
 	<key>DHTGlobal</key>
 	<true/>
 	<key>DisplayGroupRowRatio</key>
