@@ -111,6 +111,9 @@ extern NSString* const kTorrentDidChangeGroupNotification;
 /// Used for auto-assigning torrents to groups based on content type.
 @property(nonatomic, readonly) NSString* detectedMediaCategory;
 
+/// Returns detected media category for a specific file index.
+- (NSString*)mediaCategoryForFile:(NSUInteger)index;
+
 /// Cached height for play buttons view (calculated by TorrentTableView).
 @property(nonatomic) CGFloat cachedPlayButtonsHeight;
 /// Cached width used for play buttons layout (calculated by TorrentTableView).

@@ -445,7 +445,7 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
 
     tr_torrent_remove_done_func callback = nullptr;
     void* callback_user_data = nullptr;
-    
+
     if (completionHandler != nil)
     {
         // Capture completionHandler in a block that will be called from the session thread
@@ -1361,8 +1361,10 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
                 }
             }
 
-            BOOL isAudio = [type isEqualToString:@"album"];
-            NSString* baseTitle = [NSString stringWithFormat:@"%@ %@", (isAudio ? @"♫" : @"⏵"), name];
+            BOOL const isAudio = [type isEqualToString:@"album"];
+            BOOL const isBooks = [type isEqualToString:@"books"];
+            NSString* icon = isBooks ? @"📖" : (isAudio ? @"♫" : @"⏵");
+            NSString* baseTitle = [NSString stringWithFormat:@"%@ %@", icon, name];
 
             [entries addObject:@{
                 @"type" : type,
@@ -2017,6 +2019,54 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
         ]];
     });
     return [mediaExtensions containsObject:self.name.pathExtension.lowercaseString];
+}
+
+- (NSString*)mediaCategoryForFile:(NSUInteger)index
+{
+    static NSSet<NSString*>* videoExtensions;
+    static NSSet<NSString*>* audioExtensions;
+    static NSSet<NSString*>* bookExtensions;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        videoExtensions = [NSSet setWithArray:@[
+            @"mkv",
+            @"avi",
+            @"mp4",
+            @"mov",
+            @"wmv",
+            @"flv",
+            @"webm",
+            @"m4v",
+            @"mpg",
+            @"mpeg",
+            @"ts",
+            @"m2ts",
+            @"vob",
+            @"3gp",
+            @"ogv"
+        ]];
+        audioExtensions = [NSSet
+            setWithArray:
+                @[ @"mp3", @"flac", @"wav", @"aac", @"ogg", @"wma", @"m4a", @"ape", @"alac", @"aiff", @"opus", @"wv" ]];
+        bookExtensions = [NSSet setWithArray:@[ @"pdf", @"epub", @"djv", @"djvu", @"fb2", @"mobi" ]];
+    });
+
+    auto const file = tr_torrentFile(self.fHandle, (tr_file_index_t)index);
+    NSString* ext = @(file.name).pathExtension.lowercaseString;
+
+    if ([videoExtensions containsObject:ext])
+    {
+        return @"video";
+    }
+    if ([audioExtensions containsObject:ext])
+    {
+        return @"audio";
+    }
+    if ([bookExtensions containsObject:ext])
+    {
+        return @"books";
+    }
+    return nil;
 }
 
 - (NSString*)detectedMediaCategory
