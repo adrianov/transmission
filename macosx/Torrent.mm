@@ -308,6 +308,12 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
 
 @implementation Torrent
 
+- (uint64_t)sizeWhenDone
+{
+    tr_stat const* st = tr_torrentStat(self.fHandle);
+    return st ? (uint64_t)st->sizeWhenDone : 0;
+}
+
 + (void)initialize
 {
     if (self != [Torrent self])

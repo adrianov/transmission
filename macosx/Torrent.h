@@ -259,6 +259,9 @@ extern NSString* const kTorrentDidChangeGroupNotification;
 - (NSSet*)filePrioritiesForIndexes:(NSIndexSet*)indexSet;
 
 @property(nonatomic, readonly) NSDate* dateAdded;
+
+/// Size in bytes of the torrent data selected for download
+@property(nonatomic, readonly) uint64_t sizeWhenDone;
 @property(nonatomic, readonly) NSDate* dateCompleted;
 @property(nonatomic, readonly) NSDate* dateActivity;
 @property(nonatomic, readonly) NSDate* dateActivityOrAdd;
