@@ -782,10 +782,10 @@ void onTorrentCompletenessChanged(tr_torrent* tor, tr_completeness status, bool 
 
     [self removeMissingDataTorrentsOnLaunch];
 
-    // Verify existing partial torrents on launch so on-disk progress is recognized
+    // Verify torrents with zero verified bytes but not fully downloaded on launch so on-disk progress is recognized
     for (Torrent* torrent in self.fTorrents)
     {
-        if (torrent.haveVerified > 0 && !torrent.allDownloaded)
+        if (torrent.haveVerified == 0 && !torrent.allDownloaded)
         {
             [torrent resetCache];
         }
