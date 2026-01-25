@@ -579,7 +579,7 @@ if(ENABLE_MAC)
         TARGET jbig2enc::jbig2enc
         CMAKE_ARGS
             -DBUILD_SHARED_LIBS=OFF
-            "-DCMAKE_PREFIX_PATH=${LEPTONICA_PREFIX}")
+            "-DLeptonica_DIR=${LEPTONICA_PREFIX}/lib/cmake/leptonica")
 
     set(GROK_UPSTREAM_TARGET grok)
     set(GROK_EXT_PREFIX "${TR_THIRD_PARTY_BINARY_DIR}/grok.bld")
