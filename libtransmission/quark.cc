@@ -291,6 +291,8 @@ auto constexpr MyStatic = std::array<std::string_view, TR_N_KEYS>{
     "last_announce_succeeded"sv, // rpc
     "last_announce_time"sv, // rpc
     "last_announce_timed_out"sv, // rpc
+
+    "last_played_date"sv, // .resume, rpc
     "last_scrape_result"sv, // rpc
     "last_scrape_start_time"sv, // rpc
     "last_scrape_succeeded"sv, // rpc

@@ -74,6 +74,7 @@ struct tr_torrent
         void load_blocks(tr_bitfield blocks);
         void load_date_added(time_t when) noexcept;
         void load_date_done(time_t when) noexcept;
+        void load_date_last_played(time_t when) noexcept;
         void load_download_dir(std::string_view dir) noexcept;
         void load_incomplete_dir(std::string_view dir) noexcept;
         void load_seconds_downloading_before_current_start(time_t when) noexcept;
@@ -86,6 +87,7 @@ struct tr_torrent
         [[nodiscard]] time_t date_active() const noexcept;
         [[nodiscard]] time_t date_added() const noexcept;
         [[nodiscard]] time_t date_done() const noexcept;
+        [[nodiscard]] time_t date_last_played() const noexcept;
         [[nodiscard]] time_t seconds_downloading(time_t now) const noexcept;
         [[nodiscard]] time_t seconds_seeding(time_t now) const noexcept;
         [[nodiscard]] bool start_when_stable() const noexcept;
@@ -718,6 +720,14 @@ struct tr_torrent
     constexpr void set_date_active(time_t when) noexcept
     {
         this->date_active_ = when;
+
+        bump_date_changed(when);
+        set_dirty();
+    }
+
+    constexpr void set_date_last_played(time_t when) noexcept
+    {
+        this->date_last_played_ = when;
 
         bump_date_changed(when);
         set_dirty();
@@ -1438,6 +1448,7 @@ private:
     time_t date_done_ = 0;
     time_t date_edited_ = 0;
     time_t date_started_ = 0;
+    time_t date_last_played_ = 0;
 
     time_t seconds_downloading_before_current_start_ = 0;
     time_t seconds_seeding_before_current_start_ = 0;

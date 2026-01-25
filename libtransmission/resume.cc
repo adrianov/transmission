@@ -728,6 +728,15 @@ tr_resume::fields_t load_from_file(tr_torrent* tor, tr_torrent::ResumeHelper& he
         }
     }
 
+    if ((fields_to_load & tr_resume::LastPlayedDate) != 0)
+    {
+        if (auto const i = map.value_if<int64_t>(TR_KEY_last_played_date))
+        {
+            helper.load_date_last_played(static_cast<time_t>(*i));
+            fields_loaded |= tr_resume::LastPlayedDate;
+        }
+    }
+
     if ((fields_to_load & tr_resume::ActivityDate) != 0)
     {
         if (auto const i = map.value_if<int64_t>(TR_KEY_activity_date))
@@ -970,6 +979,7 @@ void save(tr_torrent* const tor, tr_torrent::ResumeHelper const& helper)
     map.try_emplace(TR_KEY_added_date, helper.date_added());
     map.try_emplace(TR_KEY_corrupt, tor->bytes_corrupt_.ever());
     map.try_emplace(TR_KEY_done_date, helper.date_done());
+    map.try_emplace(TR_KEY_last_played_date, helper.date_last_played());
     map.try_emplace(TR_KEY_destination, tr_variant::unmanaged_string(tor->download_dir().sv()));
 
     if (!std::empty(tor->incomplete_dir()))

@@ -530,12 +530,14 @@
     }
 
     // Normalize separators, preserve single dash separators as " - "
+    // Also preserve hyphens in compound words (e.g., "Blu-Ray")
     NSString* dashPlaceholder = @"\u0000";
     title = [title stringByReplacingOccurrencesOfString:@"_" withString:@" "];
     NSRegularExpression* dashGroupRegex = [NSRegularExpression regularExpressionWithPattern:@"(?:\\s*-\\s*)+" options:0 error:nil];
     title = [dashGroupRegex stringByReplacingMatchesInString:title options:0 range:NSMakeRange(0, title.length)
                                                 withTemplate:dashPlaceholder];
-    title = [title stringByReplacingOccurrencesOfString:@"-" withString:@" "];
+    NSRegularExpression* spacedDashRegex = [NSRegularExpression regularExpressionWithPattern:@"(?:^|\\s)-(?:\\s|$)" options:0 error:nil];
+    title = [spacedDashRegex stringByReplacingMatchesInString:title options:0 range:NSMakeRange(0, title.length) withTemplate:@" "];
     title = [title stringByReplacingOccurrencesOfString:dashPlaceholder withString:@" - "];
 
     // Collapse multiple spaces

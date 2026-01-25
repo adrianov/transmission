@@ -1322,6 +1322,12 @@ void tr_torrentManualUpdate(tr_torrent* tor)
     tor->session->run_in_session_thread(torrentManualUpdateImpl, tor);
 }
 
+void tr_torrentSetLastPlayedDate(tr_torrent* tor, time_t date)
+{
+    TR_ASSERT(tr_isTorrent(tor));
+    tor->set_date_last_played(date);
+}
+
 bool tr_torrentCanManualUpdate(tr_torrent const* tor)
 {
     return tr_isTorrent(tor) && tor->is_running() && tr_announcerCanManualAnnounce(tor);
@@ -2733,6 +2739,18 @@ time_t tr_torrent::ResumeHelper::date_done() const noexcept
 void tr_torrent::ResumeHelper::load_date_done(time_t when) noexcept
 {
     tor_.date_done_ = when;
+}
+
+// ---
+
+time_t tr_torrent::ResumeHelper::date_last_played() const noexcept
+{
+    return tor_.date_last_played_;
+}
+
+void tr_torrent::ResumeHelper::load_date_last_played(time_t when) noexcept
+{
+    tor_.date_last_played_ = when;
 }
 
 // ---

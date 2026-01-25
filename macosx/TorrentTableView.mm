@@ -150,6 +150,7 @@ static NSTimeInterval const kToggleProgressSeconds = 0.175;
             continue;
 
         Torrent* torrent = (Torrent*)item;
+        (void)torrent; // Suppress unused variable warning
 
         [rowsToUpdate addIndex:row];
     }
@@ -1503,6 +1504,13 @@ static NSString* folderForPlayButton(NSButton* sender, Torrent* torrent)
 - (IBAction)playMediaFile:(NSButton*)sender
 {
     [self setHighPriorityForButton:sender];
+
+    // Update last played date for the torrent
+    Torrent* torrent = [self itemAtRow:[self rowForView:[sender superview]]];
+    if (torrent)
+    {
+        tr_torrentSetLastPlayedDate(torrent.torrentStruct, time(nullptr));
+    }
 
     NSString* path = sender.identifier;
     if (!path)

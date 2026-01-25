@@ -1154,6 +1154,8 @@ void tr_sessionSetIdleLimitHitCallback(tr_session* session, tr_session_idle_limi
 
 void tr_torrentManualUpdate(tr_torrent* torrent);
 
+void tr_torrentSetLastPlayedDate(tr_torrent* torrent, time_t date);
+
 bool tr_torrentCanManualUpdate(tr_torrent const* torrent);
 
 // --- tr_peer_stat

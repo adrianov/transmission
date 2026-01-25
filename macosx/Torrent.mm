@@ -45,6 +45,7 @@ typedef NS_ENUM(NSInteger, TorrentMediaType) {
 
 @property(nonatomic, readonly) tr_torrent* fHandle;
 @property(nonatomic) tr_stat const* fStat;
+@property(nonatomic, readonly) tr_session* fSession;
 
 @property(nonatomic, readonly) NSUserDefaults* fDefaults;
 
@@ -82,6 +83,7 @@ typedef NS_ENUM(NSInteger, TorrentMediaType) {
 @property(nonatomic) uint64_t fDiskSpaceNeeded;
 @property(nonatomic) uint64_t fDiskSpaceAvailable;
 @property(nonatomic) uint64_t fDiskSpaceTotal;
+@property(nonatomic) uint64_t fDiskSpaceUsedByTorrents;
 @property(nonatomic) NSTimeInterval fLastDiskSpaceCheckTime;
 
 - (void)renameFinished:(BOOL)success
@@ -852,6 +854,7 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
         self.fDiskSpaceNeeded = neededSpace;
         self.fDiskSpaceAvailable = remainingSpace;
         self.fDiskSpaceTotal = totalSpace;
+        self.fDiskSpaceUsedByTorrents = [self totalTorrentDiskUsage];
 
         //if the remaining space is greater than the size left, then there is enough space regardless of preallocation
         if (remainingSpace < neededSpace && remainingSpace < tr_torrentGetBytesLeftToAllocate(self.fHandle))
@@ -862,6 +865,34 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
     }
     self.fPausedForDiskSpace = NO;
     return YES;
+}
+
+- (uint64_t)totalTorrentDiskUsage
+{
+    if (!self.fSession)
+    {
+        return 0;
+    }
+
+    size_t const torrentCount = tr_sessionGetAllTorrents(self.fSession, nullptr, 0);
+    if (torrentCount == 0)
+    {
+        return 0;
+    }
+
+    std::vector<tr_torrent*> torrents(torrentCount);
+    tr_sessionGetAllTorrents(self.fSession, torrents.data(), torrents.size());
+
+    uint64_t totalUsage = 0;
+    for (tr_torrent* tor : torrents)
+    {
+        tr_stat const* st = tr_torrentStat(tor);
+        if (st)
+        {
+            totalUsage += st->haveValid + st->haveUnchecked;
+        }
+    }
+    return totalUsage;
 }
 
 /// Adds a subtle drop shadow to an icon image for better visibility.
@@ -2797,11 +2828,11 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
                     self.fLastDiskSpaceCheckTime = now;
                 }
 
-                NSString* usedString = [NSString stringForFileSizeOneDecimal:(self.diskSpaceTotal - self.diskSpaceAvailable)];
+                NSString* usedString = [NSString stringForFileSizeOneDecimal:self.fDiskSpaceUsedByTorrents];
                 NSString* neededString = [NSString stringForFileSizeOneDecimal:self.diskSpaceNeeded];
                 NSString* availableString = [NSString stringForFileSizeOneDecimal:self.diskSpaceAvailable];
                 NSString* totalString = [NSString stringForFileSizeOneDecimal:self.diskSpaceTotal];
-                string = [NSString stringWithFormat:NSLocalizedString(@"Not enough disk space. Used %@, Need %@, Available %@ of %@", "Torrent -> status string"),
+                string = [NSString stringWithFormat:NSLocalizedString(@"Not enough disk space. Used for torrents %@, Need %@, Available %@ of %@", "Torrent -> status string"),
                                                     usedString,
                                                     neededString,
                                                     availableString,
@@ -3484,6 +3515,7 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
     if (torrentStruct)
     {
         _fHandle = torrentStruct;
+        _fSession = lib;
     }
     else
     {
@@ -3515,6 +3547,7 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
         if (loaded)
         {
             _fHandle = tr_torrentNew(ctor, NULL);
+            _fSession = lib;
         }
 
         tr_ctorFree(ctor);
