@@ -781,6 +781,15 @@ void onTorrentCompletenessChanged(tr_torrent* tor, tr_completeness status, bool 
 
     [self removeMissingDataTorrentsOnLaunch];
 
+    // Verify existing partial torrents on launch so on-disk progress is recognized
+    for (Torrent* torrent in self.fTorrents)
+    {
+        if (torrent.haveVerified > 0 && !torrent.allDownloaded)
+        {
+            [torrent resetCache];
+        }
+    }
+
     //update previous transfers state by recreating a torrent from history
     //and comparing to torrents already loaded via tr_sessionLoadTorrents
     NSString* historyFile = [self.fConfigDirectory stringByAppendingPathComponent:kTransferPlist];
@@ -1502,6 +1511,12 @@ static NSTimeInterval const kLowPriorityDelay = 15.0;
         }
         else
         {
+            // Verify partial local data for existing torrents before starting at launch
+            if (torrent.haveVerified > 0 && !torrent.allDownloaded)
+            {
+                [torrent resetCache];
+            }
+
             if ([self.fDefaults boolForKey:@"AutoStartDownload"])
             {
                 [torrent startTransfer];
@@ -1959,12 +1974,6 @@ static NSTimeInterval const kLowPriorityDelay = 15.0;
 {
     for (Torrent* torrent in torrents)
     {
-        // Verify partial local data before resuming, but only once per session
-        if (torrent.haveVerified > 0 && torrent.haveVerified < torrent.haveTotal && !torrent.fVerifiedOnResume)
-        {
-            [torrent resetCache];
-            torrent.fVerifiedOnResume = YES;
-        }
         [torrent startTransfer];
     }
 
@@ -1993,16 +2002,10 @@ static NSTimeInterval const kLowPriorityDelay = 15.0;
 
 - (void)resumeTorrentsNoWait:(NSArray<Torrent*>*)torrents
 {
-    // Iterate through to verify partial data before starting, but only once per session
-    for (Torrent* torrent in torrents)
-    {
-        if (torrent.haveVerified > 0 && torrent.haveVerified < torrent.haveTotal && !torrent.fVerifiedOnResume)
+        for (Torrent* torrent in torrents)
         {
-            [torrent resetCache];
-            torrent.fVerifiedOnResume = YES;
+            [torrent startTransferNoQueue];
         }
-        [torrent startTransferNoQueue];
-    }
 
     [self fullUpdateUI];
 }
