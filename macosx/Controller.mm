@@ -31,6 +31,7 @@
 #import "StatsWindowController.h"
 #import "InfoWindowController.h"
 #import "PrefsController.h"
+#import "NSStringAdditions.h"
 #import "GroupsController.h"
 #import "AboutWindowController.h"
 #import "URLSheetWindowController.h"
@@ -1510,27 +1511,30 @@ static NSTimeInterval const kLowPriorityDelay = 15.0;
             [self.fAddWindows addObject:addController];
         }
         else
+{
+    uint64_t needed = torrent.sizeWhenDone;
+    [self autoDeleteOldTorrentsInGroup:0 forBytes:needed completion:^{
+        // Verify partial local data for existing torrents before starting at launch
+        if (type != AddTypeCreated && torrent.haveVerified > 0 && !torrent.allDownloaded)
         {
-            // Verify partial local data for existing torrents before starting at launch
-            if (type != AddTypeCreated && torrent.haveVerified > 0 && !torrent.allDownloaded)
-            {
-                [torrent resetCache];
-            }
-
-            if ([self.fDefaults boolForKey:@"AutoStartDownload"])
-            {
-                [torrent startTransfer];
-            }
-
-            [torrent update];
-            [self insertTorrentAtTop:torrent];
-
-            if (!self.fAddingTransfers)
-            {
-                self.fAddingTransfers = [[NSMutableSet alloc] init];
-            }
-            [self.fAddingTransfers addObject:torrent];
+            [torrent resetCache];
         }
+
+        if ([self.fDefaults boolForKey:@"AutoStartDownload"])
+        {
+            [torrent startTransfer];
+        }
+
+        [torrent update];
+        [self insertTorrentAtTop:torrent];
+
+        if (!self.fAddingTransfers)
+        {
+            self.fAddingTransfers = [[NSMutableSet alloc] init];
+        }
+        [self.fAddingTransfers addObject:torrent];
+    }];
+}
     }
 
     [self fullUpdateUI];
@@ -2213,7 +2217,9 @@ static NSTimeInterval const kLowPriorityDelay = 15.0;
                         [torrent closeRemoveTorrent:deleteData];
                     }
 
-                    [self fullUpdateUI];
+[self fullUpdateUI];
+    // Ensure newly added torrent appears immediately
+    [self applyFilter];
                 };
 
                 [self.fTableView beginUpdates];
@@ -2500,6 +2506,8 @@ static NSTimeInterval const kLowPriorityDelay = 15.0;
 
 - (void)showPreferenceWindow:(id)sender
 {
+    // Force nib loading and awakeFromNib
+    [_prefsController window];
     NSWindow* window = _prefsController.window;
     if (!window.visible)
     {
@@ -2650,7 +2658,7 @@ static NSTimeInterval const kLowPriorityDelay = 15.0;
     });
 }
 
-#warning can this be removed or refined?
+
 - (void)fullUpdateUI
 {
     [self updateUI];
@@ -5821,18 +5829,13 @@ static NSTimeInterval const kLowPriorityDelay = 15.0;
             switch (type)
             {
             case TR_RPC_TORRENT_ADDED:
-                if ([NSUserDefaults.standardUserDefaults boolForKey:@"AutoDeleteOldTorrentsOnLowDiskSpace"])
-                {
-                    uint64_t needed = torrent.sizeWhenDone;
-                    [self autoDeleteOldTorrentsInGroup:0 forBytes:needed completion:^{
-                        [self rpcAddTorrentStruct:torrentStruct];
-                    }];
-                }
-                else
-                {
-                    [self rpcAddTorrentStruct:torrentStruct];
-                }
-                break;
+{
+    uint64_t needed = torrent.sizeWhenDone;
+    [self autoDeleteOldTorrentsInGroup:0 forBytes:needed completion:^{
+        [self rpcAddTorrentStruct:torrentStruct];
+    }];
+}
+    break;
 
             case TR_RPC_TORRENT_STARTED:
             case TR_RPC_TORRENT_STOPPED:
@@ -5888,6 +5891,23 @@ static NSTimeInterval const kLowPriorityDelay = 15.0;
         }
         [candidates sortUsingDescriptors:@[ [NSSortDescriptor sortDescriptorWithKey:@"dateAdded" ascending:YES] ]];
         uint64_t freed = 0;
+        if (freed < bytesNeeded)
+        {
+            dispatch_async(dispatch_get_main_queue(), ^{
+                NSAlert* err = [[NSAlert alloc] init];
+                err.messageText = NSLocalizedString(@"Not enough disk space", @"auto-delete error title");
+                {
+                    NSString* neededStr = [NSString stringForFileSize:bytesNeeded];
+                    NSString* freedStr = [NSString stringForFileSize:freed];
+                    err.informativeText = [NSString stringWithFormat:
+                        NSLocalizedString(@"Need %@ to add this torrent, but only %@ could be freed.", @"auto-delete error size message"),
+                        neededStr, freedStr];
+                }
+                [err addButtonWithTitle:NSLocalizedString(@"OK", nil)];
+                [err beginSheetModalForWindow:self.fWindow completionHandler:nil];
+            });
+            return;
+        }
         NSMutableArray<Torrent*>* toDelete = [NSMutableArray array];
         for (Torrent* t in candidates)
         {
@@ -5899,16 +5919,30 @@ static NSTimeInterval const kLowPriorityDelay = 15.0;
         if (toDelete.count > 0)
         {
             dispatch_async(dispatch_get_main_queue(), ^{
-                NSString* list = [[toDelete valueForKey:@"name"] componentsJoinedByString:@"\n"];
+                NSMutableArray<NSString*>* lines = [NSMutableArray array];
+                for (Torrent* t in toDelete)
+                {
+                    NSString* sizeStr = [NSString stringForFileSize:t.sizeWhenDone];
+                    [lines addObject:[NSString stringWithFormat:@"%@ (%@)", t.name, sizeStr]];
+                }
+                NSString* list = [lines componentsJoinedByString:@"\n"];
                 NSAlert* alert = [[NSAlert alloc] init];
                 alert.messageText = NSLocalizedString(@"Low Disk Space", @"auto-delete alert title");
-                alert.informativeText = [NSString
-                    stringWithFormat:NSLocalizedString(@"To free up space, Transmission will delete these torrents:\n%@", @"auto-delete alert message"),
-                                     list];
-                [alert addButtonWithTitle:NSLocalizedString(@"Continue", nil)];
+                {
+                    NSString* neededStr = [NSString stringForFileSize:bytesNeeded];
+                    NSString* freedStr = [NSString stringForFileSize:freed];
+                    alert.informativeText = [NSString stringWithFormat:
+                        NSLocalizedString(@"Need %@ to add this torrent; will delete these (%@ freed):\n%@", @"auto-delete delete confirmation size message"),
+                        neededStr, freedStr, list];
+                }
+                [alert addButtonWithTitle:NSLocalizedString(@"Delete & Continue", nil)];
+                [alert addButtonWithTitle:NSLocalizedString(@"Cancel", nil)];
                 [alert beginSheetModalForWindow:self.fWindow completionHandler:^(NSModalResponse response) {
-                    [self removeTorrents:toDelete deleteData:YES];
-                    completion();
+                    if (response == NSAlertFirstButtonReturn)
+                    {
+                        [self removeTorrents:toDelete deleteData:YES];
+                        completion();
+                    }
                 }];
             });
         }

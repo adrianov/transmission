@@ -51,7 +51,7 @@ typedef NS_ENUM(NSInteger, FilterTypeTag) {
 - (void)awakeFromNib
 {
     [super awakeFromNib];
-    NSLog(@"[FilterBar] awakeFromNib - initializing buttons");
+    
 
     //localizations
     self.fNoFilterButton.title = NSLocalizedString(@"All", "Filter Bar -> filter button");
@@ -145,7 +145,7 @@ typedef NS_ENUM(NSInteger, FilterTypeTag) {
 
 - (void)setFilter:(id)sender
 {
-    NSLog(@"[FilterBar] setFilter: called with sender: %@", sender);
+    
     NSString* oldFilterType = [NSUserDefaults.standardUserDefaults stringForKey:@"Filter"];
 
     NSButton* prevFilterButton;
@@ -356,14 +356,7 @@ typedef NS_ENUM(NSInteger, FilterTypeTag) {
              paused:(NSUInteger)paused
               error:(NSUInteger)error
 {
-    NSLog(
-        @"[FilterBar] setCountAll: all=%lu active=%lu downloading=%lu seeding=%lu paused=%lu error=%lu",
-        (unsigned long)all,
-        (unsigned long)active,
-        (unsigned long)downloading,
-        (unsigned long)seeding,
-        (unsigned long)paused,
-        (unsigned long)error);
+    
     self.fNoFilterButton.count = all;
     self.fActiveFilterButton.count = active;
     self.fDownloadFilterButton.count = downloading;
