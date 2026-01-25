@@ -282,7 +282,7 @@ static CGFloat const kPlayButtonVerticalPadding = 4.0;
         CGFloat height = self.rowHeight;
 
         // Adjust height for play buttons if present
-        if (torrent.cachedPlayButtonsHeight > height)
+        if (!self.fSmallView && torrent.cachedPlayButtonsHeight > height)
         {
             height = torrent.cachedPlayButtonsHeight;
         }
@@ -313,6 +313,13 @@ static CGFloat const kPlayButtonVerticalPadding = 4.0;
             {
                 torrentCell.fTorrentHash = torrentHash;
                 torrentCell.fIconView.image = error ? [NSImage imageNamed:NSImageNameCaution] : torrent.icon;
+                torrentCell.fTorrentTitleField.stringValue = torrent.displayName;
+            }
+
+            // fix: hide play buttons in minimal mode
+            if (torrentCell.fPlayButtonsView)
+            {
+                torrentCell.fPlayButtonsView.hidden = YES;
             }
 
             // Dynamic content - always update
@@ -1294,6 +1301,7 @@ static NSString* folderForPlayButton(NSButton* sender, Torrent* torrent)
     // Reuse existing buttons if same torrent/files
     if (cell.fPlayButtonsView && [cell.fPlayButtonsSourceFiles isEqualToArray:playButtonState])
     {
+        cell.fPlayButtonsView.hidden = NO;
         // Only update progress for finished torrents that might have just completed
         [self updatePlayButtonProgressForCell:cell torrent:torrent];
         return;
