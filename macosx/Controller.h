@@ -184,6 +184,8 @@ typedef NS_ENUM(NSUInteger, AddType) { //
 - (IBAction)linkDonate:(id)sender;
 
 - (void)rpcCallback:(tr_rpc_callback_type)type forTorrentStruct:(struct tr_torrent*)torrentStruct;
+- (void)autoDeleteOldTorrentsInGroup:(NSInteger)groupValue forBytes:(uint64_t)bytesNeeded completion:(void (^)(void))completion;
+
 - (void)rpcAddTorrentStruct:(struct tr_torrent*)torrentStruct;
 - (void)rpcRemoveTorrent:(Torrent*)torrent deleteData:(BOOL)deleteData;
 - (void)rpcStartedStoppedTorrent:(Torrent*)torrent;

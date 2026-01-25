@@ -258,8 +258,6 @@ static NSString* const kWebUIURLFormat = @"http://localhost:%ld/";
     //set queue values
     self.fQueueDownloadField.integerValue = [self.fDefaults integerForKey:@"QueueDownloadNumber"];
     self.fQueueSeedField.integerValue = [self.fDefaults integerForKey:@"QueueSeedNumber"];
-    // set auto-delete on low disk space when adding
-    self.fAutoDeleteCheckbox.state = [self.fDefaults boolForKey:@"AutoDeleteOldTorrentsOnLowDiskSpace"] ? NSControlStateValueOn : NSControlStateValueOff;
     self.fStalledField.integerValue = [self.fDefaults integerForKey:@"StalledMinutes"];
 
     //set blocklist
@@ -709,15 +707,7 @@ static NSString* const kWebUIURLFormat = @"http://localhost:%ld/";
     self.fBlocklistButton.enabled = enable;
 }
 
-
-
-- (IBAction)setAutoDeleteOldTorrentsOnLowDiskSpace:(id)sender
-{
-    BOOL enabled = (self.fAutoDeleteCheckbox.state == NSControlStateValueOn);
-    [self.fDefaults setBool:enabled forKey:@"AutoDeleteOldTorrentsOnLowDiskSpace"];
-}
-
-- (IBAction)setAutoStartDownloads:(id)sender
+- (void)setAutoStartDownloads:(id)sender
 {
     tr_sessionSetPaused(self.fHandle, ![self.fDefaults boolForKey:@"AutoStartDownload"]);
 }

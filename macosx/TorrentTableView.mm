@@ -151,10 +151,6 @@ static NSTimeInterval const kToggleProgressSeconds = 0.175;
 
         Torrent* torrent = (Torrent*)item;
 
-        // Skip finished torrents - their play buttons never change
-        if (torrent.allDownloaded)
-            continue;
-
         [rowsToUpdate addIndex:row];
     }
 

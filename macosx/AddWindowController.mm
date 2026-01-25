@@ -376,7 +376,7 @@ typedef NS_ENUM(NSUInteger, PopupPriority) {
     }
 }
 
-- (void)confirmAdd
+- (void)performConfirmAdd
 {
     [self.fTimer invalidate];
     self.fTimer = nil;
@@ -396,6 +396,21 @@ typedef NS_ENUM(NSUInteger, PopupPriority) {
 
     [self close];
     [self.fController askOpenConfirmed:self add:YES];
+}
+
+- (void)confirmAdd
+{
+    if ([NSUserDefaults.standardUserDefaults boolForKey:@"AutoDeleteOldTorrentsOnLowDiskSpace"])
+    {
+        uint64_t neededBytes = (uint64_t)[self.torrent sizeWhenDone];
+        [self.fController autoDeleteOldTorrentsInGroup:self.fGroupValue forBytes:neededBytes completion:^{
+            [self performConfirmAdd];
+        }];
+    }
+    else
+    {
+        [self performConfirmAdd];
+    }
 }
 
 - (void)setDestinationPath:(NSString*)destination determinationType:(TorrentDeterminationType)determinationType
