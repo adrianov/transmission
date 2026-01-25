@@ -105,7 +105,7 @@ struct DjvuPdfPageInfo
     DjvuPdfImageInfo image;
     // For compound pages: background picture layer + foreground text mask overlay
     DjvuPdfImageInfo bgImage; // Background: JP2 grayscale/RGB
-    DjvuPdfImageInfo fgMask; // Foreground: JBIG2 ImageMask (transparent bg)
+    DjvuPdfImageInfo fgMask; // JBIG2 ImageMask (transparent bg)
 };
 
 static bool isGrayscaleRgb24(unsigned char const* rgb, int width, int height, size_t rowBytes)
@@ -865,7 +865,7 @@ static bool encodeJp2Grok(std::vector<uint8_t>* out, unsigned char const* pixels
     if (image == nullptr)
         return false;
 
-    // Copy pixels into Grok's planar int32 component buffers.
+    // Copy pixels into Grok's planar int32 component buffers
     for (int y = 0; y < h; ++y)
     {
         auto const* srcRow = pixels + (size_t)y * stride;
@@ -899,10 +899,10 @@ static bool encodeJp2Grok(std::vector<uint8_t>* out, unsigned char const* pixels
     params.cod_format = GRK_FMT_JP2;
     params.verbose = false;
     params.irreversible = true;
-    params.allocation_by_quality = true;
     params.numlayers = 1;
-    params.layer_distortion[0] = jp2QualityToPsnr(quality);
     params.num_threads = 2;
+    params.allocation_by_quality = true;
+    params.layer_distortion[0] = jp2QualityToPsnr(quality);
 
     size_t rawSize = stride * (size_t)h;
     size_t cap = MAX(rawSize + 1024U * 1024U, (size_t)64 * 1024);
@@ -1510,6 +1510,9 @@ static BOOL convertDjvuFileDeterministic(NSString* djvuPath, NSString* tmpPdfPat
 
     std::vector<OutlineNode> outline = readDjvuOutline(ctx, doc, pageCount);
 
+    std::vector<DjvuPdfPageInfo> pages((size_t)pageCount);
+    DjvuPdfPageInfo* pagesPtr = pages.data();
+
     ddjvu_format_t* rgb24 = ddjvu_format_create(DDJVU_FORMAT_RGB24, 0, nullptr);
     ddjvu_format_t* grey8 = ddjvu_format_create(DDJVU_FORMAT_GREY8, 0, nullptr);
     ddjvu_format_t* msb = ddjvu_format_create(DDJVU_FORMAT_MSBTOLSB, 0, nullptr);
@@ -1533,9 +1536,6 @@ static BOOL convertDjvuFileDeterministic(NSString* djvuPath, NSString* tmpPdfPat
     ddjvu_format_set_y_direction(grey8, TRUE);
     ddjvu_format_set_row_order(msb, TRUE);
     ddjvu_format_set_y_direction(msb, TRUE);
-
-    std::vector<DjvuPdfPageInfo> pages((size_t)pageCount);
-    DjvuPdfPageInfo* pagesPtr = pages.data();
 
     dispatch_queue_t encQ = dispatch_queue_create("transmission.djvu.jp2.encode", DISPATCH_QUEUE_CONCURRENT);
     dispatch_group_t encGroup = dispatch_group_create();
@@ -2037,10 +2037,10 @@ static BOOL convertDjvuFileDeterministic(NSString* djvuPath, NSString* tmpPdfPat
                     dispatch_group_async(encGroup, encQ, ^{
                         @autoreleasepool
                         {
-                            dispatch_semaphore_wait(sem, DISPATCH_TIME_FOREVER);
-                            std::vector<uint8_t> jp2;
-                            (void)encodeJp2Grok(&jp2, pixels.data(), cropW, cropH, (size_t)cropW * 3U, false, quality);
-                            if (!jp2.empty())
+                        dispatch_semaphore_wait(sem, DISPATCH_TIME_FOREVER);
+                        std::vector<uint8_t> jp2;
+                        (void)encodeJp2Grok(&jp2, pixels.data(), cropW, cropH, (size_t)cropW * 3U, false, quality);
+                        if (!jp2.empty())
                                 pagesPtr[pageNum].image.bytes = std::move(jp2);
                             dispatch_semaphore_signal(sem);
                         }
