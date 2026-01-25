@@ -218,6 +218,7 @@ function formatHumanTitle(name) {
       : title.match(/\b(19\d{2}|20\d{2})\b/)?.[1] || null;
 
   // Remove tech tags
+  // Allow optional separators (space/dot/string boundary) before/after tags
   const allTags = [
     ...techTagsVideo,
     ...techTagsCodec,
@@ -227,9 +228,20 @@ function formatHumanTitle(name) {
     ...techTagsOther,
     ...techTagsVR,
   ];
+
+  // Handle BluRay special case to preserve hyphen (Blu-Ray, BluRay -> removed)
+  title = title.replaceAll(
+    /(?:^|\.|\\s)Blu[\s-]*Ray(?:$|\\.|\\s)/gi,
+    '',
+  );
+
+  // Remove all other tech tags
   for (const tag of allTags) {
+    if (tag === 'BluRay') {
+      continue; // Already handled above
+    }
     const escapedTag = escapeRegex(tag);
-    title = title.replaceAll(new RegExp(`\\b${escapedTag}\\b`, 'gi'), '');
+    title = title.replaceAll(new RegExp(`(?:^|\\.|\\s)${escapedTag}(?:$|\\.|\\s)`, 'gi'), ' ');
   }
 
   // Remove resolution, season markers, year, date (and preceding dot if used as separator)
