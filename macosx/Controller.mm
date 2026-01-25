@@ -2002,10 +2002,10 @@ static NSTimeInterval const kLowPriorityDelay = 15.0;
 
 - (void)resumeTorrentsNoWait:(NSArray<Torrent*>*)torrents
 {
-        for (Torrent* torrent in torrents)
-        {
-            [torrent startTransferNoQueue];
-        }
+    for (Torrent* torrent in torrents)
+    {
+        [torrent startTransferNoQueue];
+    }
 
     [self fullUpdateUI];
 }
@@ -5821,7 +5821,17 @@ static NSTimeInterval const kLowPriorityDelay = 15.0;
             switch (type)
             {
             case TR_RPC_TORRENT_ADDED:
-                [self rpcAddTorrentStruct:torrentStruct];
+                if ([NSUserDefaults.standardUserDefaults boolForKey:@"AutoDeleteOldTorrentsOnLowDiskSpace"])
+                {
+                    uint64_t needed = torrent.sizeWhenDone;
+                    [self autoDeleteOldTorrentsInGroup:0 forBytes:needed completion:^{
+                        [self rpcAddTorrentStruct:torrentStruct];
+                    }];
+                }
+                else
+                {
+                    [self rpcAddTorrentStruct:torrentStruct];
+                }
                 break;
 
             case TR_RPC_TORRENT_STARTED:
@@ -5863,6 +5873,52 @@ static NSTimeInterval const kLowPriorityDelay = 15.0;
             }
         });
     }
+}
+
+- (void)autoDeleteOldTorrentsInGroup:(NSInteger)groupValue forBytes:(uint64_t)bytesNeeded completion:(void (^)(void))completion
+{
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+        NSMutableArray<Torrent*>* candidates = [NSMutableArray array];
+        for (Torrent* t in self.fTorrents)
+        {
+            if (t.groupValue == groupValue)
+            {
+                [candidates addObject:t];
+            }
+        }
+        [candidates sortUsingDescriptors:@[ [NSSortDescriptor sortDescriptorWithKey:@"dateAdded" ascending:YES] ]];
+        uint64_t freed = 0;
+        NSMutableArray<Torrent*>* toDelete = [NSMutableArray array];
+        for (Torrent* t in candidates)
+        {
+            if (freed >= bytesNeeded)
+                break;
+            freed += t.sizeWhenDone;
+            [toDelete addObject:t];
+        }
+        if (toDelete.count > 0)
+        {
+            dispatch_async(dispatch_get_main_queue(), ^{
+                NSString* list = [[toDelete valueForKey:@"name"] componentsJoinedByString:@"\n"];
+                NSAlert* alert = [[NSAlert alloc] init];
+                alert.messageText = NSLocalizedString(@"Low Disk Space", @"auto-delete alert title");
+                alert.informativeText = [NSString
+                    stringWithFormat:NSLocalizedString(@"To free up space, Transmission will delete these torrents:\n%@", @"auto-delete alert message"),
+                                     list];
+                [alert addButtonWithTitle:NSLocalizedString(@"Continue", nil)];
+                [alert beginSheetModalForWindow:self.fWindow completionHandler:^(NSModalResponse response) {
+                    [self removeTorrents:toDelete deleteData:YES];
+                    completion();
+                }];
+            });
+        }
+        else
+        {
+            dispatch_async(dispatch_get_main_queue(), ^{
+                completion();
+            });
+        }
+    });
 }
 
 - (void)rpcAddTorrentStruct:(struct tr_torrent*)torrentStruct
