@@ -263,9 +263,10 @@ function formatHumanTitle(name) {
   }
 
   // Normalize separators, preserve existing " - "
+  // Also preserve hyphens in compound words (e.g., "Blu-Ray")
   title = title
     .replaceAll(' - ', '\u0000')
-    .replaceAll('-', ' ')
+    .replaceAll(/(?:^|\s)-(?:\s|$)/g, ' ')
     .replaceAll('\u0000', ' - ')
     .replaceAll(/\s+/g, ' ')
     .trim();
