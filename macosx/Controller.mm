@@ -1512,7 +1512,7 @@ static NSTimeInterval const kLowPriorityDelay = 15.0;
         else
         {
             // Verify partial local data for existing torrents before starting at launch
-            if (torrent.haveVerified > 0 && !torrent.allDownloaded)
+            if (type != AddTypeCreated && torrent.haveVerified > 0 && !torrent.allDownloaded)
             {
                 [torrent resetCache];
             }
