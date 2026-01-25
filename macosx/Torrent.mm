@@ -85,6 +85,7 @@ typedef NS_ENUM(NSInteger, TorrentMediaType) {
 @property(nonatomic) uint64_t fDiskSpaceTotal;
 @property(nonatomic) uint64_t fDiskSpaceUsedByTorrents;
 @property(nonatomic) NSTimeInterval fLastDiskSpaceCheckTime;
+@property(nonatomic) BOOL diskSpaceDialogShown;
 
 - (void)renameFinished:(BOOL)success
                  nodes:(NSArray<FileListNode*>*)nodes
@@ -94,6 +95,9 @@ typedef NS_ENUM(NSInteger, TorrentMediaType) {
 
 @property(nonatomic, readonly) BOOL shouldShowEta;
 @property(nonatomic, readonly) NSString* etaString;
+
+- (uint64_t)totalTorrentDiskUsage;
+- (uint64_t)totalTorrentDiskNeeded;
 
 @end
 
@@ -533,6 +537,7 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
         if (torrent.fStat->activity != TR_STATUS_STOPPED)
         {
             torrent.fPausedForDiskSpace = NO;
+            torrent.fDiskSpaceDialogShown = NO;
         }
 
         //make sure the "active" filter is updated when transmitting changes
@@ -850,14 +855,15 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
         uint64_t const totalSpace = ((NSNumber*)systemAttributes[NSFileSystemSize]).unsignedLongLongValue;
         uint64_t const neededSpace = self.sizeLeft;
 
-        // Store disk space info for status message
+        // Account for what all other torrents will need when finished
+        uint64_t const totalNeededForAll = [self totalTorrentDiskNeeded];
+
         self.fDiskSpaceNeeded = neededSpace;
         self.fDiskSpaceAvailable = remainingSpace;
         self.fDiskSpaceTotal = totalSpace;
         self.fDiskSpaceUsedByTorrents = [self totalTorrentDiskUsage];
 
-        //if the remaining space is greater than the size left, then there is enough space regardless of preallocation
-        if (remainingSpace < neededSpace && remainingSpace < tr_torrentGetBytesLeftToAllocate(self.fHandle))
+        if (remainingSpace < totalNeededForAll)
         {
             self.fPausedForDiskSpace = YES;
             return NO;
@@ -893,6 +899,34 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
         }
     }
     return totalUsage;
+}
+
+- (uint64_t)totalTorrentDiskNeeded
+{
+    if (!self.fSession)
+    {
+        return 0;
+    }
+
+    size_t const torrentCount = tr_sessionGetAllTorrents(self.fSession, nullptr, 0);
+    if (torrentCount == 0)
+    {
+        return 0;
+    }
+
+    std::vector<tr_torrent*> torrents(torrentCount);
+    tr_sessionGetAllTorrents(self.fSession, torrents.data(), torrents.size());
+
+    uint64_t totalNeeded = 0;
+    for (tr_torrent* tor : torrents)
+    {
+        tr_stat const* st = tr_torrentStat(tor);
+        if (st)
+        {
+            totalNeeded += st->leftUntilDone;
+        }
+    }
+    return totalNeeded;
 }
 
 /// Adds a subtle drop shadow to an icon image for better visibility.
@@ -2832,11 +2866,12 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
                 NSString* neededString = [NSString stringForFileSizeOneDecimal:self.diskSpaceNeeded];
                 NSString* availableString = [NSString stringForFileSizeOneDecimal:self.diskSpaceAvailable];
                 NSString* totalString = [NSString stringForFileSizeOneDecimal:self.diskSpaceTotal];
-                string = [NSString stringWithFormat:NSLocalizedString(@"Not enough disk space. Used for torrents %@, Need %@, Available %@ of %@", "Torrent -> status string"),
-                                                    usedString,
-                                                    neededString,
-                                                    availableString,
-                                                    totalString];
+                string = [NSString
+                    stringWithFormat:NSLocalizedString(@"Not enough disk space. Used for torrents %@, Need %@, Available %@ of %@", "Torrent -> status string"),
+                                     usedString,
+                                     neededString,
+                                     availableString,
+                                     totalString];
             }
             else
             {
@@ -3559,6 +3594,7 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
     }
 
     _fResumeOnWake = NO;
+    _fDiskSpaceDialogShown = NO;
 
     //don't do after this point - it messes with auto-group functionality
     if (!self.magnet)
