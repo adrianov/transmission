@@ -1016,19 +1016,7 @@ if(GIT_FOUND)
         WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
         OUTPUT_VARIABLE TR_GIT_ROOT
         OUTPUT_STRIP_TRAILING_WHITESPACE)
-    if(TR_GIT_ROOT AND IS_DIRECTORY "${TR_GIT_ROOT}/.git")
-        configure_file("${PROJECT_SOURCE_DIR}/extras/pre-commit" "${TR_GIT_ROOT}/.git/hooks/pre-commit" COPYONLY)
-        add_custom_target(check-format
-            COMMAND "${PROJECT_SOURCE_DIR}/code_style.sh" --check
-            WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}")
-        add_custom_target(format
-            COMMAND "${PROJECT_SOURCE_DIR}/code_style.sh"
-            WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}")
-        set_property(
-            TARGET check-format format
-            PROPERTY FOLDER "utility")
-    endif()
-    unset(TR_GIT_ROOT)
+
 endif()
 
 include(CPack)
