@@ -5940,7 +5940,22 @@ static NSTimeInterval const kLowPriorityDelay = 15.0;
                 [candidates addObject:t];
             }
         }
-        [candidates sortUsingDescriptors:@[ [NSSortDescriptor sortDescriptorWithKey:@"dateAdded" ascending:YES] ]];
+        [candidates sortUsingComparator:^NSComparisonResult(Torrent* a, Torrent* b) {
+            // Use max(dateAdded, dateLastPlayed) for sorting
+            NSDate* dateA = [a.dateLastPlayed compare:a.dateAdded] == NSOrderedDescending ? a.dateLastPlayed : a.dateAdded;
+            NSDate* dateB = [b.dateLastPlayed compare:b.dateAdded] == NSOrderedDescending ? b.dateLastPlayed : b.dateAdded;
+            
+            if (dateA && dateB) {
+                return [dateA compare:dateB];
+            }
+            if (dateA) {
+                return NSOrderedAscending; // a has date, b doesn't, a should come first
+            }
+            if (dateB) {
+                return NSOrderedDescending; // b has date, a doesn't, b should come first
+            }
+            return NSOrderedSame;
+        }];
 
         uint64_t freedPotential = 0;
         NSMutableArray<Torrent*>* toDelete = [NSMutableArray array];
@@ -6053,7 +6068,7 @@ static NSTimeInterval const kLowPriorityDelay = 15.0;
         NSNumber* const volumeID = systemAttributes[NSFileSystemNumber];
 
         // Find a proxy torrent to get disk needs on this specific volume
-        // We use any torrent because totalTorrentDiskNeededOnVolume:handles the logic
+        // We use any torrent because totalTorrentDiskNeededOnVolume:handles logic
         Torrent* proxy = self.fTorrents.firstObject;
         uint64_t const targetSpace = bytesNeeded + (proxy ? [proxy totalTorrentDiskNeededOnVolume:volumeID group:-1] : 0);
 
@@ -6070,13 +6085,28 @@ static NSTimeInterval const kLowPriorityDelay = 15.0;
         NSMutableArray<Torrent*>* candidates = [NSMutableArray array];
         for (Torrent* t in self.fTorrents)
         {
-            // Only consider torrents on the SAME volume and in the SAME group
+            // Only consider torrents on SAME volume and in SAME group
             if ([t.volumeIdentifier isEqualToNumber:volumeID] && t.groupValue == groupValue)
             {
                 [candidates addObject:t];
             }
         }
-        [candidates sortUsingDescriptors:@[ [NSSortDescriptor sortDescriptorWithKey:@"dateAdded" ascending:YES] ]];
+        [candidates sortUsingComparator:^NSComparisonResult(Torrent* a, Torrent* b) {
+            // Use max(dateAdded, dateLastPlayed) for sorting
+            NSDate* dateA = [a.dateLastPlayed compare:a.dateAdded] == NSOrderedDescending ? a.dateLastPlayed : a.dateAdded;
+            NSDate* dateB = [b.dateLastPlayed compare:b.dateAdded] == NSOrderedDescending ? b.dateLastPlayed : b.dateAdded;
+            
+            if (dateA && dateB) {
+                return [dateA compare:dateB];
+            }
+            if (dateA) {
+                return NSOrderedAscending; // a has date, b doesn't, a should come first
+            }
+            if (dateB) {
+                return NSOrderedDescending; // b has date, a doesn't, b should come first
+            }
+            return NSOrderedSame;
+        }];
 
         uint64_t freedPotential = 0;
         NSMutableArray<Torrent*>* toDelete = [NSMutableArray array];

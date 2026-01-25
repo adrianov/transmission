@@ -1392,6 +1392,7 @@ tr_stat tr_torrent::stats() const
     stats.doneDate = this->date_done_;
     stats.editDate = this->date_edited_;
     stats.startDate = this->date_started_;
+    stats.lastPlayedDate = this->date_last_played_;
     stats.secondsSeeding = this->seconds_seeding(now_sec);
     stats.secondsDownloading = this->seconds_downloading(now_sec);
 

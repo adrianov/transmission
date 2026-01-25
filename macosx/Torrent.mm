@@ -3578,6 +3578,12 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
     return date ? date : self.dateAdded;
 }
 
+- (NSDate*)dateLastPlayed
+{
+    time_t const date = self.fStat->lastPlayedDate;
+    return date != 0 ? [NSDate dateWithTimeIntervalSince1970:date] : nil;
+}
+
 - (NSInteger)secondsDownloading
 {
     return self.fStat->secondsDownloading;

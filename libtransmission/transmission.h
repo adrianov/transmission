@@ -1486,7 +1486,8 @@ struct tr_stat
 
     /** The last time we uploaded or downloaded piece data on this torrent. */
     time_t activityDate;
-
+    /** The last time a file from this torrent was played. */
+    time_t lastPlayedDate;
     /** The last time during this session that a rarely-changing field
         changed -- e.g. any `tr_torrent_metainfo` field (trackers, filenames, name)
         or download directory. RPC clients can monitor this to know when

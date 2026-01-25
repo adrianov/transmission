@@ -276,6 +276,7 @@ extern NSString* const kTorrentDidChangeGroupNotification;
 @property(nonatomic, readonly) NSDate* dateCompleted;
 @property(nonatomic, readonly) NSDate* dateActivity;
 @property(nonatomic, readonly) NSDate* dateActivityOrAdd;
+@property(nonatomic, readonly) NSDate* dateLastPlayed;
 
 @property(nonatomic, readonly) NSInteger secondsDownloading;
 @property(nonatomic, readonly) NSInteger secondsSeeding;
