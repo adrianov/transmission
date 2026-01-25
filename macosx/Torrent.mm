@@ -1363,7 +1363,7 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
 
             BOOL const isAudio = [type isEqualToString:@"album"];
             BOOL const isBooks = [type isEqualToString:@"books"];
-            NSString* icon = isBooks ? @"📖" : (isAudio ? @"♫" : @"⏵");
+            NSString* icon = isBooks ? @"📖" : (isAudio ? @"♬" : @"⏵");  // ♬ double note for albums
             NSString* baseTitle = [NSString stringWithFormat:@"%@ %@", icon, name];
 
             [entries addObject:@{
@@ -1774,7 +1774,7 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
     // Build final entries with titles
     NSMutableArray<NSDictionary*>* result = [NSMutableArray arrayWithCapacity:playable.count];
     BOOL isAudio = (self.fMediaType == TorrentMediaTypeAudio);
-    NSString* icon = isAudio ? @"♫" : @"⏵";
+    NSString* icon = isAudio ? @"♫" : @"⏵";  // ♫ single note for individual tracks
     for (NSDictionary* fileInfo in playable)
     {
         NSString* baseTitle;
