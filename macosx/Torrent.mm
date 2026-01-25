@@ -554,7 +554,8 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
 
 - (void)startTransferIgnoringQueue:(BOOL)ignoreQueue
 {
-    if ([self alertForRemainingDiskSpace])
+    // Always bypass throttle when explicitly starting - user expects fresh check
+    if ([self alertForRemainingDiskSpaceBypassThrottle:YES])
     {
         ignoreQueue ? tr_torrentStartNow(self.fHandle) : tr_torrentStart(self.fHandle);
         [self update];
@@ -576,7 +577,8 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
 
 - (void)startMagnetTransferAfterMetaDownload
 {
-    if ([self alertForRemainingDiskSpace])
+    // Always bypass throttle when explicitly starting - user expects fresh check
+    if ([self alertForRemainingDiskSpaceBypassThrottle:YES])
     {
         tr_torrentStart(self.fHandle);
         [self update];
@@ -868,20 +870,21 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
         uint64_t const remainingSpace = ((NSNumber*)systemAttributes[NSFileSystemFreeSize]).unsignedLongLongValue;
         uint64_t const totalSpace = ((NSNumber*)systemAttributes[NSFileSystemSize]).unsignedLongLongValue;
 
-        // Account for what all other torrents will need when finished
-        // fDiskSpaceNeeded shows total space needed for all downloading torrents
-        uint64_t const totalNeededForAllDownloading = [self totalTorrentDiskNeeded];
-        self.fDiskSpaceNeeded = totalNeededForAllDownloading;
+        // Global stats for display in the status message
+        // fDiskSpaceUsedByTorrents is sum of sizeWhenDone for ALL torrents
+        self.fDiskSpaceUsedByTorrents = [self totalTorrentDiskUsage];
+        // fDiskSpaceNeeded is sum of leftUntilDone for all active and disk-paused torrents
+        self.fDiskSpaceNeeded = [self totalTorrentDiskNeeded];
+
         self.fDiskSpaceAvailable = remainingSpace;
         self.fDiskSpaceTotal = totalSpace;
 
-        // totalTorrentDiskUsage is sum of sizeWhenDone for ALL torrents (including this one)
-        uint64_t const totalCommittedForAll = [self totalTorrentDiskUsage];
-        self.fDiskSpaceUsedByTorrents = totalCommittedForAll;
+        // Current task requirement = (This torrent's remaining) + (All other ACTIVE downloads)
+        uint64_t const totalNeededNow = self.sizeLeft + [self totalTorrentDiskNeeded];
+        self.fDiskSpaceNeeded = totalNeededNow;
 
-        // Check if we have enough space for all torrents when they complete
-        // Note: totalCommittedForAll already includes this torrent
-        if (remainingSpace < totalCommittedForAll)
+        // Check against THIS torrent's requirement to run alongside others
+        if (remainingSpace < totalNeededNow)
         {
             self.fPausedForDiskSpace = YES;
             return NO;
@@ -932,16 +935,27 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
         return 0;
     }
 
-    std::vector<tr_torrent*> torrents(torrentCount);
-    tr_sessionGetAllTorrents(self.fSession, torrents.data(), torrents.size());
+    std::vector<tr_torrent*> handles(torrentCount);
+    tr_sessionGetAllTorrents(self.fSession, handles.data(), handles.size());
 
     uint64_t totalNeeded = 0;
-    for (tr_torrent* tor : torrents)
+    for (tr_torrent* h : handles)
     {
-        tr_stat const* st = tr_torrentStat(tor);
+        // Skip current torrent to avoid double-counting in alertForRemainingDiskSpace
+        if (h == self.fHandle)
+        {
+            continue;
+        }
+
+        tr_stat const* st = tr_torrentStat(h);
         if (st)
         {
-            totalNeeded += st->leftUntilDone;
+            // Only count ACTUALLY downloading/seeding torrents.
+            // Exclude stopped, queued, and disk-paused torrents.
+            if (st->activity == TR_STATUS_DOWNLOAD || st->activity == TR_STATUS_SEED)
+            {
+                totalNeeded += st->leftUntilDone;
+            }
         }
     }
     return totalNeeded;

@@ -5911,14 +5911,15 @@ static NSTimeInterval const kLowPriorityDelay = 15.0;
 
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
         uint64_t const currentFreeSpace = torrent.diskSpaceAvailable;
-        uint64_t const totalNeededForAll = torrent.totalTorrentDiskUsage;
+        // The requirement to run is (This torrent's remaining) + (All other ACTIVE downloads)
+        uint64_t const targetSpace = torrent.sizeLeft + [torrent totalTorrentDiskNeeded];
 
-        if (currentFreeSpace >= totalNeededForAll)
+        if (currentFreeSpace >= targetSpace)
         {
             return;
         }
 
-        uint64_t const deficit = totalNeededForAll - currentFreeSpace;
+        uint64_t const deficit = targetSpace - currentFreeSpace;
 
         NSMutableArray<Torrent*>* candidates = [NSMutableArray array];
         for (Torrent* t in self.fTorrents)
@@ -5952,7 +5953,7 @@ static NSTimeInterval const kLowPriorityDelay = 15.0;
             for (Torrent* t in toDelete)
             {
                 NSString* sizeStr = [NSString stringForFileSize:t.sizeWhenDone];
-                [lines addObject:[NSString stringWithFormat:@"\n  • %@ (%@)", t.name, sizeStr]];
+                [lines addObject:[NSString stringWithFormat:@"\n  • %@ (%@)", t.displayName, sizeStr]];
             }
             NSString* list = [lines componentsJoinedByString:@""];
 
@@ -5977,8 +5978,16 @@ static NSTimeInterval const kLowPriorityDelay = 15.0;
                 {
                     torrent.fDiskSpaceDialogShown = NO;
                     [self removeTorrents:toDelete deleteData:YES];
-                    [torrent startTransfer];
-                    [torrent update];
+
+                    // Give the OS a tiny moment to update free space metadata
+                    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                        // Force a fresh check and restart if space is now okay
+                        if ([torrent alertForRemainingDiskSpaceBypassThrottle:YES])
+                        {
+                            [torrent startTransfer];
+                        }
+                        [torrent update];
+                    });
                 }
             }];
         });
@@ -5999,10 +6008,10 @@ static NSTimeInterval const kLowPriorityDelay = 15.0;
         }
 
         uint64_t const currentFreeSpace = proxy.diskSpaceAvailable;
-        uint64_t const totalCurrentUsage = proxy.totalTorrentDiskUsage;
-        uint64_t const totalFutureNeed = totalCurrentUsage + bytesNeeded;
+        // Check if new torrent fits alongside currently ACTIVE downloads
+        uint64_t const targetSpace = bytesNeeded + [proxy totalTorrentDiskNeeded];
 
-        if (currentFreeSpace >= totalFutureNeed)
+        if (currentFreeSpace >= targetSpace)
         {
             dispatch_async(dispatch_get_main_queue(), ^{
                 completion();
@@ -6010,7 +6019,7 @@ static NSTimeInterval const kLowPriorityDelay = 15.0;
             return;
         }
 
-        uint64_t const deficit = totalFutureNeed - currentFreeSpace;
+        uint64_t const deficit = targetSpace - currentFreeSpace;
 
         NSMutableArray<Torrent*>* candidates = [NSMutableArray array];
         for (Torrent* t in self.fTorrents)
@@ -6058,7 +6067,7 @@ static NSTimeInterval const kLowPriorityDelay = 15.0;
                 for (Torrent* t in toDelete)
                 {
                     NSString* sizeStr = [NSString stringForFileSize:t.sizeWhenDone];
-                    [lines addObject:[NSString stringWithFormat:@"\n  • %@ (%@)", t.name, sizeStr]];
+                    [lines addObject:[NSString stringWithFormat:@"\n  • %@ (%@)", t.displayName, sizeStr]];
                 }
                 NSString* list = [lines componentsJoinedByString:@""];
                 NSAlert* alert = [[NSAlert alloc] init];
