@@ -5841,8 +5841,14 @@ static NSTimeInterval const kLowPriorityDelay = 15.0;
             {
             case TR_RPC_TORRENT_ADDED:
                 {
-                    uint64_t needed = torrent.sizeWhenDone;
-                    [self autoDeleteOldTorrentsInGroup:0 forBytes:needed completion:^{
+                    tr_stat const* st = tr_torrentStat(torrentStruct);
+                    uint64_t needed = st ? st->sizeWhenDone : 0;
+                    auto const path = @(tr_torrentGetDownloadDir(torrentStruct));
+
+                    // We don't have a Torrent object yet, so we can't easily get the auto-group.
+                    // For now, use group 0 (no group) or check how Torrent object would do it.
+                    // Actually, if it's added via RPC, it might not have been categorized yet.
+                    [self autoDeleteOldTorrentsAtPath:path group:-1 forBytes:needed completion:^{
                         [self rpcAddTorrentStruct:torrentStruct];
                     }];
                 }
@@ -5911,8 +5917,12 @@ static NSTimeInterval const kLowPriorityDelay = 15.0;
 
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
         uint64_t const currentFreeSpace = torrent.diskSpaceAvailable;
-        // The requirement to run is (This torrent's remaining) + (All other ACTIVE downloads)
-        uint64_t const targetSpace = torrent.sizeLeft + [torrent totalTorrentDiskNeeded];
+        NSNumber* const volumeID = torrent.volumeIdentifier;
+        NSInteger const groupValue = torrent.groupValue;
+
+        // The requirement to run is (This torrent's remaining) + (All other ACTIVE downloads on SAME volume)
+        // Note: For now, we budget disk-wide because multiple groups share the same physical space.
+        uint64_t const targetSpace = torrent.sizeLeft + [torrent totalTorrentDiskNeededOnVolume:volumeID group:-1];
 
         if (currentFreeSpace >= targetSpace)
         {
@@ -5924,7 +5934,8 @@ static NSTimeInterval const kLowPriorityDelay = 15.0;
         NSMutableArray<Torrent*>* candidates = [NSMutableArray array];
         for (Torrent* t in self.fTorrents)
         {
-            if (t != torrent && t.groupValue == torrent.groupValue)
+            // Only consider torrents on the SAME volume and in the SAME group
+            if (t != torrent && [t.volumeIdentifier isEqualToNumber:volumeID] && t.groupValue == groupValue)
             {
                 [candidates addObject:t];
             }
@@ -5943,8 +5954,37 @@ static NSTimeInterval const kLowPriorityDelay = 15.0;
             [toDelete addObject:t];
         }
 
-        if (freedPotential < deficit || toDelete.count == 0)
+        if (toDelete.count == 0 || freedPotential < deficit)
         {
+            dispatch_async(dispatch_get_main_queue(), ^{
+                NSAlert* err = [[NSAlert alloc] init];
+                err.messageText = NSLocalizedString(@"Not enough disk space", @"auto-delete error title");
+                {
+                    NSString* neededStr = [NSString stringForFileSize:deficit];
+                    NSString* freedStr = [NSString stringForFileSize:freedPotential];
+                    NSString* groupName = [GroupsController.groups nameForIndex:groupValue];
+                    if (toDelete.count == 0)
+                    {
+                        err.informativeText = [NSString
+                            stringWithFormat:NSLocalizedString(
+                                                 @"Need %@ to add this torrent, but no old torrents in group '%@' can be deleted to free space.",
+                                                 @"auto-delete error size message"),
+                                             neededStr,
+                                             groupName];
+                    }
+                    else
+                    {
+                        err.informativeText = [NSString stringWithFormat:NSLocalizedString(
+                                                                             @"Need %@ to add this torrent, but only %@ could be freed from group '%@'.",
+                                                                             @"auto-delete error size message"),
+                                                                         neededStr,
+                                                                         freedStr,
+                                                                         groupName];
+                    }
+                }
+                [err addButtonWithTitle:NSLocalizedString(@"OK", nil)];
+                [err beginSheetModalForWindow:self.fWindow completionHandler:nil];
+            });
             return;
         }
 
@@ -5994,12 +6034,14 @@ static NSTimeInterval const kLowPriorityDelay = 15.0;
     });
 }
 
-- (void)autoDeleteOldTorrentsInGroup:(NSInteger)groupValue forBytes:(uint64_t)bytesNeeded completion:(void (^)(void))completion
+- (void)autoDeleteOldTorrentsAtPath:(NSString*)path
+                              group:(NSInteger)groupValue
+                           forBytes:(uint64_t)bytesNeeded
+                         completion:(void (^)(void))completion
 {
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
-        // Find a proxy torrent to get disk stats
-        Torrent* proxy = self.fTorrents.firstObject;
-        if (!proxy)
+        NSDictionary* systemAttributes = [NSFileManager.defaultManager attributesOfFileSystemForPath:path error:NULL];
+        if (!systemAttributes)
         {
             dispatch_async(dispatch_get_main_queue(), ^{
                 completion();
@@ -6007,9 +6049,13 @@ static NSTimeInterval const kLowPriorityDelay = 15.0;
             return;
         }
 
-        uint64_t const currentFreeSpace = proxy.diskSpaceAvailable;
-        // Check if new torrent fits alongside currently ACTIVE downloads
-        uint64_t const targetSpace = bytesNeeded + [proxy totalTorrentDiskNeeded];
+        uint64_t const currentFreeSpace = ((NSNumber*)systemAttributes[NSFileSystemFreeSize]).unsignedLongLongValue;
+        NSNumber* const volumeID = systemAttributes[NSFileSystemNumber];
+
+        // Find a proxy torrent to get disk needs on this specific volume
+        // We use any torrent because totalTorrentDiskNeededOnVolume:handles the logic
+        Torrent* proxy = self.fTorrents.firstObject;
+        uint64_t const targetSpace = bytesNeeded + (proxy ? [proxy totalTorrentDiskNeededOnVolume:volumeID group:-1] : 0);
 
         if (currentFreeSpace >= targetSpace)
         {
@@ -6024,7 +6070,8 @@ static NSTimeInterval const kLowPriorityDelay = 15.0;
         NSMutableArray<Torrent*>* candidates = [NSMutableArray array];
         for (Torrent* t in self.fTorrents)
         {
-            if (t.groupValue == groupValue)
+            // Only consider torrents on the SAME volume and in the SAME group
+            if ([t.volumeIdentifier isEqualToNumber:volumeID] && t.groupValue == groupValue)
             {
                 [candidates addObject:t];
             }
@@ -6041,7 +6088,7 @@ static NSTimeInterval const kLowPriorityDelay = 15.0;
             [toDelete addObject:t];
         }
 
-        if (freedPotential < deficit)
+        if (freedPotential < deficit || toDelete.count == 0)
         {
             dispatch_async(dispatch_get_main_queue(), ^{
                 NSAlert* err = [[NSAlert alloc] init];
@@ -6049,10 +6096,25 @@ static NSTimeInterval const kLowPriorityDelay = 15.0;
                 {
                     NSString* neededStr = [NSString stringForFileSize:deficit];
                     NSString* freedStr = [NSString stringForFileSize:freedPotential];
-                    err.informativeText = [NSString
-                        stringWithFormat:NSLocalizedString(@"Need %@ to add this torrent, but only %@ could be freed.", @"auto-delete error size message"),
-                                         neededStr,
-                                         freedStr];
+                    NSString* groupName = [GroupsController.groups nameForIndex:groupValue];
+                    if (toDelete.count == 0)
+                    {
+                        err.informativeText = [NSString
+                            stringWithFormat:NSLocalizedString(
+                                                 @"Need %@ to add this torrent, but no old torrents in group '%@' can be deleted to free space.",
+                                                 @"auto-delete error size message"),
+                                             neededStr,
+                                             groupName];
+                    }
+                    else
+                    {
+                        err.informativeText = [NSString stringWithFormat:NSLocalizedString(
+                                                                             @"Need %@ to add this torrent, but only %@ could be freed from group '%@'.",
+                                                                             @"auto-delete error size message"),
+                                                                         neededStr,
+                                                                         freedStr,
+                                                                         groupName];
+                    }
                 }
                 [err addButtonWithTitle:NSLocalizedString(@"OK", nil)];
                 [err beginSheetModalForWindow:self.fWindow completionHandler:nil];

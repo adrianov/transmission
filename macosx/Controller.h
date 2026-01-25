@@ -184,7 +184,10 @@ typedef NS_ENUM(NSUInteger, AddType) { //
 - (IBAction)linkDonate:(id)sender;
 
 - (void)rpcCallback:(tr_rpc_callback_type)type forTorrentStruct:(struct tr_torrent*)torrentStruct;
-- (void)autoDeleteOldTorrentsInGroup:(NSInteger)groupValue forBytes:(uint64_t)bytesNeeded completion:(void (^)(void))completion;
+- (void)autoDeleteOldTorrentsAtPath:(NSString*)path
+                              group:(NSInteger)groupValue
+                           forBytes:(uint64_t)bytesNeeded
+                         completion:(void (^)(void))completion;
 - (void)handleTorrentPausedForDiskSpace:(Torrent*)torrent;
 
 - (void)rpcAddTorrentStruct:(struct tr_torrent*)torrentStruct;

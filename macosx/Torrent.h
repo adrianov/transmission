@@ -197,8 +197,13 @@ extern NSString* const kTorrentDidChangeGroupNotification;
 @property(nonatomic, readonly) BOOL diskSpaceDialogShown;
 @property(nonatomic) BOOL fDiskSpaceDialogShown;
 
+@property(nonatomic, readonly) NSNumber* volumeIdentifier;
+
 @property(nonatomic, readonly) uint64_t totalTorrentDiskUsage;
 @property(nonatomic, readonly) uint64_t totalTorrentDiskNeeded;
+
+- (uint64_t)totalTorrentDiskUsageOnVolume:(NSNumber*)volumeID;
+- (uint64_t)totalTorrentDiskNeededOnVolume:(NSNumber*)volumeID group:(NSInteger)groupValue;
 
 @property(nonatomic, readonly) NSArray<NSDictionary*>* peers;
 
