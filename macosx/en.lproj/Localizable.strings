@@ -232,6 +232,10 @@
 /* inspector -> peer table -> header tool tip */
 "Available" = "Available";
 
+/* New auto-delete alert strings */
+"Low Disk Space" = "Low Disk Space";
+"To free up space, Transmission will delete these torrents:\n%@" = "To free up space, Transmission will delete these torrents:\n%@";
+
 /* Transfer speed (bytes per second) */
 "B/s" = "B/s";
 

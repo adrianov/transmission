@@ -219,3 +219,4 @@ In short:
  * **PeerSocketTOS:** Number (Default = 0)
  * **RPCHostWhitelist:** String, see `rpc_host_whitelist` above.
  * **RPCUseHostWhitelist:** Boolean, see `rpc_host_whitelist_enabled` above.
+* **AutoDeleteOldTorrentsOnLowDiskSpace:** Boolean (default = true) Automatically delete oldest torrents in same category to free space when adding new torrents.
