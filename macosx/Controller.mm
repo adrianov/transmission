@@ -5889,9 +5889,20 @@ static NSTimeInterval const kLowPriorityDelay = 15.0;
     }
 }
 
-
 - (void)handleTorrentPausedForDiskSpace:(Torrent*)torrent
 {
+    // Recheck disk space - if now available, resume torrent
+    if (torrent.pausedForDiskSpace)
+    {
+        // Force a disk space check (bypass throttle)
+        if ([torrent alertForRemainingDiskSpaceBypassThrottle:YES])
+        {
+            // Disk space is now sufficient, resume
+            [torrent startTransfer];
+            return;
+        }
+    }
+
     if (!torrent.pausedForDiskSpace || torrent.diskSpaceDialogShown)
     {
         return;
@@ -5900,7 +5911,7 @@ static NSTimeInterval const kLowPriorityDelay = 15.0;
 
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
         uint64_t const currentFreeSpace = torrent.diskSpaceAvailable;
-        uint64_t const totalNeededForAll = torrent.totalTorrentDiskNeeded;
+        uint64_t const totalNeededForAll = torrent.totalTorrentDiskUsage;
 
         if (currentFreeSpace >= totalNeededForAll)
         {
@@ -5950,12 +5961,13 @@ static NSTimeInterval const kLowPriorityDelay = 15.0;
 
             NSString* deficitStr = [NSString stringForFileSize:deficit];
             NSString* freedStr = [NSString stringForFileSize:freedPotential];
-            alert.informativeText = [NSString stringWithFormat:NSLocalizedString(
-                                                                   @"Need %@ to add this torrent; will delete these (%@ freed):%@\n\nContinue with deletion?",
-                                                                   @"auto-delete delete confirmation size message"),
-                                                               deficitStr,
-                                                               freedStr,
-                                                               list];
+            alert.informativeText = [NSString
+                stringWithFormat:NSLocalizedString(
+                                     @"Need %@ to add this torrent; will delete these (%@ freed):%@\n\nContinue with deletion?",
+                                     @"auto-delete delete confirmation size message"),
+                                 deficitStr,
+                                 freedStr,
+                                 list];
 
             [alert addButtonWithTitle:NSLocalizedString(@"Delete", nil)];
             [alert addButtonWithTitle:NSLocalizedString(@"Cancel", nil)];
@@ -5985,10 +5997,10 @@ static NSTimeInterval const kLowPriorityDelay = 15.0;
             });
             return;
         }
-        
+
         uint64_t const currentFreeSpace = proxy.diskSpaceAvailable;
-        uint64_t const totalNeededByExisting = proxy.totalTorrentDiskNeeded;
-        uint64_t const totalFutureNeed = totalNeededByExisting + bytesNeeded;
+        uint64_t const totalCurrentUsage = proxy.totalTorrentDiskUsage;
+        uint64_t const totalFutureNeed = totalCurrentUsage + bytesNeeded;
 
         if (currentFreeSpace >= totalFutureNeed)
         {
@@ -6009,7 +6021,7 @@ static NSTimeInterval const kLowPriorityDelay = 15.0;
             }
         }
         [candidates sortUsingDescriptors:@[ [NSSortDescriptor sortDescriptorWithKey:@"dateAdded" ascending:YES] ]];
-        
+
         uint64_t freedPotential = 0;
         NSMutableArray<Torrent*>* toDelete = [NSMutableArray array];
         for (Torrent* t in candidates)
@@ -6019,7 +6031,7 @@ static NSTimeInterval const kLowPriorityDelay = 15.0;
             freedPotential += t.sizeWhenDone;
             [toDelete addObject:t];
         }
-        
+
         if (freedPotential < deficit)
         {
             dispatch_async(dispatch_get_main_queue(), ^{
@@ -6038,7 +6050,7 @@ static NSTimeInterval const kLowPriorityDelay = 15.0;
             });
             return;
         }
-        
+
         if (toDelete.count > 0)
         {
             dispatch_async(dispatch_get_main_queue(), ^{
@@ -6054,12 +6066,13 @@ static NSTimeInterval const kLowPriorityDelay = 15.0;
                 {
                     NSString* deficitStr = [NSString stringForFileSize:deficit];
                     NSString* freedStr = [NSString stringForFileSize:freedPotential];
-                    alert.informativeText = [NSString stringWithFormat:NSLocalizedString(
-                                                                           @"Need %@ to add this torrent; will delete these (%@ freed):%@\n\nContinue with deletion?",
-                                                                           @"auto-delete delete confirmation size message"),
-                                                                       deficitStr,
-                                                                       freedStr,
-                                                                       list];
+                    alert.informativeText = [NSString
+                        stringWithFormat:NSLocalizedString(
+                                             @"Need %@ to add this torrent; will delete these (%@ freed):%@\n\nContinue with deletion?",
+                                             @"auto-delete delete confirmation size message"),
+                                         deficitStr,
+                                         freedStr,
+                                         list];
                 }
                 [alert addButtonWithTitle:NSLocalizedString(@"Delete", nil)];
                 [alert addButtonWithTitle:NSLocalizedString(@"Cancel", nil)];

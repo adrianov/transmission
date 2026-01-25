@@ -90,6 +90,7 @@ extern NSString* const kTorrentDidChangeGroupNotification;
 - (void)copyTorrentFileTo:(NSString*)path;
 
 @property(nonatomic, readonly) BOOL alertForRemainingDiskSpace;
+- (BOOL)alertForRemainingDiskSpaceBypassThrottle:(BOOL)bypass;
 
 @property(nonatomic, readonly) NSImage* icon;
 /// Subtitle for multi-file media torrents (e.g., "x8" for 8 video files). Nil for non-media or single file.
@@ -196,6 +197,7 @@ extern NSString* const kTorrentDidChangeGroupNotification;
 @property(nonatomic, readonly) BOOL diskSpaceDialogShown;
 @property(nonatomic) BOOL fDiskSpaceDialogShown;
 
+@property(nonatomic, readonly) uint64_t totalTorrentDiskUsage;
 @property(nonatomic, readonly) uint64_t totalTorrentDiskNeeded;
 
 @property(nonatomic, readonly) NSArray<NSDictionary*>* peers;
