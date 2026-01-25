@@ -28,6 +28,9 @@ NSString* const kTorrentDidChangeGroupNotification = @"TorrentDidChangeGroup";
 
 static int const kETAIdleDisplaySec = 2 * 60;
 
+// Throttle interval for filesystem free‑space checks (seconds)
+static NSTimeInterval const kDiskSpaceCheckThrottleSeconds = 5.0;
+
 static dispatch_queue_t timeMachineExcludeQueue;
 
 /// Media type for folder torrents
@@ -79,6 +82,7 @@ typedef NS_ENUM(NSInteger, TorrentMediaType) {
 @property(nonatomic) uint64_t fDiskSpaceNeeded;
 @property(nonatomic) uint64_t fDiskSpaceAvailable;
 @property(nonatomic) uint64_t fDiskSpaceTotal;
+@property(nonatomic) NSTimeInterval fLastDiskSpaceCheckTime;
 
 - (void)renameFinished:(BOOL)success
                  nodes:(NSArray<FileListNode*>*)nodes
@@ -2779,10 +2783,20 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
             }
             else if (self.pausedForDiskSpace)
             {
+                // Throttle filesystem query so we don't hammer disk every UI update
+                NSTimeInterval now = [NSDate timeIntervalSinceReferenceDate];
+                if (now - self.fLastDiskSpaceCheckTime > kDiskSpaceCheckThrottleSeconds)
+                {
+                    [self alertForRemainingDiskSpace];
+                    self.fLastDiskSpaceCheckTime = now;
+                }
+
+                NSString* usedString = [NSString stringForFileSizeOneDecimal:(self.diskSpaceTotal - self.diskSpaceAvailable)];
                 NSString* neededString = [NSString stringForFileSizeOneDecimal:self.diskSpaceNeeded];
                 NSString* availableString = [NSString stringForFileSizeOneDecimal:self.diskSpaceAvailable];
                 NSString* totalString = [NSString stringForFileSizeOneDecimal:self.diskSpaceTotal];
-                string = [NSString stringWithFormat:NSLocalizedString(@"Not enough disk space. Need %@, Available %@ of %@", "Torrent -> status string"),
+                string = [NSString stringWithFormat:NSLocalizedString(@"Not enough disk space. Used %@, Need %@, Available %@ of %@", "Torrent -> status string"),
+                                                    usedString,
                                                     neededString,
                                                     availableString,
                                                     totalString];
