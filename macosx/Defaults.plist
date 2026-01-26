@@ -158,6 +158,8 @@
 	<true/>
 	<key>SmallView</key>
 	<false/>
+	<key>ShowContentButtons</key>
+	<true/>
 	<key>Sort</key>
 	<string>Date</string>
 	<key>SortByGroup</key>

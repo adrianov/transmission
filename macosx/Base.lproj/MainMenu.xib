@@ -765,6 +765,12 @@
                                     <action selector="toggleAvailabilityBar:" target="206" id="2280"/>
                                 </connections>
                             </menuItem>
+                            <menuItem title="Content Buttons" secondaryImage="play.rectangle" catalog="system" id="2281">
+                                <modifierMask key="keyEquivalentModifierMask"/>
+                                <connections>
+                                    <action selector="toggleShowContentButtons:" target="206" id="2282"/>
+                                </connections>
+                            </menuItem>
                             <menuItem isSeparatorItem="YES" id="1282">
                                 <modifierMask key="keyEquivalentModifierMask" command="YES"/>
                             </menuItem>

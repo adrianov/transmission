@@ -281,8 +281,8 @@ static CGFloat const kPlayButtonVerticalPadding = 4.0;
         Torrent* torrent = (Torrent*)item;
         CGFloat height = self.rowHeight;
 
-        // Adjust height for play buttons if present
-        if (!self.fSmallView && torrent.cachedPlayButtonsHeight > height)
+        // Adjust height for play buttons if present and enabled
+        if (!self.fSmallView && [self.fDefaults boolForKey:@"ShowContentButtons"] && torrent.cachedPlayButtonsHeight > height)
         {
             height = torrent.cachedPlayButtonsHeight;
         }
@@ -704,7 +704,7 @@ static CGFloat const kPlayButtonVerticalPadding = 4.0;
 
         if ([type isEqualToString:@"document-books"] || [category isEqualToString:@"books"])
         {
-            symbolName = @"book";
+            symbolName = @"books.vertical";  // Many books for document collections
         }
         else if ([type isEqualToString:@"album"])
         {
@@ -1574,6 +1574,20 @@ static NSString* folderForPlayButton(NSButton* sender, Torrent* torrent)
 
 - (void)configurePlayButtonsForCell:(TorrentCell*)cell torrent:(Torrent*)torrent
 {
+    // Check if content buttons should be shown
+    if (![self.fDefaults boolForKey:@"ShowContentButtons"])
+    {
+        // Remove existing buttons if hidden
+        if (cell.fPlayButtonsView)
+        {
+            [cell.fPlayButtonsView removeFromSuperview];
+            cell.fPlayButtonsView = nil;
+            cell.fPlayButtonsSourceFiles = nil;
+            cell.fPlayButtonsHeightConstraint = nil;
+        }
+        return;
+    }
+
     NSArray<NSDictionary*>* playButtonState = [self playButtonStateForTorrent:torrent];
     NSArray<NSDictionary*>* playButtonLayout = [self playButtonLayoutForTorrent:torrent state:playButtonState];
 

@@ -4389,6 +4389,13 @@ static NSTimeInterval const kLowPriorityDelay = 15.0;
     [self.fTableView display];
 }
 
+- (void)toggleShowContentButtons:(id)sender
+{
+    [self.fDefaults setBool:![self.fDefaults boolForKey:@"ShowContentButtons"] forKey:@"ShowContentButtons"];
+    [self.fTableView reloadData];
+    [self updateForAutoSize];
+}
+
 - (void)toggleStatusBar:(id)sender
 {
     BOOL const show = self.fStatusBar == nil || self.fStatusBar.isHidden;
@@ -5068,6 +5075,12 @@ static NSTimeInterval const kLowPriorityDelay = 15.0;
     if (action == @selector(toggleAvailabilityBar:))
     {
         menuItem.state = [self.fDefaults boolForKey:@"DisplayProgressBarAvailable"] ? NSControlStateValueOn : NSControlStateValueOff;
+        return self.fWindow.visible;
+    }
+
+    if (action == @selector(toggleShowContentButtons:))
+    {
+        menuItem.state = [self.fDefaults boolForKey:@"ShowContentButtons"] ? NSControlStateValueOn : NSControlStateValueOff;
         return self.fWindow.visible;
     }
 

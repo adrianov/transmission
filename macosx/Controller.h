@@ -153,6 +153,7 @@ typedef NS_ENUM(NSUInteger, AddType) { //
 - (IBAction)toggleSmallView:(id)sender;
 - (IBAction)togglePiecesBar:(id)sender;
 - (IBAction)toggleAvailabilityBar:(id)sender;
+- (IBAction)toggleShowContentButtons:(id)sender;
 
 - (IBAction)toggleStatusBar:(id)sender;
 - (IBAction)toggleFilterBar:(id)sender;
