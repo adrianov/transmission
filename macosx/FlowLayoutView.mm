@@ -82,6 +82,14 @@
         return cached.sizeValue;
 
     NSSize size = view.fittingSize;
+    if ([view isKindOfClass:[NSButton class]])
+    {
+        // Use cellSize for buttons to ensure we get the full width including image and title
+        NSButton* button = (NSButton*)view;
+        size = [button.cell cellSizeForBounds:NSMakeRect(0, 0, 10000, 10000)];
+        size.width += 6; // Add minimal padding for the recessed bezel
+    }
+
     if (size.width <= 0)
         size.width = 60;
     if (size.height <= 0)
