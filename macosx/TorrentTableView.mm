@@ -701,7 +701,7 @@ static CGFloat const kPlayButtonVerticalPadding = 4.0;
         NSString* type = fileItem[@"type"] ?: @"file";
         NSString* category = fileItem[@"category"];
         NSString* symbolName = nil;
-        
+
         if ([type isEqualToString:@"document-books"] || [category isEqualToString:@"books"])
         {
             symbolName = @"book";
@@ -712,13 +712,13 @@ static CGFloat const kPlayButtonVerticalPadding = 4.0;
         }
         else if ([type isEqualToString:@"track"] || [category isEqualToString:@"audio"])
         {
-            symbolName = @"music.note";       // Single note for tracks/audio
+            symbolName = @"music.note";  // Single note for tracks/audio
         }
         else if ([type isEqualToString:@"dvd"] || [type isEqualToString:@"bluray"] || [category isEqualToString:@"video"])
         {
-            symbolName = @"play.fill";        // Triangle for video
+            symbolName = @"play";  // Smaller technical triangle for video
         }
-        
+
         if (symbolName)
         {
             return [NSImage imageWithSystemSymbolName:symbolName accessibilityDescription:nil];
@@ -841,7 +841,6 @@ static CGFloat const kPlayButtonVerticalPadding = 4.0;
             NSString* name = fileItem[@"name"] ?: @"";
             CGFloat progress = [fileItem[@"progress"] doubleValue];
             
-            // Construct title without emoji for menu
             NSString* menuTitle = name;
             if (progress > 0 && progress < 1.0)
             {
@@ -861,7 +860,7 @@ static CGFloat const kPlayButtonVerticalPadding = 4.0;
                     albumItem.image = [self iconForPlayableFileItem:fileItem];
                     NSMenu* albumMenu = [[NSMenu alloc] initWithTitle:menuTitle];
                     albumItem.submenu = albumMenu;
-                    
+
                     // Add individual tracks to submenu
                     for (NSDictionary* track in tracks)
                     {
@@ -891,10 +890,9 @@ static CGFloat const kPlayButtonVerticalPadding = 4.0;
             NSMenuItem* menuItem = [[NSMenuItem alloc] initWithTitle:menuTitle action:@selector(playContextItem:) keyEquivalent:@""];
             menuItem.target = self;
             menuItem.representedObject = @{ @"torrent" : torrent, @"item" : fileItem };
-            
-            // Assign icon based on file type
+
             menuItem.image = [self iconForPlayableFileItem:fileItem];
-            
+
             [currentMenu addItem:menuItem];
         }
     }
@@ -936,8 +934,8 @@ static CGFloat const kPlayButtonVerticalPadding = 4.0;
     NSImage* icon = nil;
     if (@available(macOS 11.0, *))
     {
-        // Use double note for audio (albums), book for documents, play for video
-        icon = [NSImage imageWithSystemSymbolName:(isBooks ? @"book" : (isAudio ? @"music.note.list" : @"play.fill")) accessibilityDescription:nil];
+        // Use double note for audio (albums), book for documents, smaller play triangle for video
+        icon = [NSImage imageWithSystemSymbolName:(isBooks ? @"book" : (isAudio ? @"music.note.list" : @"play")) accessibilityDescription:nil];
     }
 
     if (playMenu.numberOfItems == 1 && !playMenu.itemArray[0].hasSubmenu)
