@@ -27,6 +27,11 @@
 {
     if (self = [super initWithFrame:frameRect])
     {
+        self.translatesAutoresizingMaskIntoConstraints = NO;  // Required for Auto Layout
+        self.wantsLayer = YES;
+        self.layerContentsRedrawPolicy = NSViewLayerContentsRedrawOnSetNeedsDisplay;
+        self.canDrawConcurrently = YES;
+
         _arrangedSubviews = [NSMutableArray array];
         _cachedSizes = [NSMapTable weakToStrongObjectsMapTable];
         _horizontalSpacing = 6;
@@ -46,22 +51,65 @@
     [self addSubview:view];
     _visibleCacheValid = NO;
     _layoutDirty = YES;
+    // Don't trigger layout for each view - let caller batch updates
+}
+
+- (void)addArrangedSubviewBatched:(NSView*)view
+{
+    [_arrangedSubviews addObject:view];
+    [self addSubview:view];
+    // No cache invalidation - caller will call finishBatchUpdates
+}
+
+- (void)finishBatchUpdates
+{
+    _visibleCacheValid = NO;
+    _layoutDirty = YES;
     [self setNeedsLayout:YES];
 }
 
 - (void)addLineBreak
 {
     FlowLineBreak* br = [[FlowLineBreak alloc] init];
+    br.wantsLayer = YES;
     [_arrangedSubviews addObject:br];
     [self addSubview:br];
     _visibleCacheValid = NO;
     _layoutDirty = YES;
-    [self setNeedsLayout:YES];
+    // Don't trigger layout for each view - let caller batch updates
+}
+
+- (void)addLineBreakBatched
+{
+    FlowLineBreak* br = [[FlowLineBreak alloc] init];
+    br.wantsLayer = YES;
+    [_arrangedSubviews addObject:br];
+    [self addSubview:br];
+    // No cache invalidation - caller will call finishBatchUpdates
 }
 
 - (NSArray<NSView*>*)arrangedSubviews
 {
     return [_arrangedSubviews copy];
+}
+
+- (void)removeAllArrangedSubviews
+{
+    if (_arrangedSubviews.count == 0)
+        return;
+
+    for (NSView* view in _arrangedSubviews)
+    {
+        [view removeFromSuperview];
+    }
+    [_arrangedSubviews removeAllObjects];
+    [_cachedSizes removeAllObjects];
+    _visibleCacheValid = NO;
+    _layoutDirty = YES;
+    _lastLayoutWidth = 0;
+    _lastLayoutHeight = 0;
+    [self invalidateIntrinsicContentSize];
+    [self setNeedsLayout:YES];
 }
 
 - (BOOL)isFlipped
@@ -81,23 +129,24 @@
     if (cached)
         return cached.sizeValue;
 
-    NSSize size = view.fittingSize;
+    NSSize size;
     if ([view isKindOfClass:[NSButton class]])
     {
-        // Use cellSize for buttons to ensure we get the full width including image and title
-        NSButton* button = (NSButton*)view;
-        size = [button.cell cellSizeForBounds:NSMakeRect(0, 0, 10000, 10000)];
-        size.width += 6; // Add minimal padding for the recessed bezel
+        // For buttons, use intrinsicContentSize + fixed padding to avoid expensive cellSizeForBounds
+        size = view.intrinsicContentSize;
+        size.width += 10; // Padding for recessed style
+        if (size.width < _minimumButtonWidth)
+            size.width = _minimumButtonWidth;
+    }
+    else
+    {
+        size = view.fittingSize;
     }
 
     if (size.width <= 0)
         size.width = 60;
     if (size.height <= 0)
         size.height = 18;
-
-    // Apply minimum width for buttons
-    if ([view isKindOfClass:[NSButton class]] && size.width < _minimumButtonWidth)
-        size.width = _minimumButtonWidth;
 
     [_cachedSizes setObject:[NSValue valueWithSize:size] forKey:view];
     return size;

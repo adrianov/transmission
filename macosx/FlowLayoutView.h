@@ -14,11 +14,17 @@
 @property(nonatomic) CGFloat minimumButtonWidth;
 
 - (void)addArrangedSubview:(NSView*)view;
+- (void)addArrangedSubviewBatched:(NSView*)view;
 - (void)addLineBreak;
+- (void)addLineBreakBatched;
+- (void)finishBatchUpdates;
 - (NSArray<NSView*>*)arrangedSubviews;
 
 /// Returns height for given width. Uses cached sizes for subviews.
 - (CGFloat)heightForWidth:(CGFloat)width;
+
+/// Removes all arranged subviews efficiently.
+- (void)removeAllArrangedSubviews;
 
 /// Clears cached size for a specific view (call when view content changes)
 - (void)invalidateSizeForView:(NSView*)view;
