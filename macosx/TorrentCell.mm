@@ -14,21 +14,11 @@
 - (void)awakeFromNib
 {
     [super awakeFromNib];
-    // 1. Enable layers for GPU-accelerated scrolling
-    self.wantsLayer = YES;
-    // 2. Flatten subviews to reduce layer count (improves FPS)
-    self.canDrawSubviewsIntoLayer = YES;
 }
 
 - (BOOL)wantsUpdateLayer
 {
-    return YES;
-}
-
-- (void)updateLayer
-{
-    // Background styling: keep clear so the table view controls row backgrounds.
-    self.layer.backgroundColor = NSColor.clearColor.CGColor;
+    return NO;
 }
 
 - (void)drawRect:(NSRect)dirtyRect
@@ -39,39 +29,35 @@
 
         // draw progress bar - use cached image when possible
         NSRect barRect = self.fTorrentProgressBarView.frame;
-
-        // Create cache key based on torrent state that affects progress bar appearance
-        NSString* cacheKey = [NSString stringWithFormat:@"%@_%f_%d_%d_%f_%f_%d_%f_%d",
-                                                        torrent.hashString,
-                                                        torrent.progress,
-                                                        torrent.active,
-                                                        torrent.checking,
-                                                        torrent.progressLeft,
-                                                        torrent.availableDesired,
-                                                        torrent.seeding,
-                                                        torrent.progressStopRatio,
-                                                        torrent.allDownloaded];
-
-        // Check if we need to regenerate the progress bar image
-        if (!self.fCachedProgressBarImage || ![self.fProgressBarCacheKey isEqualToString:cacheKey])
+        if (barRect.size.width > 0 && barRect.size.height > 0)
         {
-            // Generate new progress bar image
-            NSImage* progressImage = [[NSImage alloc] initWithSize:barRect.size];
-            [progressImage lockFocus];
+            // Create cache key based on torrent state that affects progress bar appearance
+            NSString* cacheKey = [NSString stringWithFormat:@"%@_%f_%d_%d_%f_%f_%d_%f_%d",
+                                                            torrent.hashString,
+                                                            torrent.progress,
+                                                            torrent.active,
+                                                            torrent.checking,
+                                                            torrent.progressLeft,
+                                                            torrent.availableDesired,
+                                                            torrent.seeding,
+                                                            torrent.progressStopRatio,
+                                                            torrent.allDownloaded];
 
-            ProgressBarView* progressBar = [[ProgressBarView alloc] init];
-            NSRect imageRect = NSMakeRect(0, 0, barRect.size.width, barRect.size.height);
-            [progressBar drawBarInRect:imageRect forTableView:self.fTorrentTableView withTorrent:torrent];
+            // Check if we need to regenerate the progress bar image
+            if (!self.fCachedProgressBarImage || ![self.fProgressBarCacheKey isEqualToString:cacheKey] || !NSEqualSizes(self.fCachedProgressBarImage.size, barRect.size))
+            {
+                self.fCachedProgressBarImage = [NSImage imageWithSize:barRect.size flipped:NO drawingHandler:^BOOL(NSRect dstRect) {
+                    ProgressBarView* progressBar = [[ProgressBarView alloc] init];
+                    [progressBar drawBarInRect:dstRect forTableView:self.fTorrentTableView withTorrent:torrent];
+                    return YES;
+                }];
+                self.fProgressBarCacheKey = cacheKey;
+            }
 
-            [progressImage unlockFocus];
-
-            self.fCachedProgressBarImage = progressImage;
-            self.fProgressBarCacheKey = cacheKey;
+            // Draw cached progress bar image
+            [self.fCachedProgressBarImage drawInRect:barRect fromRect:NSZeroRect operation:NSCompositingOperationSourceOver
+                                            fraction:1.0];
         }
-
-        // Draw cached progress bar image
-        [self.fCachedProgressBarImage drawInRect:barRect fromRect:NSZeroRect operation:NSCompositingOperationSourceOver
-                                        fraction:1.0];
 
         // set priority icon
         if (torrent.priority != TR_PRI_NORMAL)
