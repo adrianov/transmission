@@ -132,6 +132,7 @@ npm run lint:fix          # Fix
 ### General Guidelines
 
 - Follow C++ Core Guidelines: https://isocpp.github.io/CppCoreGuidelines/CppCoreGuidelines
+- Before starting a task, search the `docs/` directory for relevant documentation. This often provides critical context on existing features and implementation rules (e.g., `Human-Friendly-Titles.md`).
 - Fix all warnings before merging code
 - Address compiler warnings that occur during the build process immediately, even if they don't prevent compilation
 - Use standard library containers (`std::vector`, `std::map`) over custom implementations

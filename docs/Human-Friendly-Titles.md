@@ -90,7 +90,8 @@ The following technical tags are filtered out:
 **Video Sources:**
 - `WEB-DL`, `WEBDL`, `WEBRip`, `BDRip`, `BluRay`, `HDRip`, `DVDRip`, `HDTV`
 - Any `[Source]-?Rip` variants (e.g., `WEB-Rip`, `DLRip`) are removed via regex.
-- Any `[Source]HD` variants (e.g., `EniaHD`, `playHD`) are removed via regex.
+- Any `[Source]HD` variants (e.g., `EniaHD`, `playHD`, `HDCLUB`) are removed via regex.
+- Any `[Source]-?SbR` variants (e.g., `SbR`, `-SbR`) are removed via regex.
 
 **Video Codecs:**
 - `HEVC`, `H264`, `H.264`, `H265`, `H.265`, `x264`, `x265`, `AVC`, `10bit`
@@ -102,10 +103,10 @@ The following technical tags are filtered out:
 - `SDR`, `HDR`, `HDR10`, `DV`, `DoVi`
 
 **Streaming Sources:**
-- `AMZN`, `NF`, `DSNP`, `HMAX`, `PCOK`, `ATVP`, `APTV`, `EniaHD`
+- `AMZN`, `NF`, `DSNP`, `HMAX`, `PCOK`, `ATVP`, `APTV`, `EniaHD`, `HDCLUB`
 
 **Release Info:**
-- `ExKinoRay`, `RuTracker`, `LostFilm`, `MP4`, `IMAX`, `REPACK`, `PROPER`, `EXTENDED`, `UNRATED`, `REMUX`
+- `ExKinoRay`, `RuTracker`, `LostFilm`, `MP4`, `IMAX`, `REPACK`, `PROPER`, `EXTENDED`, `UNRATED`, `REMUX`, `HDCLUB`, `Jaskier`, `MVO`
 
 **VR/3D Format Tags:**
 - `180`, `360`, `180x180`, `3dh`, `3dv`, `LR`, `TB`, `SBS`, `OU`
