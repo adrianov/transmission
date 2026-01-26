@@ -2705,6 +2705,8 @@ static NSTimeInterval const kLowPriorityDelay = 15.0;
                 [self.fTableView reloadVisibleRows];
             }
 
+            [self updateSearchPlaceholder];
+
             //badge dock
             [self.fBadger updateBadgeWithDownload:dlRate upload:ulRate];
 
@@ -3258,7 +3260,7 @@ static NSTimeInterval const kLowPriorityDelay = 15.0;
     NSInteger const groupFilterValue = [self.fDefaults integerForKey:@"FilterGroup"];
     BOOL const filterGroup = groupFilterValue != kGroupFilterAllTag;
 
-    NSArray<NSString*>* searchStrings = self.fFilterBar.searchStrings;
+    NSArray<NSString*>* searchStrings = [self.fToolbarSearchField.stringValue nonEmptyComponentsSeparatedByCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
     if (searchStrings && searchStrings.count == 0)
     {
         searchStrings = nil;
@@ -4415,11 +4417,14 @@ static NSTimeInterval const kLowPriorityDelay = 15.0;
 
 - (void)focusFilterField
 {
-    if (self.fFilterBar == nil || self.fFilterBar.isHidden)
+    if (self.fFilterBar && !self.fFilterBar.hidden)
     {
-        [self toggleFilterBar:self];
+        [self.fWindow makeFirstResponder:self.fFilterBar.fSearchField];
     }
-    [self.fFilterBar focusSearchField];
+    else
+    {
+        [self.fWindow makeFirstResponder:self.fToolbarSearchField];
+    }
 }
 
 - (BOOL)acceptsPreviewPanelControl:(QLPreviewPanel*)panel
@@ -4791,12 +4796,14 @@ static NSTimeInterval const kLowPriorityDelay = 15.0;
     else if ([ident isEqualToString:ToolbarItemIdentifierSearch])
     {
         NSSearchToolbarItem* item = [[NSSearchToolbarItem alloc] initWithItemIdentifier:ident];
-        item.searchField.placeholderString = NSLocalizedString(@"Search torrents...", "Search toolbar item -> placeholder");
-        item.searchField.delegate = self;
-        self.fToolbarSearchField = item.searchField;
+
+        NSSearchField* searchField = item.searchField;
+        searchField.placeholderString = NSLocalizedString(@"Search on the rutracker.org...", "Search toolbar item -> placeholder");
+        searchField.delegate = self;
+        self.fToolbarSearchField = searchField;
+
         item.label = NSLocalizedString(@"Search", "Search toolbar item -> label");
-        item.paletteLabel = NSLocalizedString(@"Search Torrents", "Search toolbar item -> palette label");
-        item.toolTip = NSLocalizedString(@"Search for torrents on the internet", "Search toolbar item -> tooltip");
+        item.preferredWidthForSearchField = 240;
 
         return item;
     }
@@ -4863,10 +4870,10 @@ static NSTimeInterval const kLowPriorityDelay = 15.0;
         ToolbarItemIdentifierOpenFile,
         ToolbarItemIdentifierRemove,
         ToolbarItemIdentifierRemoveTrash,
-        NSToolbarSpaceItemIdentifier,
-        ToolbarItemIdentifierPauseResumeAll,
         NSToolbarFlexibleSpaceItemIdentifier,
         ToolbarItemIdentifierSearch,
+        NSToolbarFlexibleSpaceItemIdentifier,
+        ToolbarItemIdentifierPauseResumeAll,
         ToolbarItemIdentifierShare,
         ToolbarItemIdentifierQuickLook,
         ToolbarItemIdentifierFilter,
@@ -5133,7 +5140,10 @@ static NSTimeInterval const kLowPriorityDelay = 15.0;
     {
         BOOL warning = NO;
 
-        if (self.fFilterBar.isFocused == YES)
+        BOOL const isSearchFocused = [self.fWindow.firstResponder isKindOfClass:NSTextView.class] &&
+            [self.fWindow fieldEditor:NO forObject:nil] != nil && [self.fToolbarSearchField isEqual:((NSTextView*)self.fWindow.firstResponder).delegate];
+
+        if (isSearchFocused)
         {
             return NO;
         }
@@ -5761,11 +5771,6 @@ static NSTimeInterval const kLowPriorityDelay = 15.0;
     NSSearchField* searchField = notification.object;
     if ([searchField isKindOfClass:[NSSearchField class]])
     {
-        if (searchField == self.fToolbarSearchField)
-        {
-            [self.fFilterBar updateSearchText:searchField.stringValue];
-        }
-
         // Check if the user pressed Enter (Return key)
         NSNumber* textMovement = notification.userInfo[@"NSTextMovement"];
         if (textMovement.integerValue == NSReturnTextMovement)
@@ -5774,7 +5779,8 @@ static NSTimeInterval const kLowPriorityDelay = 15.0;
             if (query.length > 0)
             {
                 [self searchTorrentsWithQuery:query];
-                [self resetSearchFilterIfNeededForSearchField:searchField];
+                [self resetSearchFilterIfNeededForSearchField:self.fToolbarSearchField];
+                [self resetSearchFilterIfNeededForSearchField:self.fFilterBar.fSearchField];
             }
         }
     }
@@ -5782,7 +5788,7 @@ static NSTimeInterval const kLowPriorityDelay = 15.0;
 
 - (void)resetSearchFilterIfNeededForSearchField:(NSSearchField*)searchField
 {
-    if (searchField != self.fToolbarSearchField || searchField.stringValue.length == 0)
+    if (searchField.stringValue.length == 0)
     {
         return;
     }
@@ -5792,16 +5798,97 @@ static NSTimeInterval const kLowPriorityDelay = 15.0;
         return;
     }
 
-    searchField.stringValue = @"";
-    [self.fFilterBar updateSearchText:@""];
+    self.fToolbarSearchField.stringValue = @"";
+    self.fFilterBar.fSearchField.stringValue = @"";
+    [self applyFilter];
 }
 
 - (void)controlTextDidChange:(NSNotification*)notification
 {
     NSSearchField* searchField = notification.object;
-    if ([searchField isKindOfClass:[NSSearchField class]] && searchField == self.fToolbarSearchField)
+    if ([searchField isKindOfClass:[NSSearchField class]])
     {
-        [self.fFilterBar updateSearchText:searchField.stringValue];
+        if (searchField == self.fToolbarSearchField)
+        {
+            self.fFilterBar.fSearchField.stringValue = searchField.stringValue;
+        }
+        else if (searchField == self.fFilterBar.fSearchField)
+        {
+            self.fToolbarSearchField.stringValue = searchField.stringValue;
+        }
+
+        [self applyFilter];
+    }
+}
+
+- (void)updateSearchPlaceholder
+{
+    // Search for supported trackers (domain substring)
+    NSMutableSet<NSString*>* searchDomains = [NSMutableSet setWithArray:@[ @"rutracker.org", @"kinozal.tv", @"nnmclub.to" ]];
+
+    // Detect tracker links in comments: viewtopic.php or details.php
+    NSError* error = nil;
+    NSRegularExpression* regex = [NSRegularExpression regularExpressionWithPattern:@"(https?://[^/]+/).*(viewtopic|details|browse)\\.php"
+                                                                           options:NSRegularExpressionCaseInsensitive
+                                                                              error:&error];
+
+    // Count torrents per tracker domain found in comments
+    NSCountedSet<NSString*>* domainCounts = [[NSCountedSet alloc] init];
+    for (Torrent* torrent in self.fTorrents)
+    {
+        NSString* comment = torrent.comment;
+        if (comment.length == 0)
+        {
+            continue;
+        }
+
+        NSMutableSet<NSString*>* foundInThisTorrent = [NSMutableSet set];
+
+        // Check for specific known domains
+        for (NSString* domain in searchDomains)
+        {
+            if ([comment rangeOfString:domain options:NSCaseInsensitiveSearch].location != NSNotFound)
+            {
+                [foundInThisTorrent addObject:domain];
+            }
+        }
+
+        // Discover and count dynamic domains
+        [regex enumerateMatchesInString:comment options:0 range:NSMakeRange(0, comment.length)
+                             usingBlock:^(NSTextCheckingResult* result, NSMatchingFlags /*flags*/, BOOL* /*stop*/) {
+                                 NSString* baseUrl = [comment substringWithRange:[result rangeAtIndex:1]];
+                                 NSURL* url = [NSURL URLWithString:baseUrl];
+                                 NSString* domain = url.host.lowercaseString;
+                                 if (domain)
+                                 {
+                                     [foundInThisTorrent addObject:domain];
+                                 }
+                             }];
+
+        for (NSString* domain in foundInThisTorrent)
+        {
+            [domainCounts addObject:domain];
+        }
+    }
+
+    NSString* topDomain = @"rutracker.org"; // Default
+    if (domainCounts.count > 0)
+    {
+        // Sort domains by count descending
+        NSArray<NSString*>* sortedDomains = [domainCounts.allObjects sortedArrayUsingComparator:^NSComparisonResult(NSString* a, NSString* b) {
+            return [@([domainCounts countForObject:b]) compare:@([domainCounts countForObject:a])];
+        }];
+        topDomain = sortedDomains[0];
+    }
+
+    NSString* placeholder = [NSString stringWithFormat:NSLocalizedString(@"Search on %@...", "Search toolbar item -> placeholder"), topDomain];
+    if (![self.fToolbarSearchField.placeholderString isEqualToString:placeholder])
+    {
+        self.fToolbarSearchField.placeholderString = placeholder;
+    }
+    if (![self.fFilterBar.fSearchField.placeholderString isEqualToString:placeholder])
+    {
+        self.fFilterBar.fSearchField.placeholderString = placeholder;
     }
 }
 

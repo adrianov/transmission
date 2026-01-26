@@ -22,19 +22,14 @@ extern NSInteger const kGroupFilterAllTag;
 
 @interface FilterBarController : NSTitlebarAccessoryViewController<NSMenuItemValidation>
 
-@property(nonatomic, readonly) NSArray<NSString*>* searchStrings;
+@property(nonatomic, readonly) IBOutlet NSSearchField* fSearchField;
 
 - (instancetype)init;
 
 - (IBAction)setFilter:(id)sender;
 - (void)switchFilter:(BOOL)right;
-- (IBAction)setSearchText:(id)sender;
-- (IBAction)setSearchType:(id)sender;
 - (IBAction)setGroupFilter:(id)sender;
-- (void)updateSearchText:(NSString*)searchText;
 - (void)reset;
-- (void)focusSearchField;
-- (BOOL)isFocused;
 
 - (void)setCountAll:(NSUInteger)all
              active:(NSUInteger)active

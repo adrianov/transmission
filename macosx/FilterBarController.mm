@@ -19,12 +19,7 @@ FilterSearchType const FilterSearchTypeTracker = @"Tracker";
 
 NSInteger const kGroupFilterAllTag = -2;
 
-typedef NS_ENUM(NSInteger, FilterTypeTag) {
-    FilterTypeTagName = 401,
-    FilterTypeTagTracker = 402,
-};
-
-@interface FilterBarController ()<NSSearchFieldDelegate>
+@interface FilterBarController ()
 
 @property(nonatomic) IBOutlet FilterButton* fNoFilterButton;
 @property(nonatomic) IBOutlet FilterButton* fActiveFilterButton;
@@ -33,10 +28,8 @@ typedef NS_ENUM(NSInteger, FilterTypeTag) {
 @property(nonatomic) IBOutlet FilterButton* fPauseFilterButton;
 @property(nonatomic) IBOutlet FilterButton* fErrorFilterButton;
 
-@property(nonatomic) IBOutlet NSSearchField* fSearchField;
-@property(nonatomic) IBOutlet NSLayoutConstraint* fSearchFieldMinWidthConstraint;
-
 @property(nonatomic) IBOutlet NSPopUpButton* fGroupsButton;
+@property(nonatomic) IBOutlet NSSearchField* fSearchField;
 
 @end
 
@@ -67,10 +60,27 @@ typedef NS_ENUM(NSInteger, FilterTypeTag) {
     self.fPauseFilterButton.cell.backgroundStyle = NSBackgroundStyleRaised;
     self.fErrorFilterButton.cell.backgroundStyle = NSBackgroundStyleRaised;
 
-    [self.fSearchField.searchMenuTemplate itemWithTag:FilterTypeTagName].title = NSLocalizedString(@"Name", "Filter Bar -> filter menu");
-    [self.fSearchField.searchMenuTemplate itemWithTag:FilterTypeTagTracker].title = NSLocalizedString(@"Tracker", "Filter Bar -> filter menu");
-
     [self.fGroupsButton.menu itemWithTag:kGroupFilterAllTag].title = NSLocalizedString(@"All Groups", "Filter Bar -> group filter menu");
+
+    self.fSearchField.placeholderString = NSLocalizedString(@"Search on the rutracker.org...", "Filter Bar -> search field");
+
+    //localize search menu
+    NSMenuItem* nameItem = [self.fSearchField.searchMenuTemplate itemWithTag:0];
+    NSMenuItem* trackerItem = [self.fSearchField.searchMenuTemplate itemWithTag:1];
+    
+    nameItem.title = NSLocalizedString(@"Name", "Filter Bar -> search filter");
+    trackerItem.title = NSLocalizedString(@"Tracker", "Filter Bar -> search filter");
+
+    //set current search type
+    NSString* searchType = [NSUserDefaults.standardUserDefaults stringForKey:@"FilterSearchType"];
+    if ([searchType isEqualToString:FilterSearchTypeTracker])
+    {
+        trackerItem.state = NSControlStateValueOn;
+    }
+    else
+    {
+        nameItem.state = NSControlStateValueOn;
+    }
 
     //set current filter
     NSString* filterType = [NSUserDefaults.standardUserDefaults stringForKey:@"Filter"];
@@ -107,39 +117,24 @@ typedef NS_ENUM(NSInteger, FilterTypeTag) {
     }
     currentFilterButton.state = NSControlStateValueOn;
 
-    //set filter search type
-    NSString* filterSearchType = [NSUserDefaults.standardUserDefaults stringForKey:@"FilterSearchType"];
-
-    NSMenu* filterSearchMenu = self.fSearchField.searchMenuTemplate;
-    NSString* filterSearchTypeTitle;
-    if ([filterSearchType isEqualToString:FilterSearchTypeTracker])
-    {
-        filterSearchTypeTitle = [filterSearchMenu itemWithTag:FilterTypeTagTracker].title;
-    }
-    else
-    {
-        //safety
-        if (![filterType isEqualToString:FilterSearchTypeName])
-        {
-            [NSUserDefaults.standardUserDefaults setObject:FilterSearchTypeName forKey:@"FilterSearchType"];
-        }
-        filterSearchTypeTitle = [filterSearchMenu itemWithTag:FilterTypeTagName].title;
-    }
-    self.fSearchField.placeholderString = filterSearchTypeTitle;
-
-    NSString* searchString;
-    if ((searchString = [NSUserDefaults.standardUserDefaults stringForKey:@"FilterSearchString"]))
-    {
-        self.fSearchField.stringValue = searchString;
-    }
-
     [self updateGroupsButton];
 
     // update when groups change
     [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(updateGroups:) name:@"UpdateGroups" object:nil];
+}
 
-    // update when filter change
-    self.fSearchField.delegate = self;
+- (void)setSearchType:(id)sender
+{
+    FilterSearchType const searchType = [sender tag] == 1 ? FilterSearchTypeTracker : FilterSearchTypeName;
+    [NSUserDefaults.standardUserDefaults setObject:searchType forKey:@"FilterSearchType"];
+
+    NSMenuItem* nameItem = [self.fSearchField.searchMenuTemplate itemWithTag:0];
+    NSMenuItem* trackerItem = [self.fSearchField.searchMenuTemplate itemWithTag:1];
+
+    nameItem.state = [searchType isEqualToString:FilterSearchTypeName] ? NSControlStateValueOn : NSControlStateValueOff;
+    trackerItem.state = [searchType isEqualToString:FilterSearchTypeTracker] ? NSControlStateValueOn : NSControlStateValueOff;
+
+    [NSNotificationCenter.defaultCenter postNotificationName:@"ApplyFilter" object:nil];
 }
 
 - (void)setFilter:(id)sender
@@ -250,78 +245,6 @@ typedef NS_ENUM(NSInteger, FilterTypeTag) {
     [self setFilter:button];
 }
 
-- (void)setSearchText:(id)sender
-{
-    [NSUserDefaults.standardUserDefaults setObject:self.fSearchField.stringValue forKey:@"FilterSearchString"];
-    [NSNotificationCenter.defaultCenter postNotificationName:@"ApplyFilter" object:nil];
-}
-
-- (void)updateSearchText:(NSString*)searchText
-{
-    NSString* normalized = searchText ?: @"";
-    if (![self.fSearchField.stringValue isEqualToString:normalized])
-    {
-        self.fSearchField.stringValue = normalized;
-    }
-    [self setSearchText:self.fSearchField];
-}
-
-- (void)focusSearchField
-{
-    [self.view.window makeFirstResponder:self.fSearchField];
-}
-
-- (BOOL)isFocused
-{
-    NSTextView* textView = (NSTextView*)self.fSearchField.window.firstResponder;
-    return [self.fSearchField.window.firstResponder isKindOfClass:NSTextView.class] &&
-        [self.fSearchField.window fieldEditor:NO forObject:nil] != nil && [self.fSearchField isEqualTo:textView.delegate];
-}
-
-- (void)searchFieldDidStartSearching:(NSSearchField*)sender
-{
-    [self.fSearchFieldMinWidthConstraint animator].constant = 95;
-}
-
-- (void)searchFieldDidEndSearching:(NSSearchField*)sender
-{
-    [self.fSearchFieldMinWidthConstraint animator].constant = 48;
-}
-
-- (void)setSearchType:(id)sender
-{
-    NSString* oldFilterType = [NSUserDefaults.standardUserDefaults stringForKey:@"FilterSearchType"];
-
-    NSInteger prevTag, currentTag = [sender tag];
-    if ([oldFilterType isEqualToString:FilterSearchTypeTracker])
-    {
-        prevTag = FilterTypeTagTracker;
-    }
-    else
-    {
-        prevTag = FilterTypeTagName;
-    }
-
-    if (currentTag != prevTag)
-    {
-        FilterSearchType filterType;
-        if (currentTag == FilterTypeTagTracker)
-        {
-            filterType = FilterSearchTypeTracker;
-        }
-        else
-        {
-            filterType = FilterSearchTypeName;
-        }
-
-        [NSUserDefaults.standardUserDefaults setObject:filterType forKey:@"FilterSearchType"];
-
-        self.fSearchField.placeholderString = [sender title];
-    }
-
-    [NSNotificationCenter.defaultCenter postNotificationName:@"ApplyFilter" object:nil];
-}
-
 - (void)setGroupFilter:(id)sender
 {
     [NSUserDefaults.standardUserDefaults setInteger:[sender tag] forKey:@"FilterGroup"];
@@ -337,14 +260,6 @@ typedef NS_ENUM(NSInteger, FilterTypeTag) {
     [self updateGroupsButton];
 
     [self setFilter:self.fNoFilterButton];
-
-    self.fSearchField.stringValue = @"";
-    [self setSearchText:self.fSearchField];
-}
-
-- (NSArray<NSString*>*)searchStrings
-{
-    return [self.fSearchField.stringValue nonEmptyComponentsSeparatedByCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
 }
 
 - (void)setCountAll:(NSUInteger)all
@@ -387,25 +302,6 @@ typedef NS_ENUM(NSInteger, FilterTypeTag) {
 - (BOOL)validateMenuItem:(NSMenuItem*)menuItem
 {
     SEL const action = menuItem.action;
-
-    //check proper filter search item
-    if (action == @selector(setSearchType:))
-    {
-        NSString* filterType = [NSUserDefaults.standardUserDefaults stringForKey:@"FilterSearchType"];
-
-        BOOL state;
-        if (menuItem.tag == FilterTypeTagTracker)
-        {
-            state = [filterType isEqualToString:FilterSearchTypeTracker];
-        }
-        else
-        {
-            state = [filterType isEqualToString:FilterSearchTypeName];
-        }
-
-        menuItem.state = state ? NSControlStateValueOn : NSControlStateValueOff;
-        return YES;
-    }
 
     if (action == @selector(setGroupFilter:))
     {

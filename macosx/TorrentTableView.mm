@@ -694,6 +694,105 @@ static CGFloat const kPlayButtonVerticalPadding = 4.0;
     }
 }
 
+- (NSImage*)iconForPlayableFileItem:(NSDictionary*)fileItem
+{
+    if (@available(macOS 11.0, *))
+    {
+        NSString* type = fileItem[@"type"] ?: @"file";
+        NSString* category = fileItem[@"category"];
+        NSString* symbolName = nil;
+        
+        if ([type isEqualToString:@"document-books"] || [category isEqualToString:@"books"])
+        {
+            symbolName = @"book";
+        }
+        else if ([type isEqualToString:@"album"])
+        {
+            symbolName = @"music.note.list";  // Double note for albums
+        }
+        else if ([type isEqualToString:@"track"] || [category isEqualToString:@"audio"])
+        {
+            symbolName = @"music.note";       // Single note for tracks/audio
+        }
+        else if ([type isEqualToString:@"dvd"] || [type isEqualToString:@"bluray"] || [category isEqualToString:@"video"])
+        {
+            symbolName = @"play.fill";        // Triangle for video
+        }
+        
+        if (symbolName)
+        {
+            return [NSImage imageWithSystemSymbolName:symbolName accessibilityDescription:nil];
+        }
+    }
+    return nil;
+}
+
+- (NSArray<NSDictionary*>*)tracksForAlbumItem:(NSDictionary*)albumItem torrent:(Torrent*)torrent
+{
+    NSString* folder = albumItem[@"folder"];
+    if (!folder || folder.length == 0)
+        return nil;
+    
+    NSIndexSet* fileIndexes = [torrent fileIndexesForFolder:folder];
+    if (!fileIndexes || fileIndexes.count == 0)
+        return nil;
+    
+    static NSSet<NSString*>* audioExtensions;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        audioExtensions = [NSSet setWithArray:@[
+            @"mp3", @"flac", @"wav", @"aac", @"ogg", @"wma", @"m4a", @"ape", @"alac", @"aiff", @"opus"
+        ]];
+    });
+    
+    NSMutableArray<NSDictionary*>* tracks = [NSMutableArray array];
+    [fileIndexes enumerateIndexesUsingBlock:^(NSUInteger idx, BOOL* _Nonnull stop) {
+        (void)stop;
+        auto const file = tr_torrentFile(torrent.torrentStruct, (tr_file_index_t)idx);
+        NSString* fileName = @(file.name);
+        NSString* ext = fileName.pathExtension.lowercaseString;
+        
+        // Only include audio files, skip .cue files
+        if (![audioExtensions containsObject:ext])
+            return;
+        
+        CGFloat progress = (CGFloat)tr_torrentFileConsecutiveProgress(torrent.torrentStruct, (tr_file_index_t)idx);
+        if (progress < 0)
+            progress = 0;
+        
+        // Visibility logic: only show tracks that have started downloading.
+        // If the file is not wanted, only show it if it's 100% complete.
+        if (progress <= 0 && file.wanted)
+            return;
+        if (!file.wanted && progress < 1.0)
+            return;
+        
+        NSString* displayName = fileName.lastPathComponent.stringByDeletingPathExtension.humanReadableFileName;
+        if (!displayName || displayName.length == 0)
+            displayName = fileName.lastPathComponent;
+        
+        auto const location = tr_torrentFindFile(torrent.torrentStruct, (tr_file_index_t)idx);
+        NSString* path = !std::empty(location) ? @(location.c_str()) : 
+                        [torrent.currentDirectory stringByAppendingPathComponent:fileName];
+        
+        [tracks addObject:@{
+            @"type": @"track",
+            @"category": @"audio",
+            @"index": @(idx),
+            @"name": displayName,
+            @"path": path,
+            @"progress": @(progress)
+        }];
+    }];
+    
+    // Sort tracks alphabetically (they should already be in order, but just to be sure)
+    [tracks sortUsingComparator:^NSComparisonResult(NSDictionary* a, NSDictionary* b) {
+        return [a[@"name"] localizedStandardCompare:b[@"name"]];
+    }];
+    
+    return tracks.count > 0 ? tracks : nil;
+}
+
 - (NSMenu*)playMenuForTorrent:(Torrent*)torrent
 {
     NSArray<NSDictionary*>* playableFiles = torrent.playableFiles;
@@ -702,7 +801,6 @@ static CGFloat const kPlayButtonVerticalPadding = 4.0;
         return nil;
     }
 
-    BOOL const isAudio = [torrent.detectedMediaCategory isEqualToString:@"audio"];
     BOOL const isBooks = [torrent.detectedMediaCategory isEqualToString:@"books"];
     NSString* mainTitle = isBooks ? NSLocalizedString(@"Read", "Context menu") : NSLocalizedString(@"Play", "Context menu");
 
@@ -711,6 +809,7 @@ static CGFloat const kPlayButtonVerticalPadding = 4.0;
     NSArray<NSDictionary*>* state = [self playButtonStateForTorrent:torrent];
     NSArray<NSDictionary*>* layout = [self playButtonLayoutForTorrent:torrent state:state];
 
+    NSMenuItem* pendingHeaderItem = nil;
     NSMenu* currentMenu = menu;
     for (NSDictionary* entry in layout)
     {
@@ -721,21 +820,88 @@ static CGFloat const kPlayButtonVerticalPadding = 4.0;
             if ([title hasSuffix:@":"])
                 title = [title substringToIndex:title.length - 1];
 
-            NSMenuItem* seasonItem = [[NSMenuItem alloc] initWithTitle:title action:nil keyEquivalent:@""];
+            pendingHeaderItem = [[NSMenuItem alloc] initWithTitle:title action:nil keyEquivalent:@""];
             NSMenu* seasonMenu = [[NSMenu alloc] initWithTitle:title];
-            seasonItem.submenu = seasonMenu;
-            [menu addItem:seasonItem];
+            pendingHeaderItem.submenu = seasonMenu;
             currentMenu = seasonMenu;
         }
         else
         {
             NSDictionary* fileItem = entry[@"item"];
-            NSString* title = fileItem[@"title"];
-            NSMenuItem* menuItem = [[NSMenuItem alloc] initWithTitle:title action:@selector(playContextItem:) keyEquivalent:@""];
+            if (![fileItem[@"visible"] boolValue])
+                continue;
+
+            if (pendingHeaderItem)
+            {
+                [menu addItem:pendingHeaderItem];
+                pendingHeaderItem = nil;
+            }
+
+            NSString* type = fileItem[@"type"] ?: @"file";
+            NSString* name = fileItem[@"name"] ?: @"";
+            CGFloat progress = [fileItem[@"progress"] doubleValue];
+            
+            // Construct title without emoji for menu
+            NSString* menuTitle = name;
+            if (progress > 0 && progress < 1.0)
+            {
+                int progressPct = (int)floor(progress * 100);
+                if (progressPct < 100)
+                    menuTitle = [NSString stringWithFormat:@"%@ (%d%%)", name, progressPct];
+            }
+
+            // For albums, check if we can expand to individual tracks
+            if ([type isEqualToString:@"album"])
+            {
+                NSArray<NSDictionary*>* tracks = [self tracksForAlbumItem:fileItem torrent:torrent];
+                if (tracks && tracks.count > 1)
+                {
+                    // Create submenu for album with individual tracks
+                    NSMenuItem* albumItem = [[NSMenuItem alloc] initWithTitle:menuTitle action:nil keyEquivalent:@""];
+                    albumItem.image = [self iconForPlayableFileItem:fileItem];
+                    NSMenu* albumMenu = [[NSMenu alloc] initWithTitle:menuTitle];
+                    albumItem.submenu = albumMenu;
+                    
+                    // Add individual tracks to submenu
+                    for (NSDictionary* track in tracks)
+                    {
+                        NSString* trackName = track[@"name"];
+                        CGFloat trackProgress = [track[@"progress"] doubleValue];
+                        NSString* trackTitle = trackName;
+                        if (trackProgress > 0 && trackProgress < 1.0)
+                        {
+                            int trackPct = (int)floor(trackProgress * 100);
+                            if (trackPct < 100)
+                                trackTitle = [NSString stringWithFormat:@"%@ (%d%%)", trackName, trackPct];
+                        }
+
+                        NSMenuItem* trackItem = [[NSMenuItem alloc] initWithTitle:trackTitle action:@selector(playContextItem:) keyEquivalent:@""];
+                        trackItem.target = self;
+                        trackItem.representedObject = @{ @"torrent": torrent, @"item": track };
+                        trackItem.image = [self iconForPlayableFileItem:track];
+                        [albumMenu addItem:trackItem];
+                    }
+                    
+                    [currentMenu addItem:albumItem];
+                    continue;
+                }
+            }
+            
+            // Regular item (file, single-track album, DVD, Blu-ray, book, etc.)
+            NSMenuItem* menuItem = [[NSMenuItem alloc] initWithTitle:menuTitle action:@selector(playContextItem:) keyEquivalent:@""];
             menuItem.target = self;
             menuItem.representedObject = @{ @"torrent" : torrent, @"item" : fileItem };
+            
+            // Assign icon based on file type
+            menuItem.image = [self iconForPlayableFileItem:fileItem];
+            
             [currentMenu addItem:menuItem];
         }
+    }
+
+    if (menu.numberOfItems == 0)
+    {
+        return nil;
     }
 
     return menu;
@@ -770,7 +936,8 @@ static CGFloat const kPlayButtonVerticalPadding = 4.0;
     NSImage* icon = nil;
     if (@available(macOS 11.0, *))
     {
-        icon = [NSImage imageWithSystemSymbolName:(isBooks ? @"book" : (isAudio ? @"music.note" : @"play.fill")) accessibilityDescription:nil];
+        // Use double note for audio (albums), book for documents, play for video
+        icon = [NSImage imageWithSystemSymbolName:(isBooks ? @"book" : (isAudio ? @"music.note.list" : @"play.fill")) accessibilityDescription:nil];
     }
 
     if (playMenu.numberOfItems == 1 && !playMenu.itemArray[0].hasSubmenu)
@@ -1153,27 +1320,6 @@ static void setPlayButtonFolderCache(NSButton* sender, id value)
     objc_setAssociatedObject(sender, @selector(folderForPlayButton:), value, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 }
 
-static NSImage* bookIcon()
-{
-    static NSImage* icon = nil;
-    static dispatch_once_t onceToken;
-    dispatch_once(&onceToken, ^{
-        NSImage* image = nil;
-        if (@available(macOS 11.0, *))
-        {
-            image = [NSImage imageWithSystemSymbolName:@"book" accessibilityDescription:nil];
-        }
-        if (!image)
-        {
-            image = [NSImage imageNamed:NSImageNameBookmarksTemplate];
-        }
-        image = [image copy];
-        image.size = NSMakeSize(12.0, 12.0);
-        icon = image;
-    });
-    return icon;
-}
-
 static NSString* folderForPlayButton(NSButton* sender, Torrent* torrent)
 {
     id cached = playButtonFolderCache(sender);
@@ -1253,10 +1399,11 @@ static NSString* folderForPlayButton(NSButton* sender, Torrent* torrent)
             {
                 category = ([type isEqualToString:@"album"]) ? @"audio" : @"video";
             }
+            entry[@"category"] = category;
 
             BOOL const itemIsAudio = [category isEqualToString:@"audio"];
             BOOL const itemIsBooks = [category isEqualToString:@"books"];
-            NSString* icon = itemIsBooks ? @"📖" : (itemIsAudio ? @"♫" : @"⏵");
+            NSString* icon = itemIsBooks ? @"📖" : (itemIsAudio ? ([type isEqualToString:@"album"] ? @"♬" : @"♫") : @"⏵");
 
             if (singleItem)
             {

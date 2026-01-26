@@ -14,8 +14,7 @@
                 <outlet property="fGroupsButton" destination="4" id="49"/>
                 <outlet property="fNoFilterButton" destination="9" id="27"/>
                 <outlet property="fPauseFilterButton" destination="6" id="28"/>
-                <outlet property="fSearchField" destination="10" id="31"/>
-                <outlet property="fSearchFieldMinWidthConstraint" destination="Ven-bt-DjP" id="X9R-JZ-TVl"/>
+                <outlet property="fSearchField" destination="10" id="out-srch"/>
                 <outlet property="fSeedFilterButton" destination="7" id="32"/>
                 <outlet property="view" destination="2" id="33"/>
             </connections>
@@ -152,7 +151,7 @@
                         <color key="backgroundColor" name="textBackgroundColor" catalog="System" colorSpace="catalog"/>
                     </searchFieldCell>
                     <connections>
-                        <action selector="setSearchText:" target="-2" id="51"/>
+                        <outlet property="delegate" destination="-2" id="del-srch"/>
                         <outlet property="searchMenuTemplate" destination="22" id="48"/>
                     </connections>
                 </searchField>
@@ -180,12 +179,12 @@
         </customView>
         <menu title="Menu" id="22" userLabel="SearchFilterMenu">
             <items>
-                <menuItem title="Name" tag="401" id="23">
+                <menuItem title="Name" tag="0" id="23">
                     <connections>
                         <action selector="setSearchType:" target="-2" id="46"/>
                     </connections>
                 </menuItem>
-                <menuItem title="Tracker" tag="402" id="24">
+                <menuItem title="Tracker" tag="1" id="24">
                     <connections>
                         <action selector="setSearchType:" target="-2" id="47"/>
                     </connections>
