@@ -35,6 +35,10 @@ static CGFloat const kErrorImageSize = 20.0;
 
 static NSTimeInterval const kToggleProgressSeconds = 0.175;
 
+// Associated object keys for play buttons
+static char const kPlayButtonTypeKey = '\0';
+static char const kPlayButtonFolderKey = '\0';
+
 @interface TorrentTableView ()
 
 @property(nonatomic) IBOutlet Controller* fController;
@@ -129,6 +133,35 @@ static NSTimeInterval const kToggleProgressSeconds = 0.175;
     [nc addObserver:self selector:@selector(refreshTorrentTable) name:@"RefreshTorrentTable" object:nil];
     [nc addObserver:self selector:@selector(updateVisiblePlayButtons) name:@"UpdateUI" object:nil];
     [nc addObserver:self selector:@selector(updateDefaultsCache) name:NSUserDefaultsDidChangeNotification object:nil];
+    
+    // Pre-warm button pool asynchronously to avoid startup lag
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [self prewarmButtonPool];
+    });
+}
+
+- (void)prewarmButtonPool
+{
+    // Create buttons in the pool so they're ready when needed.
+    // Increasing to 200 to handle multiple visible torrents with many files (e.g. music albums)
+    NSUInteger const poolSize = 200;
+    for (NSUInteger i = 0; i < poolSize; i++)
+    {
+        PlayButton* button = [[PlayButton alloc] init];
+        button.target = self;
+        button.action = @selector(playMediaFile:);
+        [self.fPlayButtonPool addObject:button];
+    }
+    
+    // Pre-warm header pool too
+    for (NSUInteger i = 0; i < 20; i++)
+    {
+        NSTextField* field = [NSTextField labelWithString:@""];
+        field.font = [NSFont boldSystemFontOfSize:11];
+        field.textColor = NSColor.secondaryLabelColor;
+        field.wantsLayer = YES;
+        [self.fHeaderPool addObject:field];
+    }
 }
 
 - (void)viewDidEndLiveResize
@@ -732,32 +765,40 @@ static CGFloat const kPlayButtonVerticalPadding = 4.0;
         if (cached)
             return cached;
 
-        NSString* symbolName = nil;
+        NSString* symbolName = @"play"; // Default fallback
 
         if ([type isEqualToString:@"document-books"] || [category isEqualToString:@"books"])
         {
-            symbolName = @"book";  // Outlined book for documents
+            symbolName = @"book";
         }
         else if ([type isEqualToString:@"album"])
         {
-            symbolName = @"music.note.list";  // Double note for albums
+            symbolName = @"music.note.list";
         }
         else if ([type isEqualToString:@"track"] || [category isEqualToString:@"audio"])
         {
-            symbolName = @"music.note";  // Single note for tracks/audio
+            symbolName = @"music.note";
         }
         else if ([type isEqualToString:@"dvd"] || [type isEqualToString:@"bluray"] || [category isEqualToString:@"video"])
         {
-            symbolName = @"play";  // Outlined triangle for video
+            symbolName = @"play";
         }
 
-        if (symbolName)
+        NSImage* icon = [NSImage imageWithSystemSymbolName:symbolName accessibilityDescription:nil];
+        if (!icon)
         {
-            NSImage* icon = [NSImage imageWithSystemSymbolName:symbolName accessibilityDescription:nil];
-            if (icon)
-                [self.fIconCache setObject:icon forKey:cacheKey];
-            return icon;
+            icon = [NSImage imageWithSystemSymbolName:@"play" accessibilityDescription:nil];
         }
+        
+        if (icon)
+        {
+            // Use configuration to ensure small, medium weight, gray icon
+            NSImageSymbolConfiguration* config = [NSImageSymbolConfiguration configurationWithPointSize:11 weight:NSFontWeightMedium scale:NSImageSymbolScaleSmall];
+            icon = [icon imageWithSymbolConfiguration:config];
+            [icon setTemplate:YES]; // Ensure it follows button's text color (gray)
+            [self.fIconCache setObject:icon forKey:cacheKey];
+        }
+        return icon;
     }
     return nil;
 }
@@ -1378,12 +1419,12 @@ static CGFloat const kPlayButtonVerticalPadding = 4.0;
 
 static id playButtonFolderCache(NSButton* sender)
 {
-    return objc_getAssociatedObject(sender, @selector(folderForPlayButton:));
+    return objc_getAssociatedObject(sender, &kPlayButtonFolderKey);
 }
 
 static void setPlayButtonFolderCache(NSButton* sender, id value)
 {
-    objc_setAssociatedObject(sender, @selector(folderForPlayButton:), value, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    objc_setAssociatedObject(sender, &kPlayButtonFolderKey, value, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 }
 
 static NSString* folderForPlayButton(NSButton* sender, Torrent* torrent)
@@ -1599,7 +1640,7 @@ static NSString* folderForPlayButton(NSButton* sender, Torrent* torrent)
     BOOL hasMultipleSeasons = sortedSeasons.count > 1;
 
     NSUInteger totalFilesShown = 0;
-    NSUInteger const maxFiles = 100;
+    NSUInteger const maxFiles = 1000; // High limit to effectively remove quantity limitation
 
     for (NSNumber* season in sortedSeasons)
     {
@@ -1671,6 +1712,8 @@ static NSString* folderForPlayButton(NSButton* sender, Torrent* torrent)
     else
     {
         button = [[PlayButton alloc] init];
+        button.target = self;
+        button.action = @selector(playMediaFile:);
     }
     return button;
 }
@@ -1681,6 +1724,8 @@ static NSString* folderForPlayButton(NSButton* sender, Torrent* torrent)
     if (field)
     {
         [self.fHeaderPool removeLastObject];
+        // Reset color in case it was used as a "more" label
+        field.textColor = NSColor.secondaryLabelColor;
     }
     else
     {
@@ -1688,7 +1733,6 @@ static NSString* folderForPlayButton(NSButton* sender, Torrent* torrent)
         field.font = [NSFont boldSystemFontOfSize:11];
         field.textColor = NSColor.secondaryLabelColor;
         field.wantsLayer = YES;
-        field.canDrawConcurrently = YES;
     }
     return field;
 }
@@ -1696,7 +1740,6 @@ static NSString* folderForPlayButton(NSButton* sender, Torrent* torrent)
 - (PlayButton*)setupPlayButtonWithItem:(NSDictionary*)item
 {
     PlayButton* playButton = [self dequeuePlayButton];
-    BOOL const isNewButton = (playButton.target == nil);  // New buttons have no target set
     
     NSString* type = item[@"type"] ?: @"file";
     NSString* path = item[@"path"];
@@ -1714,25 +1757,16 @@ static NSString* folderForPlayButton(NSButton* sender, Torrent* torrent)
             title = baseTitle;
     }
 
-    // Dynamic properties - always set
+    // Dynamic properties
     playButton.title = title;
     playButton.identifier = path;
     playButton.toolTip = path;
-    playButton.accessibilityHelp = type;
-    playButton.accessibilityLabel = baseTitle;
-
-    NSNumber* index = item[@"index"];
-    playButton.tag = index ? index.integerValue : NSNotFound;
+    playButton.tag = [item[@"index"] integerValue];
     
+    // Store type and folder via associated objects (lighter than accessibility properties)
     NSString* folder = item[@"folder"];
-    if (folder.length > 0)
-    {
-        objc_setAssociatedObject(playButton, @selector(folderForPlayButton:), folder, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    }
-    else
-    {
-        objc_setAssociatedObject(playButton, @selector(folderForPlayButton:), nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    }
+    objc_setAssociatedObject(playButton, &kPlayButtonTypeKey, type, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    objc_setAssociatedObject(playButton, &kPlayButtonFolderKey, folder.length > 0 ? folder : nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 
     // Visibility
     NSNumber* visible = item[@"visible"];
@@ -1748,27 +1782,11 @@ static NSString* folderForPlayButton(NSButton* sender, Torrent* torrent)
     {
         playButton.hidden = (progress <= 0);
     }
-
-    // Static properties - only set on new buttons (not recycled)
-    if (isNewButton)
-    {
-        playButton.imagePosition = NSImageLeft;
-        playButton.target = self;
-        playButton.action = @selector(playMediaFile:);
-        playButton.bezelStyle = NSBezelStyleRecessed;
-        playButton.showsBorderOnlyWhileMouseInside = YES;
-        playButton.font = [NSFont systemFontOfSize:11];
-        playButton.controlSize = NSControlSizeSmall;
-    }
     
     // Image - set based on type/category (cached)
-    playButton.image = [self iconForPlayableFileItem:item];
-    
-    // Hover callback - needs to be set each time as it captures context
-    __weak TorrentTableView* weakSelf = self;
-    playButton.onHover = ^(PlayButton* button) {
-        [weakSelf setHighPriorityForButton:button];
-    };
+    NSImage* icon = [self iconForPlayableFileItem:item];
+    playButton.image = icon;
+    playButton.imagePosition = icon ? NSImageLeft : NSNoImage;
 
     return playButton;
 }
@@ -1879,30 +1897,35 @@ static NSString* folderForPlayButton(NSButton* sender, Torrent* torrent)
 
     if (playButtonLayout.count > 0)
     {
-        // Use batched updates to avoid layout thrashing
+        // Add all buttons at once (batched for performance)
         for (NSDictionary* entry in playButtonLayout)
         {
-            NSString* kind = entry[@"kind"];
-            if ([kind isEqualToString:@"header"])
-            {
-                [flowView addLineBreakBatched];
-                NSTextField* seasonLabel = [self dequeueHeader];
-                seasonLabel.stringValue = entry[@"title"] ?: @"";
-                [flowView addArrangedSubviewBatched:seasonLabel];
-            }
-            else
-            {
-                NSDictionary* item = entry[@"item"];
-                if (item)
-                {
-                    [flowView addArrangedSubviewBatched:[self setupPlayButtonWithItem:item]];
-                }
-            }
+            [self addPlayButtonLayoutEntry:entry toFlowView:flowView];
         }
         [flowView finishBatchUpdates];
     }
 
     [self updatePlayButtonProgressForCell:cell torrent:torrent forceLayout:YES];
+}
+
+- (void)addPlayButtonLayoutEntry:(NSDictionary*)entry toFlowView:(FlowLayoutView*)flowView
+{
+    NSString* kind = entry[@"kind"];
+    if ([kind isEqualToString:@"header"])
+    {
+        [flowView addLineBreakBatched];
+        NSTextField* seasonLabel = [self dequeueHeader];
+        seasonLabel.stringValue = entry[@"title"] ?: @"";
+        [flowView addArrangedSubviewBatched:seasonLabel];
+    }
+    else
+    {
+        NSDictionary* item = entry[@"item"];
+        if (item)
+        {
+            [flowView addArrangedSubviewBatched:[self setupPlayButtonWithItem:item]];
+        }
+    }
 }
 
 - (void)updatePlayButtonProgressForCell:(TorrentCell*)cell torrent:(Torrent*)torrent
@@ -2285,11 +2308,14 @@ static NSString* folderForPlayButton(NSButton* sender, Torrent* torrent)
     if (!torrent)
         return;
 
+    NSString* type = objc_getAssociatedObject(sender, &kPlayButtonTypeKey) ?: @"";
+    NSString* folder = objc_getAssociatedObject(sender, &kPlayButtonFolderKey) ?: @"";
+    
     NSDictionary* item = @{
         @"path" : sender.identifier ?: @"",
-        @"type" : sender.accessibilityHelp ?: @"",
+        @"type" : type,
         @"index" : @(sender.tag),
-        @"folder" : folderForPlayButton(sender, torrent) ?: @""
+        @"folder" : folder
     };
 
     [self playMediaItem:item forTorrent:torrent];
