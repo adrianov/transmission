@@ -113,6 +113,7 @@ static NSTimeInterval const kToggleProgressSeconds = 0.175;
 - (void)awakeFromNib
 {
     [super awakeFromNib];
+    self.fContextRow.delegate = self;
     self.fLastKnownWidth = self.bounds.size.width;
     [self updateDefaultsCache];
 
@@ -834,6 +835,7 @@ static CGFloat const kPlayButtonVerticalPadding = 4.0;
     NSString* mainTitle = isBooks ? NSLocalizedString(@"Read", "Context menu") : NSLocalizedString(@"Play", "Context menu");
 
     NSMenu* menu = [[NSMenu alloc] initWithTitle:mainTitle];
+    menu.delegate = self;
 
     NSArray<NSDictionary*>* state = [self playButtonStateForTorrent:torrent];
     NSArray<NSDictionary*>* layout = [self playButtonLayoutForTorrent:torrent state:state];
@@ -851,6 +853,7 @@ static CGFloat const kPlayButtonVerticalPadding = 4.0;
 
             pendingHeaderItem = [[NSMenuItem alloc] initWithTitle:title action:nil keyEquivalent:@""];
             NSMenu* seasonMenu = [[NSMenu alloc] initWithTitle:title];
+            seasonMenu.delegate = self;
             pendingHeaderItem.submenu = seasonMenu;
             currentMenu = seasonMenu;
         }
@@ -888,6 +891,7 @@ static CGFloat const kPlayButtonVerticalPadding = 4.0;
                     NSMenuItem* albumItem = [[NSMenuItem alloc] initWithTitle:menuTitle action:nil keyEquivalent:@""];
                     albumItem.image = [self iconForPlayableFileItem:fileItem];
                     NSMenu* albumMenu = [[NSMenu alloc] initWithTitle:menuTitle];
+                    albumMenu.delegate = self;
                     albumItem.submenu = albumMenu;
 
                     // Add individual tracks to submenu
@@ -1086,6 +1090,20 @@ static CGFloat const kPlayButtonVerticalPadding = 4.0;
 - (void)paste:(id)sender
 {
     [self.fController openPasteboard];
+}
+
+- (void)menu:(NSMenu*)menu willHighlightItem:(NSMenuItem*)item
+{
+    if (item && item.action == @selector(playContextItem:))
+    {
+        NSDictionary* data = item.representedObject;
+        Torrent* torrent = data[@"torrent"];
+        NSDictionary* fileItem = data[@"item"];
+        if (torrent && fileItem)
+        {
+            [self setHighPriorityForItem:fileItem forTorrent:torrent];
+        }
+    }
 }
 
 - (BOOL)validateMenuItem:(NSMenuItem*)menuItem
