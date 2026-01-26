@@ -14,8 +14,15 @@
         self.wantsLayer = YES;
         self.layer.cornerRadius = 4.0;
         self.layer.masksToBounds = YES;
-        self.canDrawConcurrently = YES;
         self.layerContentsRedrawPolicy = NSViewLayerContentsRedrawOnSetNeedsDisplay;
+
+        // Default styling for all play buttons
+        self.bezelStyle = NSBezelStyleRecessed;
+        self.showsBorderOnlyWhileMouseInside = YES;
+        self.font = [NSFont systemFontOfSize:11];
+        self.controlSize = NSControlSizeSmall;
+        self.imagePosition = NSImageLeft;
+        self.imageScaling = NSImageScaleProportionallyDown;
 
         [self setupTrackingArea];
         self.cell.lineBreakMode = NSLineBreakByTruncatingTail;
@@ -38,6 +45,8 @@
     self.accessibilityHelp = nil;
     self.accessibilityLabel = nil;
     self.toolTip = nil;
+    self.state = NSControlStateValueOff;
+    self.highlighted = NO;
     [self updateBackground];
 }
 
@@ -69,24 +78,9 @@
 
 - (void)updateBackground
 {
-    NSColor* bgColor = self.isHovered ? [NSColor colorWithWhite:0.0 alpha:0.15] : [NSColor colorWithWhite:0.0 alpha:0.07];
+    // Use slightly darker gray for non-hovered to look more "properly gray"
+    NSColor* bgColor = self.isHovered ? [NSColor colorWithWhite:0.0 alpha:0.12] : [NSColor colorWithWhite:0.0 alpha:0.05];
     self.layer.backgroundColor = bgColor.CGColor;
-}
-
-- (BOOL)wantsUpdateLayer
-{
-    return YES;
-}
-
-- (void)updateLayer
-{
-    [self updateBackground];
-}
-
-- (void)drawRect:(NSRect)dirtyRect
-{
-    // Layer handles background drawing via updateLayer
-    [super drawRect:dirtyRect];
 }
 
 @end
