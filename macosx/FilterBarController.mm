@@ -62,7 +62,7 @@ NSInteger const kGroupFilterAllTag = -2;
 
     [self.fGroupsButton.menu itemWithTag:kGroupFilterAllTag].title = NSLocalizedString(@"All Groups", "Filter Bar -> group filter menu");
 
-    self.fSearchField.placeholderString = NSLocalizedString(@"Search on the rutracker.org...", "Filter Bar -> search field");
+    self.fSearchField.placeholderString = NSLocalizedString(@"Press Enter to Search on the rutracker.org...", "Filter Bar -> search field");
 
     //localize search menu
     NSMenuItem* nameItem = [self.fSearchField.searchMenuTemplate itemWithTag:0];
