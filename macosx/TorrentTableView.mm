@@ -1524,9 +1524,27 @@ static NSString* folderForPlayButton(NSButton* sender, Torrent* torrent)
                 entry[@"baseTitle"] = entry[@"baseTitle"] ?: @"";
             }
             entry[@"title"] = entry[@"baseTitle"] ?: @"";
-            entry[@"visible"] = @NO;
-            entry[@"progress"] = @0.0;
-            entry[@"progressPercent"] = @0;
+            // Compute initial progress and visibility
+            CGFloat progress = 0.0;
+            if (entry[@"index"])
+            {
+                progress = [torrent fileProgressForIndex:[entry[@"index"] unsignedIntegerValue]];
+            }
+            else
+            {
+                NSString* folder = entry[@"folder"];
+                progress = folder.length > 0 ? [torrent folderConsecutiveProgress:folder] : 0.0;
+            }
+            entry[@"progress"] = @(progress);
+            int progressPct = (int)floor(progress * 100);
+            entry[@"progressPercent"] = @(progressPct);
+            // Documents only visible when complete; media files visible when consecutive progress > 0
+            BOOL visible = [type hasPrefix:@"document"] ? (progress >= 1.0) : (progress > 0.000001);
+            entry[@"visible"] = @(visible);
+            if (visible && ![type hasPrefix:@"document"] && progress < 1.0 && progressPct < 100)
+            {
+                entry[@"title"] = [NSString stringWithFormat:@"%@ (%d%%)", entry[@"baseTitle"], progressPct];
+            }
             [state addObject:entry];
         }
         torrent.cachedPlayButtonState = state;
@@ -1561,7 +1579,8 @@ static NSString* folderForPlayButton(NSButton* sender, Torrent* torrent)
             entry[@"progress"] = @(progress);
             int progressPct = (int)floor(progress * 100);
             entry[@"progressPercent"] = @(progressPct);
-            BOOL visible = [type hasPrefix:@"document"] ? (progress >= 1.0) : (progress > 0);
+            // Documents only visible when complete; media files visible when consecutive progress > 0
+            BOOL visible = [type hasPrefix:@"document"] ? (progress >= 1.0) : (progress > 0.000001);
             entry[@"visible"] = @(visible);
             if (visible != wasVisible)
             {
@@ -1852,10 +1871,15 @@ static NSString* folderForPlayButton(NSButton* sender, Torrent* torrent)
     NSArray<NSDictionary*>* playButtonState = [self playButtonStateForTorrent:torrent];
     NSArray<NSDictionary*>* playButtonLayout = [self playButtonLayoutForTorrent:torrent state:playButtonState];
 
-    // Reuse existing buttons if same file source (O(1) if cached in Torrent)
+    // Reuse existing buttons if same file source AND layout exists (O(1) if cached in Torrent)
     BOOL const sameSource = (cell.fPlayButtonsSourceFiles == playableFiles);
+    BOOL const hasLayout = (playButtonLayout.count > 0);
+    
+    // Check if we have existing buttons that match the layout
+    FlowLayoutView* existingFlowView = (FlowLayoutView*)cell.fPlayButtonsView;
+    BOOL const hasExistingButtons = existingFlowView && [existingFlowView arrangedSubviews].count > 0;
 
-    if (cell.fPlayButtonsView && sameSource)
+    if (cell.fPlayButtonsView && sameSource && (!hasLayout || hasExistingButtons))
     {
         cell.fPlayButtonsView.hidden = NO;
         
@@ -2196,13 +2220,36 @@ static NSString* folderForPlayButton(NSButton* sender, Torrent* torrent)
     if (isComplete || targetIndexes.count == 0)
         return;
 
+    // Track that these files were played in this session
+    [torrent.playedFiles addIndexes:targetIndexes];
+
     NSIndexSet* otherHighIndexes = [self otherHighPriorityIndexesForTorrent:torrent excluding:targetIndexes];
     if (otherHighIndexes.count > 0)
     {
-        NSIndexSet* normalIndexes = [self fileIndexesWithPriority:TR_PRI_NORMAL torrent:torrent];
-        if (normalIndexes.count > 0)
-            [torrent setFilePriority:TR_PRI_LOW forIndexes:normalIndexes];
-        [torrent setFilePriority:TR_PRI_NORMAL forIndexes:otherHighIndexes];
+        // Only demote to Normal if the file was played in this session.
+        // Otherwise, it might be a file the user manually set to High, so we can demote it to Low.
+        NSMutableIndexSet* toNormal = [NSMutableIndexSet indexSet];
+        NSMutableIndexSet* toLow = [NSMutableIndexSet indexSet];
+
+        [otherHighIndexes enumerateIndexesUsingBlock:^(NSUInteger idx, BOOL* /*stop*/) {
+            if ([torrent.playedFiles containsIndex:idx])
+            {
+                [toNormal addIndex:idx];
+            }
+            else
+            {
+                [toLow addIndex:idx];
+            }
+        }];
+
+        if (toNormal.count > 0)
+        {
+            [torrent setFilePriority:TR_PRI_NORMAL forIndexes:toNormal];
+        }
+        if (toLow.count > 0)
+        {
+            [torrent setFilePriority:TR_PRI_LOW forIndexes:toLow];
+        }
     }
 
     [torrent setFilePriority:TR_PRI_HIGH forIndexes:targetIndexes];

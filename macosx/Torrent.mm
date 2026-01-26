@@ -87,6 +87,8 @@ typedef NS_ENUM(NSInteger, TorrentMediaType) {
 @property(nonatomic) NSTimeInterval fLastDiskSpaceCheckTime;
 @property(nonatomic) BOOL diskSpaceDialogShown;
 
+@property(nonatomic) NSMutableIndexSet* playedFiles;
+
 - (void)renameFinished:(BOOL)success
                  nodes:(NSArray<FileListNode*>*)nodes
      completionHandler:(void (^)(BOOL))completionHandler
@@ -3928,6 +3930,8 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
     }
 
     _fDownloadFolderDetermination = TorrentDeterminationAutomatic;
+
+    _playedFiles = [[NSMutableIndexSet alloc] init];
 
     if (groupValue)
     {

@@ -301,4 +301,7 @@ extern NSString* const kTorrentDidChangeGroupNotification;
 // Tracks whether we've verified partial data before resuming in this session
 @property(nonatomic) BOOL fVerifiedOnResume;
 
+/// Tracks file indexes that were played in the current session.
+@property(nonatomic, readonly) NSMutableIndexSet* playedFiles;
+
 @end
