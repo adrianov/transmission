@@ -1519,11 +1519,97 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
 
     // Third pass: collect playable files
     NSMutableDictionary<NSString*, NSNumber*>* cueProgress = [NSMutableDictionary dictionary];
+    NSMutableArray<NSString*>* fileNamesForLexemeAnalysis = [NSMutableArray arrayWithCapacity:count];
+    for (NSUInteger i = 0; i < count; i++)
+    {
+        auto const file = tr_torrentFile(self.fHandle, i);
+        [fileNamesForLexemeAnalysis addObject:@(file.name)];
+    }
+
+    // Find common prefix and suffix across all files in the torrent
+    NSString* commonPrefix = nil;
+    NSString* commonSuffix = nil;
+    if (count > 1)
+    {
+        for (NSString* fileName in fileNamesForLexemeAnalysis)
+        {
+            if (commonPrefix == nil)
+            {
+                commonPrefix = fileName;
+            }
+            else
+            {
+                NSUInteger j = 0;
+                while (j < commonPrefix.length && j < fileName.length && [commonPrefix characterAtIndex:j] == [fileName characterAtIndex:j])
+                {
+                    j++;
+                }
+                commonPrefix = [commonPrefix substringToIndex:j];
+            }
+
+            if (commonSuffix == nil)
+            {
+                commonSuffix = fileName;
+            }
+            else
+            {
+                NSUInteger j = 0;
+                while (j < commonSuffix.length && j < fileName.length &&
+                       [commonSuffix characterAtIndex:commonSuffix.length - 1 - j] == [fileName characterAtIndex:fileName.length - 1 - j])
+                {
+                    j++;
+                }
+                commonSuffix = [commonSuffix substringFromIndex:commonSuffix.length - j];
+            }
+        }
+    }
+
+    // Only use common prefix/suffix if they are "reasonable" (e.g. end/start with a separator or space)
+    // and don't consume the entire filename
+    if (commonPrefix.length > 0)
+    {
+        NSCharacterSet* separators = [NSCharacterSet characterSetWithCharactersInString:@".-_ "];
+        NSUInteger lastSep = [commonPrefix rangeOfCharacterFromSet:separators options:NSBackwardsSearch].location;
+        if (lastSep != NSNotFound)
+        {
+            commonPrefix = [commonPrefix substringToIndex:lastSep + 1];
+        }
+        else
+        {
+            commonPrefix = @"";
+        }
+    }
+    if (commonSuffix.length > 0)
+    {
+        NSCharacterSet* separators = [NSCharacterSet characterSetWithCharactersInString:@".-_ "];
+        NSUInteger firstSep = [commonSuffix rangeOfCharacterFromSet:separators].location;
+        if (firstSep != NSNotFound)
+        {
+            commonSuffix = [commonSuffix substringFromIndex:firstSep];
+        }
+        else
+        {
+            commonSuffix = @"";
+        }
+    }
+
     for (NSUInteger i = 0; i < count; i++)
     {
         auto const file = tr_torrentFile(self.fHandle, i);
         NSString* fileName = @(file.name);
-        NSString* ext = fileName.pathExtension.lowercaseString;
+        NSString* originalFileName = fileName;
+
+        // Strip common prefix/suffix from the filename before further processing
+        if (commonPrefix.length > 0 && [fileName hasPrefix:commonPrefix] && fileName.length > commonPrefix.length)
+        {
+            fileName = [fileName substringFromIndex:commonPrefix.length];
+        }
+        if (commonSuffix.length > 0 && [fileName hasSuffix:commonSuffix] && fileName.length > commonSuffix.length)
+        {
+            fileName = [fileName substringToIndex:fileName.length - commonSuffix.length];
+        }
+
+        NSString* ext = originalFileName.pathExtension.lowercaseString;
 
         if (![mediaExtensions containsObject:ext])
             continue;
@@ -1572,7 +1658,7 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
         // Skip DJVU files if the torrent already contains a PDF with the same base name
         if (isDjvu)
         {
-            NSString* baseName = fileName.stringByDeletingPathExtension.lowercaseString;
+            NSString* baseName = originalFileName.stringByDeletingPathExtension.lowercaseString;
             if ([pdfBaseNames containsObject:baseName])
             {
                 // Torrent has both DJVU and PDF - skip DJVU, PDF will be shown separately
@@ -1581,7 +1667,7 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
         }
         if (isFb2)
         {
-            NSString* baseName = fileName.stringByDeletingPathExtension.lowercaseString;
+            NSString* baseName = originalFileName.stringByDeletingPathExtension.lowercaseString;
             if ([epubBaseNames containsObject:baseName])
             {
                 // Torrent has both FB2 and EPUB - skip FB2, EPUB will be shown separately
@@ -1625,11 +1711,6 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
                 useCompanionPdf = YES;
                 path = companionPdfPath;
             }
-            else
-            {
-                // Skip DJVU files until conversion is complete with valid PDF
-                continue;
-            }
         }
 
         if (isFb2)
@@ -1641,11 +1722,6 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
             {
                 useCompanionEpub = YES;
                 path = companionEpubPath;
-            }
-            else
-            {
-                // Skip FB2 files until conversion is complete with valid EPUB
-                continue;
             }
         }
 
@@ -1692,187 +1768,14 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
             @"season" : season,
             @"episode" : episode,
             @"progress" : @(progress),
-            @"sortKey" : fileName.lastPathComponent
+            @"sortKey" : fileName.lastPathComponent,
+            @"originalExt" : ext,
+            @"isCompanion" : @(useCompanionPdf || useCompanionEpub)
         }];
     }
 
     if (playable.count == 0 && cueBaseNames.count == 0)
         return nil;
-
-    // Remove common lexemes across all episode titles
-    NSMutableArray* episodeItems = [NSMutableArray array];
-    for (NSDictionary* item in playable)
-    {
-        if ([item[@"type"] isEqualToString:@"file"] && item[@"season"] != nil && [item[@"season"] intValue] >= 0)
-        {
-            [episodeItems addObject:item];
-        }
-    }
-
-    if (episodeItems.count > 1)
-    {
-        BOOL changed = NO;
-        do
-        {
-            changed = NO;
-            NSString* commonPrefix = nil;
-            NSString* commonSuffix = nil;
-            BOOL prefixSame = YES;
-            BOOL suffixSame = YES;
-
-            for (NSDictionary* item in episodeItems)
-            {
-                NSString* name = item[@"name"];
-                // Only look at the part after "E# - "
-                NSRange dashRange = [name rangeOfString:@" - "];
-                if (dashRange.location == NSNotFound)
-                {
-                    prefixSame = NO;
-                    suffixSame = NO;
-                    break;
-                }
-
-                NSString* titlePart = [name substringFromIndex:dashRange.location + dashRange.length];
-                NSArray* words = [titlePart componentsSeparatedByString:@" "];
-                if (words.count < 2)
-                {
-                    prefixSame = NO;
-                    suffixSame = NO;
-                    break;
-                }
-
-                if (commonPrefix == nil)
-                {
-                    commonPrefix = words.firstObject;
-                }
-                else if (![commonPrefix isEqualToString:words.firstObject])
-                {
-                    prefixSame = NO;
-                }
-
-                if (commonSuffix == nil)
-                {
-                    commonSuffix = words.lastObject;
-                }
-                else if (![commonSuffix isEqualToString:words.lastObject])
-                {
-                    suffixSame = NO;
-                }
-            }
-
-            if (prefixSame && commonPrefix.length > 0)
-            {
-                for (NSUInteger i = 0; i < playable.count; i++)
-                {
-                    NSMutableDictionary* item = [playable[i] mutableCopy];
-                    if ([episodeItems containsObject:playable[i]])
-                    {
-                        NSString* name = item[@"name"];
-                        NSRange dashRange = [name rangeOfString:@" - "];
-                        NSString* prefix = [name substringToIndex:dashRange.location + dashRange.length];
-                        NSString* titlePart = [name substringFromIndex:dashRange.location + dashRange.length];
-                        NSString* newTitle = [[titlePart substringFromIndex:commonPrefix.length] stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet];
-                        item[@"name"] = newTitle.length > 0 ? [prefix stringByAppendingString:newTitle] : [prefix stringByReplacingOccurrencesOfString:@" - " withString:@""];
-                        playable[i] = item;
-                        changed = YES;
-                    }
-                }
-            }
-            else if (suffixSame && commonSuffix.length > 0)
-            {
-                for (NSUInteger i = 0; i < playable.count; i++)
-                {
-                    NSMutableDictionary* item = [playable[i] mutableCopy];
-                    if ([episodeItems containsObject:playable[i]])
-                    {
-                        NSString* name = item[@"name"];
-                        NSRange dashRange = [name rangeOfString:@" - "];
-                        NSString* prefix = [name substringToIndex:dashRange.location + dashRange.length];
-                        NSString* titlePart = [name substringFromIndex:dashRange.location + dashRange.length];
-                        NSString* newTitle = [[titlePart substringToIndex:titlePart.length - commonSuffix.length] stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet];
-                        item[@"name"] = newTitle.length > 0 ? [prefix stringByAppendingString:newTitle] : [prefix stringByReplacingOccurrencesOfString:@" - " withString:@""];
-                        playable[i] = item;
-                        changed = YES;
-                    }
-                }
-            }
-
-            if (changed)
-            {
-                // Refresh episodeItems with new names for next iteration
-                [episodeItems removeAllObjects];
-                for (NSDictionary* item in playable)
-                {
-                    if ([item[@"type"] isEqualToString:@"file"] && item[@"season"] != nil && [item[@"season"] intValue] >= 0)
-                    {
-                        [episodeItems addObject:item];
-                    }
-                }
-            }
-        } while (changed);
-    }
-
-    if (playable.count == 0 && cueBaseNames.count == 0)
-        return nil;
-
-    // If a cue is present alongside multiple individual audio files, treat the
-    // cue as metadata only (no separate play button). Keep the cue-only path
-    // for single-file albums where the cue is the playable unit.
-    if (playable.count > 1)
-    {
-        [cueBaseNames removeAllObjects];
-    }
-
-    for (NSString* baseName in cueBaseNames)
-    {
-        NSNumber* cueIndex = cueFileIndexes[baseName];
-        NSString* cueFileName = cueFileNames[baseName];
-        if (!cueIndex || !cueFileName)
-            continue;
-
-        // Use CUE file path for playback
-        auto const location = tr_torrentFindFile(self.fHandle, (tr_file_index_t)cueIndex.unsignedIntegerValue);
-        NSString* path = !std::empty(location) ? @(location.c_str()) : [self.currentDirectory stringByAppendingPathComponent:cueFileName];
-
-        // Use audio file index for progress tracking (CUE is tiny, audio progress matters for playability)
-        NSNumber* audioIndex = cueAudioIndexes[baseName];
-        if (!audioIndex)
-            continue;
-        NSNumber* progressIndex = audioIndex ?: cueIndex;
-
-        CGFloat progress = cueProgress[baseName] ? cueProgress[baseName].doubleValue :
-                                                   tr_torrentFileConsecutiveProgress(self.fHandle, progressIndex.unsignedIntegerValue);
-        if (progress < 0)
-            progress = 0;
-
-        // Check if audio file is wanted
-        auto const audioFile = tr_torrentFile(self.fHandle, (tr_file_index_t)progressIndex.unsignedIntegerValue);
-
-        // Skip if audio file not wanted unless fully downloaded
-        if (!audioFile.wanted && progress < 1.0)
-        {
-            continue;
-        }
-
-        // Include all wanted CUE files regardless of progress
-        // (visibility will be controlled by TorrentTableView based on progress)
-
-        NSString* displayName = baseName.lastPathComponent.humanReadableFileName;
-        if (!displayName || displayName.length == 0)
-            displayName = baseName.lastPathComponent;
-
-        [playable addObject:@{
-            @"type" : @"file",
-            @"category" : @"audio",
-            @"index" : progressIndex, // Use audio index for progress tracking via button.tag
-            @"name" : displayName,
-            @"path" : path, // CUE path for playback
-            @"season" : @0,
-            @"episode" : cueIndex,
-            @"progress" : @(progress),
-            @"sortKey" : cueFileName.lastPathComponent
-        }];
-    }
 
     // Sort by original file name to match download order
     [playable sortUsingComparator:^NSComparisonResult(NSDictionary* a, NSDictionary* b) {
@@ -1881,10 +1784,19 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
         return [aKey localizedStandardCompare:bKey];
     }];
 
-    // Build final entries with titles
+        // Build final entries with titles
     NSMutableArray<NSDictionary*>* result = [NSMutableArray arrayWithCapacity:playable.count];
     for (NSDictionary* fileInfo in playable)
     {
+        // Skip DJVU/FB2 source files that haven't been converted yet
+        // (if converted, the path will point to PDF/EPUB, not the original)
+        NSString* path = fileInfo[@"path"];
+        NSString* pathExt = path.pathExtension.lowercaseString;
+        if ([pathExt isEqualToString:@"djvu"] || [pathExt isEqualToString:@"djv"] || [pathExt isEqualToString:@"fb2"])
+        {
+            continue;
+        }
+
         NSMutableDictionary* entry = [fileInfo mutableCopy];
         entry[@"baseTitle"] = fileInfo[@"name"];
         [result addObject:entry];

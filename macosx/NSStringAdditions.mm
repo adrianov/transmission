@@ -425,6 +425,15 @@
         title = [hdRegex stringByReplacingMatchesInString:title options:0 range:NSMakeRange(0, title.length) withTemplate:@" "];
     }
 
+    // Remove any [Source]-?SbR variants (e.g., SbR, -SbR)
+    NSRegularExpression* sbrRegex = [NSRegularExpression regularExpressionWithPattern:@"\\b[a-z0-9]*-?SbR\\b"
+                                                                              options:NSRegularExpressionCaseInsensitive
+                                                                                error:nil];
+    if (sbrRegex != nil)
+    {
+        title = [sbrRegex stringByReplacingMatchesInString:title options:0 range:NSMakeRange(0, title.length) withTemplate:@" "];
+    }
+
     // Technical tags to remove
     NSArray* techTags = @[
         // Video sources
@@ -845,6 +854,15 @@
     if (hdRegexEpisode != nil)
     {
         title = [hdRegexEpisode stringByReplacingMatchesInString:title options:0 range:NSMakeRange(0, title.length) withTemplate:@""];
+    }
+
+    // Remove any [Source]-?SbR variants from episode title
+    NSRegularExpression* sbrRegexEpisode = [NSRegularExpression regularExpressionWithPattern:@"\\b[a-z0-9]*-?SbR\\b"
+                                                                                     options:NSRegularExpressionCaseInsensitive
+                                                                                       error:nil];
+    if (sbrRegexEpisode != nil)
+    {
+        title = [sbrRegexEpisode stringByReplacingMatchesInString:title options:0 range:NSMakeRange(0, title.length) withTemplate:@""];
     }
 
     for (NSString* tag in tagsToStrip)
