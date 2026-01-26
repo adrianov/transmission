@@ -719,7 +719,7 @@ static CGFloat const kPlayButtonVerticalPadding = 4.0;
 
         if ([type isEqualToString:@"document-books"] || [category isEqualToString:@"books"])
         {
-            symbolName = @"book";  // Single book for documents
+            symbolName = @"book";  // Outlined book for documents
         }
         else if ([type isEqualToString:@"album"])
         {
@@ -731,7 +731,7 @@ static CGFloat const kPlayButtonVerticalPadding = 4.0;
         }
         else if ([type isEqualToString:@"dvd"] || [type isEqualToString:@"bluray"] || [category isEqualToString:@"video"])
         {
-            symbolName = @"play";  // Smaller technical triangle for video
+            symbolName = @"play";  // Outlined triangle for video
         }
 
         if (symbolName)
@@ -1296,6 +1296,8 @@ static CGFloat const kPlayButtonVerticalPadding = 4.0;
 
     PlayButton* playButton = [[PlayButton alloc] init];
     playButton.title = title;
+    playButton.image = [self iconForPlayableFileItem:item];
+    playButton.imagePosition = NSImageLeft;
     playButton.target = self;
     playButton.action = @selector(playMediaFile:);
     __weak TorrentTableView* weakSelf = self;
@@ -1435,17 +1437,16 @@ static NSString* folderForPlayButton(NSButton* sender, Torrent* torrent)
             }
 
             BOOL const itemIsBooks = [category isEqualToString:@"books"];
-            BOOL const itemIsAudio = [category isEqualToString:@"audio"];
-            NSString* icon = itemIsBooks ? @"📖" : (itemIsAudio ? ([type isEqualToString:@"album"] ? @"♬" : @"♫") : @"⏵");
+            (void)itemIsBooks; // Suppress unused variable warning
 
             if (singleItem)
             {
-                entry[@"baseTitle"] = [NSString stringWithFormat:@"%@ %@", icon, itemIsBooks ? @"Read" : @"Play"];
+                entry[@"baseTitle"] = itemIsBooks ? @"Read" : @"Play";
             }
             else
             {
                 // Multi-item: baseTitle humanized in Torrent.mm
-                entry[@"baseTitle"] = [NSString stringWithFormat:@"%@ %@", icon, entry[@"baseTitle"] ?: @""];
+                entry[@"baseTitle"] = entry[@"baseTitle"] ?: @"";
             }
             entry[@"title"] = entry[@"baseTitle"] ?: @"";
             entry[@"visible"] = @NO;

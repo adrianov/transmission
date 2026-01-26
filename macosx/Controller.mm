@@ -4805,7 +4805,7 @@ static NSTimeInterval const kLowPriorityDelay = 15.0;
         NSSearchToolbarItem* item = [[NSSearchToolbarItem alloc] initWithItemIdentifier:ident];
 
         NSSearchField* searchField = item.searchField;
-        searchField.placeholderString = NSLocalizedString(@"Search on the rutracker.org...", "Search toolbar item -> placeholder");
+        searchField.placeholderString = NSLocalizedString(@"Press Enter to Search on the rutracker.org...", "Search toolbar item -> placeholder");
         searchField.delegate = self;
         self.fToolbarSearchField = searchField;
 
@@ -5894,7 +5894,7 @@ static NSTimeInterval const kLowPriorityDelay = 15.0;
         topDomain = sortedDomains[0];
     }
 
-    NSString* placeholder = [NSString stringWithFormat:NSLocalizedString(@"Search on %@...", "Search toolbar item -> placeholder"), topDomain];
+    NSString* placeholder = [NSString stringWithFormat:NSLocalizedString(@"Press Enter to Search on %@...", "Search toolbar item -> placeholder"), topDomain];
     if (![self.fToolbarSearchField.placeholderString isEqualToString:placeholder])
     {
         self.fToolbarSearchField.placeholderString = placeholder;
