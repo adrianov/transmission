@@ -1908,8 +1908,7 @@ static BOOL convertDjvuFileDeterministic(NSString* djvuPath, NSString* tmpPdfPat
                 {
                     // Check bitonal directly from RGB buffer (avoids gray buffer allocation for bitonal pages)
                     // Skip bitonal check for PHOTO pages - they should stay as JP2
-                    bool const bitonal = (pageType != DDJVU_PAGETYPE_PHOTO) &&
-                        isBitonalGrayscaleRgb(rgb.data(), renderW, renderH, rowBytes);
+                    bool const bitonal = (pageType != DDJVU_PAGETYPE_PHOTO) && isBitonalGrayscaleRgb(rgb.data(), renderW, renderH, rowBytes);
                     if (bitonal)
                     {
                         bool const preferBitonal = (renderDpi == pageDpi) && (renderW == pageWidth) && (renderH == pageHeight);
@@ -2037,10 +2036,10 @@ static BOOL convertDjvuFileDeterministic(NSString* djvuPath, NSString* tmpPdfPat
                     dispatch_group_async(encGroup, encQ, ^{
                         @autoreleasepool
                         {
-                        dispatch_semaphore_wait(sem, DISPATCH_TIME_FOREVER);
-                        std::vector<uint8_t> jp2;
-                        (void)encodeJp2Grok(&jp2, pixels.data(), cropW, cropH, (size_t)cropW * 3U, false, quality);
-                        if (!jp2.empty())
+                            dispatch_semaphore_wait(sem, DISPATCH_TIME_FOREVER);
+                            std::vector<uint8_t> jp2;
+                            (void)encodeJp2Grok(&jp2, pixels.data(), cropW, cropH, (size_t)cropW * 3U, false, quality);
+                            if (!jp2.empty())
                                 pagesPtr[pageNum].image.bytes = std::move(jp2);
                             dispatch_semaphore_signal(sem);
                         }
