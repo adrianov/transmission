@@ -30,7 +30,6 @@
         self.translatesAutoresizingMaskIntoConstraints = NO;  // Required for Auto Layout
         self.wantsLayer = YES;
         self.layerContentsRedrawPolicy = NSViewLayerContentsRedrawOnSetNeedsDisplay;
-        self.canDrawConcurrently = YES;
 
         _arrangedSubviews = [NSMutableArray array];
         _cachedSizes = [NSMapTable weakToStrongObjectsMapTable];
