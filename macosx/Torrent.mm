@@ -1668,7 +1668,11 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
         }
         else
         {
-            displayName = fileName.lastPathComponent.humanReadableEpisodeName;
+            displayName = [fileName.lastPathComponent humanReadableEpisodeTitleWithTorrentName:self.name];
+            if (!displayName)
+            {
+                displayName = fileName.lastPathComponent.humanReadableEpisodeName;
+            }
             if (!displayName)
             {
                 displayName = fileName.lastPathComponent.stringByDeletingPathExtension.humanReadableFileName;
@@ -1688,6 +1692,122 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
             @"progress" : @(progress),
             @"sortKey" : fileName.lastPathComponent
         }];
+    }
+
+    if (playable.count == 0 && cueBaseNames.count == 0)
+        return nil;
+
+    // Remove common lexemes across all episode titles
+    NSMutableArray* episodeItems = [NSMutableArray array];
+    for (NSDictionary* item in playable)
+    {
+        if ([item[@"type"] isEqualToString:@"file"] && item[@"season"] != nil && [item[@"season"] intValue] >= 0)
+        {
+            [episodeItems addObject:item];
+        }
+    }
+
+    if (episodeItems.count > 1)
+    {
+        BOOL changed = NO;
+        do
+        {
+            changed = NO;
+            NSString* commonPrefix = nil;
+            NSString* commonSuffix = nil;
+            BOOL prefixSame = YES;
+            BOOL suffixSame = YES;
+
+            for (NSDictionary* item in episodeItems)
+            {
+                NSString* name = item[@"name"];
+                // Only look at the part after "E# - "
+                NSRange dashRange = [name rangeOfString:@" - "];
+                if (dashRange.location == NSNotFound)
+                {
+                    prefixSame = NO;
+                    suffixSame = NO;
+                    break;
+                }
+
+                NSString* titlePart = [name substringFromIndex:dashRange.location + dashRange.length];
+                NSArray* words = [titlePart componentsSeparatedByString:@" "];
+                if (words.count < 2)
+                {
+                    prefixSame = NO;
+                    suffixSame = NO;
+                    break;
+                }
+
+                if (commonPrefix == nil)
+                {
+                    commonPrefix = words.firstObject;
+                }
+                else if (![commonPrefix isEqualToString:words.firstObject])
+                {
+                    prefixSame = NO;
+                }
+
+                if (commonSuffix == nil)
+                {
+                    commonSuffix = words.lastObject;
+                }
+                else if (![commonSuffix isEqualToString:words.lastObject])
+                {
+                    suffixSame = NO;
+                }
+            }
+
+            if (prefixSame && commonPrefix.length > 0)
+            {
+                for (NSUInteger i = 0; i < playable.count; i++)
+                {
+                    NSMutableDictionary* item = [playable[i] mutableCopy];
+                    if ([episodeItems containsObject:playable[i]])
+                    {
+                        NSString* name = item[@"name"];
+                        NSRange dashRange = [name rangeOfString:@" - "];
+                        NSString* prefix = [name substringToIndex:dashRange.location + dashRange.length];
+                        NSString* titlePart = [name substringFromIndex:dashRange.location + dashRange.length];
+                        NSString* newTitle = [[titlePart substringFromIndex:commonPrefix.length] stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet];
+                        item[@"name"] = newTitle.length > 0 ? [prefix stringByAppendingString:newTitle] : [prefix stringByReplacingOccurrencesOfString:@" - " withString:@""];
+                        playable[i] = item;
+                        changed = YES;
+                    }
+                }
+            }
+            else if (suffixSame && commonSuffix.length > 0)
+            {
+                for (NSUInteger i = 0; i < playable.count; i++)
+                {
+                    NSMutableDictionary* item = [playable[i] mutableCopy];
+                    if ([episodeItems containsObject:playable[i]])
+                    {
+                        NSString* name = item[@"name"];
+                        NSRange dashRange = [name rangeOfString:@" - "];
+                        NSString* prefix = [name substringToIndex:dashRange.location + dashRange.length];
+                        NSString* titlePart = [name substringFromIndex:dashRange.location + dashRange.length];
+                        NSString* newTitle = [[titlePart substringToIndex:titlePart.length - commonSuffix.length] stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet];
+                        item[@"name"] = newTitle.length > 0 ? [prefix stringByAppendingString:newTitle] : [prefix stringByReplacingOccurrencesOfString:@" - " withString:@""];
+                        playable[i] = item;
+                        changed = YES;
+                    }
+                }
+            }
+
+            if (changed)
+            {
+                // Refresh episodeItems with new names for next iteration
+                [episodeItems removeAllObjects];
+                for (NSDictionary* item in playable)
+                {
+                    if ([item[@"type"] isEqualToString:@"file"] && item[@"season"] != nil && [item[@"season"] intValue] >= 0)
+                    {
+                        [episodeItems addObject:item];
+                    }
+                }
+            }
+        } while (changed);
     }
 
     if (playable.count == 0 && cueBaseNames.count == 0)
@@ -2360,12 +2480,21 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
 {
     if (!self.fDisplayName)
     {
-        // Cache the human-readable title result
-        if (!self.fCachedHumanReadableTitle)
+        // Check for episode title first
+        NSString* episodeTitle = [self.name humanReadableEpisodeTitleWithTorrentName:self.name];
+        if (episodeTitle)
         {
-            self.fCachedHumanReadableTitle = self.name.humanReadableTitle;
+            self.fDisplayName = episodeTitle;
         }
-        self.fDisplayName = self.fCachedHumanReadableTitle;
+        else
+        {
+            // Cache the human-readable title result
+            if (!self.fCachedHumanReadableTitle)
+            {
+                self.fCachedHumanReadableTitle = self.name.humanReadableTitle;
+            }
+            self.fDisplayName = self.fCachedHumanReadableTitle;
+        }
     }
     return self.fDisplayName;
 }

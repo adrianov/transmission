@@ -4,6 +4,8 @@
 
 #import <Foundation/Foundation.h>
 
+NS_ASSUME_NONNULL_BEGIN
+
 @interface NSString (NSStringAdditions)
 
 @property(nonatomic, class, readonly) NSString* ellipsis;
@@ -60,14 +62,30 @@
  *
  * Returns nil if no episode pattern found.
  */
-@property(nonatomic, readonly, copy) NSString* humanReadableEpisodeName;
+@property(nonatomic, readonly, copy, nullable) NSString* humanReadableEpisodeName;
+
+/**
+ * Converts a filename to a human-readable episode title.
+ *
+ * Examples:
+ *   Ponies.S01E01.The.Beginning.1080p -> E1 - The Beginning
+ *   Ponies.S01E01.1080p -> E1
+ *
+ * Returns nil if no episode pattern found.
+ */
+@property(nonatomic, readonly, copy, nullable) NSString* humanReadableEpisodeTitle;
+
+/**
+ * Converts a filename to a human-readable episode title, optionally stripping the torrent name if redundant.
+ */
+- (nullable NSString*)humanReadableEpisodeTitleWithTorrentName:(nullable NSString*)torrentName;
 
 /**
  * Extracts season and episode numbers from filename.
  *
  * Returns @[@(season), @(episode)] or nil if no pattern found.
  */
-@property(nonatomic, readonly, copy) NSArray<NSNumber*>* episodeNumbers;
+@property(nonatomic, readonly, copy, nullable) NSArray<NSNumber*>* episodeNumbers;
 
 @end
 
@@ -75,3 +93,5 @@ __attribute__((annotate("returns_localized_nsstring"))) static inline NSString* 
 {
     return s;
 }
+
+NS_ASSUME_NONNULL_END

@@ -246,16 +246,13 @@
         return title;
     }
 
-    // Remove file extension
-    NSArray* extensions = @[ @"mkv", @"avi", @"mp4", @"mov", @"wmv", @"flv", @"webm", @"m4v", @"torrent" ];
-    for (NSString* ext in extensions)
+    // Remove file extension (any 2-5 character alphanumeric extension)
+    NSRegularExpression* extRegex = [NSRegularExpression regularExpressionWithPattern:@"\\.[a-z0-9]{2,5}$"
+                                                                              options:NSRegularExpressionCaseInsensitive
+                                                                                error:nil];
+    if (extRegex != nil)
     {
-        NSString* dotExt = [@"." stringByAppendingString:ext];
-        if ([title.lowercaseString hasSuffix:dotExt])
-        {
-            title = [title substringToIndex:title.length - dotExt.length];
-            break;
-        }
+        title = [extRegex stringByReplacingMatchesInString:title options:0 range:NSMakeRange(0, title.length) withTemplate:@""];
     }
 
     // Normalize bracketed metadata early to simplify parsing
@@ -410,6 +407,24 @@
         year = yearMatch ? [title substringWithRange:yearMatch.range] : nil;
     }
 
+    // Remove any [Source]-?Rip variants (e.g., WEB-Rip, WEBRip, BD-Rip, BDRip)
+    NSRegularExpression* ripRegex = [NSRegularExpression regularExpressionWithPattern:@"\\b[a-z0-9]+-?rip\\b"
+                                                                              options:NSRegularExpressionCaseInsensitive
+                                                                                error:nil];
+    if (ripRegex != nil)
+    {
+        title = [ripRegex stringByReplacingMatchesInString:title options:0 range:NSMakeRange(0, title.length) withTemplate:@" "];
+    }
+
+    // Remove any [Source]HD variants (e.g., EniaHD, playHD)
+    NSRegularExpression* hdRegex = [NSRegularExpression regularExpressionWithPattern:@"\\b[a-z0-9]+HD\\b"
+                                                                             options:NSRegularExpressionCaseInsensitive
+                                                                               error:nil];
+    if (hdRegex != nil)
+    {
+        title = [hdRegex stringByReplacingMatchesInString:title options:0 range:NSMakeRange(0, title.length) withTemplate:@" "];
+    }
+
     // Technical tags to remove
     NSArray* techTags = @[
         // Video sources
@@ -421,6 +436,8 @@
         @"HDRip",
         @"DVDRip",
         @"HDTV",
+        @"WEB-DLRip",
+        @"DLRip",
         // Codecs
         @"HEVC",
         @"H264",
@@ -721,7 +738,7 @@
     NSString* filename = self.lastPathComponent;
 
     // Try S01E05 or S1E5 pattern (most common for TV shows)
-    NSRegularExpression* seasonEpisodeRegex = [NSRegularExpression regularExpressionWithPattern:@"\\bS(\\d{1,2})[.\\s]?E(\\d{1,2})\\b"
+    NSRegularExpression* seasonEpisodeRegex = [NSRegularExpression regularExpressionWithPattern:@"\\bS(\\d{1,2})[.\\s]?E(\\d{1,3})\\b"
                                                                                         options:NSRegularExpressionCaseInsensitive
                                                                                           error:nil];
     NSTextCheckingResult* seMatch = [seasonEpisodeRegex firstMatchInString:filename options:0 range:NSMakeRange(0, filename.length)];
@@ -731,8 +748,19 @@
         return [NSString stringWithFormat:@"E%ld", (long)episode];
     }
 
+    // Try E05 or E12 pattern (standalone episode)
+    NSRegularExpression* standaloneEpisodeRegex = [NSRegularExpression regularExpressionWithPattern:@"\\bE(\\d{1,3})\\b"
+                                                                                            options:NSRegularExpressionCaseInsensitive
+                                                                                              error:nil];
+    NSTextCheckingResult* standaloneMatch = [standaloneEpisodeRegex firstMatchInString:filename options:0 range:NSMakeRange(0, filename.length)];
+    if (standaloneMatch && standaloneMatch.numberOfRanges >= 2)
+    {
+        NSInteger episode = [[filename substringWithRange:[standaloneMatch rangeAtIndex:1]] integerValue];
+        return [NSString stringWithFormat:@"E%ld", (long)episode];
+    }
+
     // Try 1x05 pattern (alternative TV format)
-    NSRegularExpression* altSeasonRegex = [NSRegularExpression regularExpressionWithPattern:@"\\b(\\d{1,2})x(\\d{1,2})\\b"
+    NSRegularExpression* altSeasonRegex = [NSRegularExpression regularExpressionWithPattern:@"\\b(\\d{1,2})x(\\d{1,3})\\b"
                                                                                     options:NSRegularExpressionCaseInsensitive
                                                                                       error:nil];
     NSTextCheckingResult* altMatch = [altSeasonRegex firstMatchInString:filename options:0 range:NSMakeRange(0, filename.length)];
@@ -744,6 +772,158 @@
 
     // No episode pattern found - return nil to use humanized filename instead
     return nil;
+}
+
+- (NSString*)humanReadableEpisodeTitle
+{
+    return [self humanReadableEpisodeTitleWithTorrentName:nil];
+}
+
+- (NSString*)humanReadableEpisodeTitleWithTorrentName:(NSString*)torrentName
+{
+    NSString* filename = self.lastPathComponent;
+
+    // Match SxxExx or Exx pattern
+    NSRegularExpression* episodeRegex = [NSRegularExpression regularExpressionWithPattern:@"\\b(?:S?\\d{1,2})?E(\\d{1,3})\\b"
+                                                                                  options:NSRegularExpressionCaseInsensitive
+                                                                                    error:nil];
+    if (episodeRegex == nil)
+    {
+        return nil;
+    }
+    NSTextCheckingResult* episodeMatch = [episodeRegex firstMatchInString:filename options:0 range:NSMakeRange(0, filename.length)];
+    if (!episodeMatch)
+    {
+        return nil;
+    }
+
+    NSInteger episodeNum = [[filename substringWithRange:[episodeMatch rangeAtIndex:1]] integerValue];
+    NSString* episodePrefix = [NSString stringWithFormat:@"E%ld", (long)episodeNum];
+
+    // Try to extract title after the episode marker
+    // Remove everything before and including the episode marker
+    NSString* remaining = [filename substringFromIndex:episodeMatch.range.location + episodeMatch.range.length];
+
+    // If there's a dot or hyphen immediately after, skip it
+    NSRegularExpression* separatorRegex = [NSRegularExpression regularExpressionWithPattern:@"^[.\\-\\s]+" options:0 error:nil];
+    if (separatorRegex != nil)
+    {
+        remaining = [separatorRegex stringByReplacingMatchesInString:remaining options:0 range:NSMakeRange(0, remaining.length) withTemplate:@""];
+    }
+
+    if (remaining.length == 0)
+    {
+        return episodePrefix;
+    }
+
+    // Cleanup the remaining part using humanReadableFileName logic
+    NSString* title = remaining.humanReadableFileName;
+
+    // Aggressively strip technical tags from the episode title specifically
+    NSArray* tagsToStrip = @[
+        @"1080p", @"720p", @"2160p", @"480p", @"8K", @"4K", @"UHD",
+        @"WEB-DL", @"WEBDL", @"WEBRip", @"BDRip", @"BluRay", @"HDRip", @"DVDRip", @"HDTV",
+        @"WEB-DLRip", @"DLRip",
+        @"H264", @"H.264", @"H265", @"H.265", @"x264", @"x265", @"HEVC", @"AVC",
+        @"AMZN", @"NF", @"DSNP", @"HMAX", @"PCOK", @"ATVP", @"APTV",
+        @"2xRu", @"Ru", @"En", @"qqss44", @"WEB", @"DL"
+    ];
+
+    // Remove any [Source]-?Rip variants from episode title
+    NSRegularExpression* ripRegexEpisode = [NSRegularExpression regularExpressionWithPattern:@"\\b[a-z0-9]+-?rip\\b"
+                                                                                     options:NSRegularExpressionCaseInsensitive
+                                                                                       error:nil];
+    if (ripRegexEpisode != nil)
+    {
+        title = [ripRegexEpisode stringByReplacingMatchesInString:title options:0 range:NSMakeRange(0, title.length) withTemplate:@""];
+    }
+
+    // Remove any [Source]HD variants from episode title
+    NSRegularExpression* hdRegexEpisode = [NSRegularExpression regularExpressionWithPattern:@"\\b[a-z0-9]+HD\\b"
+                                                                                    options:NSRegularExpressionCaseInsensitive
+                                                                                      error:nil];
+    if (hdRegexEpisode != nil)
+    {
+        title = [hdRegexEpisode stringByReplacingMatchesInString:title options:0 range:NSMakeRange(0, title.length) withTemplate:@""];
+    }
+
+    for (NSString* tag in tagsToStrip)
+    {
+        NSString* pattern = [NSString stringWithFormat:@"\\b%@\\b", tag];
+        NSRegularExpression* tagRegex = [NSRegularExpression regularExpressionWithPattern:pattern
+                                                                                  options:NSRegularExpressionCaseInsensitive
+                                                                                    error:nil];
+        if (tagRegex != nil)
+        {
+            title = [tagRegex stringByReplacingMatchesInString:title options:0 range:NSMakeRange(0, title.length) withTemplate:@""];
+        }
+    }
+
+    // Remove file extension if it survived
+    title = title.stringByDeletingPathExtension;
+
+    // Final cleanup of spaces and separators
+    // Also remove empty brackets/parentheses like [] or ()
+    NSRegularExpression* emptyBracketsRegex = [NSRegularExpression regularExpressionWithPattern:@"[\\[\\(]\\s*[\\]\\)]" options:0 error:nil];
+    if (emptyBracketsRegex != nil)
+    {
+        title = [emptyBracketsRegex stringByReplacingMatchesInString:title options:0 range:NSMakeRange(0, title.length) withTemplate:@""];
+    }
+
+    // Remove stray closing brackets or parentheses that might be left over
+    title = [title stringByReplacingOccurrencesOfString:@"]" withString:@""];
+    title = [title stringByReplacingOccurrencesOfString:@")" withString:@""];
+
+    NSRegularExpression* spaceRegex = [NSRegularExpression regularExpressionWithPattern:@"\\s+" options:0 error:nil];
+    if (spaceRegex != nil)
+    {
+        title = [spaceRegex stringByReplacingMatchesInString:title options:0 range:NSMakeRange(0, title.length) withTemplate:@" "];
+    }
+    title = [title stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet];
+
+    // Remove trailing/leading hyphens, dots, and spaces
+    NSCharacterSet* trimSet = [NSCharacterSet characterSetWithCharactersInString:@"- ."];
+    title = [title stringByTrimmingCharactersInSet:trimSet];
+
+    // Final check for file extension that might have survived the stringByDeletingPathExtension
+    if ([title.lowercaseString hasSuffix:@"mkv"])
+    {
+        title = [title substringToIndex:title.length - 3];
+        title = [title stringByTrimmingCharactersInSet:trimSet];
+    }
+
+    // If the title is just a repeat of the torrent name (movie name), it's probably garbage
+    if (title.length > 1)
+    {
+        if (torrentName)
+        {
+            NSString* humanTorrentName = torrentName.humanReadableTitle;
+            // Strip season/year/resolution from torrent name for comparison
+            NSRegularExpression* cleanupRegex = [NSRegularExpression regularExpressionWithPattern:@"\\s*(- Season \\d+|\\(\\d{4}\\)|#\\d+p|#\\w+)" options:0 error:nil];
+            if (cleanupRegex != nil)
+            {
+                NSString* baseTorrentName = [cleanupRegex stringByReplacingMatchesInString:humanTorrentName options:0 range:NSMakeRange(0, humanTorrentName.length) withTemplate:@""];
+                
+                // If title is just the series name, or the series name + year, it's redundant
+                if ([title.lowercaseString isEqualToString:baseTorrentName.lowercaseString])
+                {
+                    return episodePrefix;
+                }
+                
+                // Check if title is "Series Name (Year)" or "Series Name Year"
+                NSRegularExpression* yearSuffixRegex = [NSRegularExpression regularExpressionWithPattern:@"\\s*\\(?\\b(19|20)\\d{2}\\b\\)?" options:0 error:nil];
+                NSString* titleWithoutYear = [yearSuffixRegex stringByReplacingMatchesInString:title options:0 range:NSMakeRange(0, title.length) withTemplate:@""];
+                if ([titleWithoutYear.lowercaseString isEqualToString:baseTorrentName.lowercaseString])
+                {
+                    return episodePrefix;
+                }
+            }
+        }
+
+        return [NSString stringWithFormat:@"%@ - %@", episodePrefix, title];
+    }
+
+    return episodePrefix;
 }
 
 - (NSArray<NSNumber*>*)episodeNumbers
