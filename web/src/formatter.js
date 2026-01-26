@@ -129,18 +129,17 @@ function formatHumanTitle(name) {
     return 'Unknown';
   }
 
-  // Shortcut: if title already looks clean (contains only letters, numbers,
-  // whitespace, and basic punctuation), return as-is.
-  // Using \w with 'u' flag for Unicode support (matches letters, numbers, and more).
-  // Underscores are excluded since they get replaced with spaces.
-  if (/^[\w\s,()[\]{}\-:;]+$/u.test(name) && !name.includes('_')) {
-    return name;
+  // Always replace underscores with spaces and collapse multiple whitespaces
+  let title = name.replaceAll('_', ' ').replaceAll(/\s+/g, ' ').trim();
+
+  // Shortcut: if title already looks clean, return it (after initial cleanup)
+  // Note: '.' is NOT in the clean regex, so any title with '.' will go through full processing.
+  if (/^[\p{L}\p{N}\s,()[\]{}\-:;]+$/u.test(title)) {
+    return title;
   }
+
   // Remove file extension
-  let title = name.replace(
-    /\.(mkv|avi|mp4|mov|wmv|flv|webm|m4v|torrent)$/i,
-    '',
-  );
+  title = title.replace(/\.(mkv|avi|mp4|mov|wmv|flv|webm|m4v|torrent)$/i, '');
 
   // Normalize bracketed metadata early to simplify parsing
   title = title.replaceAll('[', ' ').replaceAll(']', ' ');
@@ -152,9 +151,6 @@ function formatHumanTitle(name) {
     /(BDRip|HDRip|DVDRip|WEBRip)(1080p|720p|2160p|480p)/gi,
     '$1 $2',
   );
-
-  // Normalize underscore before resolution (e.g., "_1080p" -> " 1080p")
-  title = title.replaceAll('_', ' ');
 
   // Resolution patterns
   const resMatch = title.match(/\b(2160p|1080p|720p|480p)\b/i);
@@ -230,10 +226,7 @@ function formatHumanTitle(name) {
   ];
 
   // Handle BluRay special case to preserve hyphen (Blu-Ray, BluRay -> removed)
-  title = title.replaceAll(
-    /(?:^|\.|\\s)Blu[\s-]*Ray(?:$|\\.|\\s)/gi,
-    '',
-  );
+  title = title.replaceAll(/(?:^|\.|\\s)Blu[\s-]*Ray(?:$|\\.|\\s)/gi, '');
 
   // Remove all other tech tags
   for (const tag of allTags) {
@@ -241,7 +234,10 @@ function formatHumanTitle(name) {
       continue; // Already handled above
     }
     const escapedTag = escapeRegex(tag);
-    title = title.replaceAll(new RegExp(`(?:^|\\.|\\s)${escapedTag}(?:$|\\.|\\s)`, 'gi'), ' ');
+    title = title.replaceAll(
+      new RegExp(`(?:^|\\.|\\s)${escapedTag}(?:$|\\.|\\s)`, 'gi'),
+      ' ',
+    );
   }
 
   // Remove resolution, season markers, year, date (and preceding dot if used as separator)
@@ -268,10 +264,15 @@ function formatHumanTitle(name) {
     .replace(/\(?\d{2}\.\d{2}\.\d{4}\)?/, '')
     .replace(/\(?\d{2}\.\d{2}\.\d{2}\)?/, '');
 
-  // Only replace dots with spaces if title uses dots as separators (no spaces)
-  const hasDotSeparators = !title.includes(' ') && title.includes('.');
-  if (hasDotSeparators) {
-    title = title.replaceAll(/[.]/g, ' ');
+  // Replace dots with spaces if more than 2 words are glued with dots (e.g., Word.Word.Word)
+  // or if the title uses dots as separators (no spaces at all)
+  /* eslint-disable sonarjs/slow-regex -- simple patterns on short strings */
+  const gluedDotsRegex = /[\p{L}\p{N}]+\.[\p{L}\p{N}]+\.[\p{L}\p{N}]+/u;
+  const hasGluedDots = gluedDotsRegex.test(title);
+  /* eslint-enable sonarjs/slow-regex */
+  const hasNoSpaces = !title.includes(' ');
+  if (hasGluedDots || (hasNoSpaces && title.includes('.'))) {
+    title = title.replaceAll('.', ' ');
   }
 
   // Normalize separators, preserve existing " - "

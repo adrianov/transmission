@@ -222,16 +222,23 @@
         return @"Unknown";
     }
 
-    // Shortcut: if title already looks clean, return as-is
+    NSString* title = self;
+
+    // Always replace underscores with spaces and collapse multiple whitespaces
+    title = [title stringByReplacingOccurrencesOfString:@"_" withString:@" "];
+    NSRegularExpression* multiSpaceRegex = [NSRegularExpression regularExpressionWithPattern:@"\\s+" options:0 error:nil];
+    title = [multiSpaceRegex stringByReplacingMatchesInString:title options:0 range:NSMakeRange(0, title.length) withTemplate:@" "];
+    title = [title stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet];
+
+    // Shortcut: if title already looks clean, return it (after initial cleanup)
+    // Note: '.' is NOT in the clean regex, so any title with '.' will go through full processing.
     NSRegularExpression* cleanTitleRegex = [NSRegularExpression regularExpressionWithPattern:@"^[\\p{L}\\p{N}\\s,\\[\\]\\(\\)\\{\\}\\-:;]+$"
                                                                                      options:0
                                                                                        error:nil];
-    if ([cleanTitleRegex firstMatchInString:self options:0 range:NSMakeRange(0, self.length)])
+    if ([cleanTitleRegex firstMatchInString:title options:0 range:NSMakeRange(0, title.length)])
     {
-        return self;
+        return title;
     }
-
-    NSString* title = self;
 
     // Remove file extension
     NSArray* extensions = @[ @"mkv", @"avi", @"mp4", @"mov", @"wmv", @"flv", @"webm", @"m4v", @"torrent" ];
@@ -522,9 +529,12 @@
     title = [fullDateRegex stringByReplacingMatchesInString:title options:0 range:NSMakeRange(0, title.length) withTemplate:@""];
     title = [shortDateRegex stringByReplacingMatchesInString:title options:0 range:NSMakeRange(0, title.length) withTemplate:@""];
 
-    // Only replace dots with spaces if title uses dots as separators (no spaces)
-    BOOL hasDotSeparators = ![title containsString:@" "] && [title containsString:@"."];
-    if (hasDotSeparators)
+    // Replace dots with spaces if more than 2 words are glued with dots (e.g., Word.Word.Word)
+    // or if the title uses dots as separators (no spaces at all)
+    NSRegularExpression* gluedDotsRegex = [NSRegularExpression regularExpressionWithPattern:@"[\\p{L}\\p{N}]+\\.[\\p{L}\\p{N}]+\\.[\\p{L}\\p{N}]+" options:0 error:nil];
+    BOOL const hasGluedDots = [gluedDotsRegex firstMatchInString:title options:0 range:NSMakeRange(0, title.length)] != nil;
+    BOOL const hasNoSpaces = ![title containsString:@" "];
+    if (hasGluedDots || (hasNoSpaces && [title containsString:@"."]))
     {
         title = [title stringByReplacingOccurrencesOfString:@"." withString:@" "];
     }
@@ -532,7 +542,6 @@
     // Normalize separators, preserve single dash separators as " - "
     // Also preserve hyphens in compound words (e.g., "Blu-Ray")
     NSString* dashPlaceholder = @"\u0000";
-    title = [title stringByReplacingOccurrencesOfString:@"_" withString:@" "];
     NSRegularExpression* dashGroupRegex = [NSRegularExpression regularExpressionWithPattern:@"(?:\\s*-\\s*)+" options:0 error:nil];
     title = [dashGroupRegex stringByReplacingMatchesInString:title options:0 range:NSMakeRange(0, title.length)
                                                 withTemplate:dashPlaceholder];
