@@ -2060,6 +2060,29 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
         if (![audioExtensions containsObject:ext])
             continue;
 
+        // Prioritize CUE files in the folder
+        if ([ext isEqualToString:@"cue"])
+        {
+            CGFloat progress = tr_torrentFileConsecutiveProgress(self.fHandle, i);
+            CGFloat normalized = progress > 0 ? progress : 0.0;
+            if (!self.fFolderFirstMediaProgressCache)
+            {
+                self.fFolderFirstMediaProgressCache = [NSMutableDictionary dictionary];
+            }
+            self.fFolderFirstMediaProgressCache[folder] = @(normalized);
+            return normalized;
+        }
+    }
+
+    for (NSNumber* fileIndex in fileIndices)
+    {
+        NSUInteger i = fileIndex.unsignedIntegerValue;
+        auto const file = tr_torrentFile(self.fHandle, i);
+        NSString* fileName = @(file.name);
+        NSString* ext = fileName.pathExtension.lowercaseString;
+        if (![audioExtensions containsObject:ext] || [ext isEqualToString:@"cue"])
+            continue;
+
         CGFloat progress = tr_torrentFileConsecutiveProgress(self.fHandle, i);
         CGFloat normalized = progress > 0 ? progress : 0.0;
         if (!self.fFolderFirstMediaProgressCache)

@@ -2133,12 +2133,27 @@ static NSString* folderForPlayButton(NSButton* sender, Torrent* torrent)
     // 1. First file that has started downloading (progress > 0)
     // 2. First file in the list
     NSDictionary* bestItem = nil;
+
+    // Prioritize .cue files
     for (NSDictionary* item in playableFiles)
     {
-        if ([item[@"progress"] doubleValue] > 0)
+        NSString* path = item[@"path"];
+        if ([path.pathExtension.lowercaseString isEqualToString:@"cue"])
         {
             bestItem = item;
             break;
+        }
+    }
+
+    if (!bestItem)
+    {
+        for (NSDictionary* item in playableFiles)
+        {
+            if ([item[@"progress"] doubleValue] > 0)
+            {
+                bestItem = item;
+                break;
+            }
         }
     }
 
@@ -2250,6 +2265,38 @@ static NSString* folderForPlayButton(NSButton* sender, Torrent* torrent)
         // Album folder: try IINA first, then default music player
         // IINA can handle cue+flac albums better than most music players
         NSURL* iinaURL = [NSWorkspace.sharedWorkspace URLForApplicationWithBundleIdentifier:@"com.colliderli.iina"];
+
+        // If this is an album folder, check if it contains a .cue file and use that instead of the folder path
+        __block NSString* cuePath = nil;
+        NSString* folder = item[@"folder"];
+        if (folder.length > 0)
+        {
+            NSIndexSet* fileIndexes = [torrent fileIndexesForFolder:folder];
+            [fileIndexes enumerateIndexesUsingBlock:^(NSUInteger idx, BOOL* stop) {
+                auto const file = tr_torrentFile(torrent.torrentStruct, (tr_file_index_t)idx);
+                NSString* fileName = @(file.name);
+                if ([fileName.pathExtension.lowercaseString isEqualToString:@"cue"])
+                {
+                    auto const location = tr_torrentFindFile(torrent.torrentStruct, (tr_file_index_t)idx);
+                    if (!std::empty(location))
+                    {
+                        cuePath = @(location.c_str());
+                    }
+                    else
+                    {
+                        cuePath = [torrent.currentDirectory stringByAppendingPathComponent:fileName];
+                    }
+                    *stop = YES;
+                }
+            }];
+        }
+
+        if (cuePath)
+        {
+            path = cuePath;
+            fileURL = [NSURL fileURLWithPath:path];
+        }
+
         if (iinaURL)
         {
             NSWorkspaceOpenConfiguration* config = [NSWorkspaceOpenConfiguration configuration];
