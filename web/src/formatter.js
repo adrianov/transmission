@@ -130,7 +130,13 @@ function formatHumanTitle(name) {
   }
 
   // Always replace underscores with spaces and collapse multiple whitespaces
-  let title = name.replaceAll('_', ' ').replaceAll(/\s+/g, ' ').trim();
+  let title = name
+    .replaceAll('_', ' ')
+    .replaceAll('(', ' (')
+    .replaceAll(')', ') ')
+    .replaceAll(',', ', ')
+    .replaceAll(/\s+/g, ' ')
+    .trim();
 
   // Shortcut: if title already looks clean, return it (after initial cleanup)
   // Note: '.' is NOT in the clean regex, so any title with '.' will go through full processing.
@@ -336,6 +342,15 @@ function formatHumanFileName(name) {
   if (!name) {
     return 'Unknown';
   }
+
+  // Always replace underscores with spaces and collapse multiple whitespaces
+  name = name
+    .replaceAll('_', ' ')
+    .replaceAll('(', ' (')
+    .replaceAll(')', ') ')
+    .replaceAll(',', ', ')
+    .replaceAll(/\s+/g, ' ')
+    .trim();
 
   // Keep the file extension intact if it looks like one.
   const lastDot = name.lastIndexOf('.');

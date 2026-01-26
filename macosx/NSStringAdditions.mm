@@ -226,6 +226,12 @@
 
     // Always replace underscores with spaces and collapse multiple whitespaces
     title = [title stringByReplacingOccurrencesOfString:@"_" withString:@" "];
+
+    // Ensure space prior to '(', after ')', and after ','
+    title = [title stringByReplacingOccurrencesOfString:@"(" withString:@" ("];
+    title = [title stringByReplacingOccurrencesOfString:@")" withString:@") "];
+    title = [title stringByReplacingOccurrencesOfString:@"," withString:@", "];
+
     NSRegularExpression* multiSpaceRegex = [NSRegularExpression regularExpressionWithPattern:@"\\s+" options:0 error:nil];
     title = [multiSpaceRegex stringByReplacingMatchesInString:title options:0 range:NSMakeRange(0, title.length) withTemplate:@" "];
     title = [title stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet];
@@ -619,6 +625,18 @@
     {
         return @"Unknown";
     }
+
+    // Always replace underscores with spaces and collapse multiple whitespaces
+    name = [name stringByReplacingOccurrencesOfString:@"_" withString:@" "];
+
+    // Ensure space prior to '(', after ')', and after ','
+    name = [name stringByReplacingOccurrencesOfString:@"(" withString:@" ("];
+    name = [name stringByReplacingOccurrencesOfString:@")" withString:@") "];
+    name = [name stringByReplacingOccurrencesOfString:@"," withString:@", "];
+
+    NSRegularExpression* multiSpaceRegex = [NSRegularExpression regularExpressionWithPattern:@"\\s+" options:0 error:nil];
+    name = [multiSpaceRegex stringByReplacingMatchesInString:name options:0 range:NSMakeRange(0, name.length) withTemplate:@" "];
+    name = [name stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet];
 
     NSUInteger whitespaceCount = 0;
     NSUInteger dotCount = 0;
