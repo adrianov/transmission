@@ -20,8 +20,7 @@ Major Grom Igra protiv pravil - Season 1 (2025) #2160p
 
 ### 1. File Extension Removal
 
-Common video file extensions are stripped:
-- `.mkv`, `.avi`, `.mp4`, `.mov`, `.wmv`, `.flv`, `.webm`, `.m4v`, `.torrent`
+Any trailing file extension (2 to 5 alphanumeric characters following a dot) is automatically stripped from the title.
 
 ### 2. Bracket Metadata Extraction
 
@@ -90,6 +89,8 @@ The following technical tags are filtered out:
 
 **Video Sources:**
 - `WEB-DL`, `WEBDL`, `WEBRip`, `BDRip`, `BluRay`, `HDRip`, `DVDRip`, `HDTV`
+- Any `[Source]-?Rip` variants (e.g., `WEB-Rip`, `DLRip`) are removed via regex.
+- Any `[Source]HD` variants (e.g., `EniaHD`, `playHD`) are removed via regex.
 
 **Video Codecs:**
 - `HEVC`, `H264`, `H.264`, `H265`, `H.265`, `x264`, `x265`, `AVC`, `10bit`
@@ -101,7 +102,7 @@ The following technical tags are filtered out:
 - `SDR`, `HDR`, `HDR10`, `DV`, `DoVi`
 
 **Streaming Sources:**
-- `AMZN`, `NF`, `DSNP`, `HMAX`, `PCOK`, `ATVP`, `APTV`
+- `AMZN`, `NF`, `DSNP`, `HMAX`, `PCOK`, `ATVP`, `APTV`, `EniaHD`
 
 **Release Info:**
 - `ExKinoRay`, `RuTracker`, `LostFilm`, `MP4`, `IMAX`, `REPACK`, `PROPER`, `EXTENDED`, `UNRATED`, `REMUX`
@@ -173,6 +174,10 @@ Media torrents display Play buttons below the status line for quick access to do
 - **Single document:** The button label is `Read`
 - **Document readiness:** Read buttons appear only when the file is 100% downloaded
 - **Episode detection:** Files with `S01E05` or `1x05` patterns show as `▶ E1`, `▶ E2`, etc.
+- **Episode title detection:** If a title follows the episode marker, it is extracted and cleaned (e.g., `▶ E1 - The Beginning`).
+- **Technical tag removal:** Titles are aggressively cleaned of technical tags like `1080p`, `WEB-DL`, `H264`, etc.
+- **Redundancy removal:** If the detected episode title is just a repeat of the series name, it is simplified to just the episode number.
+- **Common lexeme removal:** If all episodes in a torrent share the same tag at the same position (start or end of the title), that tag is automatically removed as garbage.
 - **Season grouping:** Multiple seasons show headers (`Season 1:`, `Season 2:`) followed by episode buttons
 - **Single season:** No header shown, just episode buttons (`▶ E1`, `▶ E2`, ...)
 - **Non-episode files:** Show lightly humanized filename (separator cleanup) (e.g., `▶ Artist Track Name`)
@@ -186,6 +191,8 @@ Media torrents display Play buttons below the status line for quick access to do
 Button titles for individual files follow these rules:
 
 1. **Episode files** (`S01E05`, `1x05` patterns): Show as `▶ E5`, `▶ E12`, etc.
+   - If a title is detected after the marker, it shows as `▶ E5 - Title`.
+   - Technical tags (`1080p`, `HEVC`, etc.) and redundant series names are stripped.
 2. **Non-episode files**: Show filename with lightweight separator normalization
    - If the name is separator-heavy (lots of `.` / `-` / `_` and few/no spaces), separators are replaced with spaces
    - Numeric separators inside dates/ranges are preserved (e.g., `25.04.14`, `2000-2003`)
