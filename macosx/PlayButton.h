@@ -10,4 +10,7 @@
 @property(nonatomic) BOOL isHovered;
 @property(nonatomic, copy) void (^onHover)(PlayButton* button);
 
+/// Resets the button state for reuse in a pool.
+- (void)prepareForReuse;
+
 @end
