@@ -1741,6 +1741,7 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
 
         [playable addObject:@{
             @"type" : @"file",
+            @"category" : @"audio",
             @"index" : progressIndex, // Use audio index for progress tracking via button.tag
             @"name" : displayName,
             @"path" : path, // CUE path for playback

@@ -63,6 +63,9 @@ static NSTimeInterval const kToggleProgressSeconds = 0.175;
 @property(nonatomic) BOOL fDisplaySmallStatusRegular;
 @property(nonatomic) BOOL fDisplayGroupRowRatio;
 
+@property(nonatomic, readonly) NSCache<NSString*, NSImage*>* fIconCache;
+@property(nonatomic, readonly) NSMapTable<Torrent*, NSMenu*>* fPlayMenuCache;
+
 @end
 
 @implementation TorrentTableView
@@ -95,6 +98,11 @@ static NSTimeInterval const kToggleProgressSeconds = 0.175;
         self.indentationPerLevel = 0;
 
         _piecesBarPercent = [_fDefaults boolForKey:@"PiecesBar"] ? 1.0 : 0.0;
+
+        _fIconCache = [[NSCache alloc] init];
+        _fIconCache.name = @"PlayMenuIconCache";
+
+        _fPlayMenuCache = [NSMapTable weakToStrongObjectsMapTable];
 
         self.style = NSTableViewStyleFullWidth;
     }
@@ -700,6 +708,13 @@ static CGFloat const kPlayButtonVerticalPadding = 4.0;
     {
         NSString* type = fileItem[@"type"] ?: @"file";
         NSString* category = fileItem[@"category"];
+        
+        // Cache key based on type and category
+        NSString* cacheKey = [NSString stringWithFormat:@"%@:%@", type, category ?: @""];
+        NSImage* cached = [self.fIconCache objectForKey:cacheKey];
+        if (cached)
+            return cached;
+
         NSString* symbolName = nil;
 
         if ([type isEqualToString:@"document-books"] || [category isEqualToString:@"books"])
@@ -721,7 +736,10 @@ static CGFloat const kPlayButtonVerticalPadding = 4.0;
 
         if (symbolName)
         {
-            return [NSImage imageWithSystemSymbolName:symbolName accessibilityDescription:nil];
+            NSImage* icon = [NSImage imageWithSystemSymbolName:symbolName accessibilityDescription:nil];
+            if (icon)
+                [self.fIconCache setObject:icon forKey:cacheKey];
+            return icon;
         }
     }
     return nil;
@@ -771,6 +789,10 @@ static CGFloat const kPlayButtonVerticalPadding = 4.0;
         if (!displayName || displayName.length == 0)
             displayName = fileName.lastPathComponent;
         
+        // Cache humanized name back to torrent? No, tracks are recreated.
+        // We can use an associated object on the torrent's file indexes if needed, 
+        // but let's just make it faster for now.
+        
         auto const location = tr_torrentFindFile(torrent.torrentStruct, (tr_file_index_t)idx);
         NSString* path = !std::empty(location) ? @(location.c_str()) : 
                         [torrent.currentDirectory stringByAppendingPathComponent:fileName];
@@ -799,6 +821,13 @@ static CGFloat const kPlayButtonVerticalPadding = 4.0;
     if (playableFiles.count == 0)
     {
         return nil;
+    }
+
+    NSUInteger statsGeneration = torrent.statsGeneration;
+    NSMenu* cachedMenu = [self.fPlayMenuCache objectForKey:torrent];
+    if (cachedMenu && torrent.cachedPlayMenuGeneration == statsGeneration)
+    {
+        return cachedMenu;
     }
 
     BOOL const isBooks = [torrent.detectedMediaCategory isEqualToString:@"books"];
@@ -901,6 +930,9 @@ static CGFloat const kPlayButtonVerticalPadding = 4.0;
     {
         return nil;
     }
+
+    [self.fPlayMenuCache setObject:menu forKey:torrent];
+    torrent.cachedPlayMenuGeneration = statsGeneration;
 
     return menu;
 }
@@ -1388,16 +1420,19 @@ static NSString* folderForPlayButton(NSButton* sender, Torrent* torrent)
         {
             NSMutableDictionary* entry = [fileInfo mutableCopy];
             NSString* type = entry[@"type"] ?: @"file";
-            NSString* category = nil;
-            if ([type isEqualToString:@"file"] || [type hasPrefix:@"document"])
+            NSString* category = entry[@"category"];
+            if (!category)
             {
-                category = [torrent mediaCategoryForFile:[entry[@"index"] unsignedIntegerValue]];
+                if ([type isEqualToString:@"file"] || [type hasPrefix:@"document"])
+                {
+                    category = [torrent mediaCategoryForFile:[entry[@"index"] unsignedIntegerValue]];
+                }
+                else
+                {
+                    category = ([type isEqualToString:@"album"]) ? @"audio" : @"video";
+                }
+                entry[@"category"] = category;
             }
-            else
-            {
-                category = ([type isEqualToString:@"album"]) ? @"audio" : @"video";
-            }
-            entry[@"category"] = category;
 
             BOOL const itemIsBooks = [category isEqualToString:@"books"];
             BOOL const itemIsAudio = [category isEqualToString:@"audio"];

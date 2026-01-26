@@ -126,6 +126,8 @@ extern NSString* const kTorrentDidChangeGroupNotification;
 @property(nonatomic, copy) NSArray<NSDictionary*>* cachedPlayButtonLayout;
 /// Cached stats generation for play button progress.
 @property(nonatomic) NSUInteger cachedPlayButtonProgressGeneration;
+/// Cached stats generation for play menu.
+@property(nonatomic) NSUInteger cachedPlayMenuGeneration;
 
 /// Returns current file progress (0.0-1.0) for a file index.
 - (CGFloat)fileProgressForIndex:(NSUInteger)index;
