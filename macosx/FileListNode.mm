@@ -102,27 +102,29 @@
 + (NSImage*)iconWithShadow:(NSImage*)icon
 {
     NSSize size = icon.size;
+    if (size.width <= 0 || size.height <= 0)
+    {
+        return icon;
+    }
 
-    NSImage* result = [[NSImage alloc] initWithSize:size];
-    [result lockFocus];
+    return [NSImage imageWithSize:size flipped:NO drawingHandler:^BOOL(NSRect dstRect) {
+        // Save graphics state and set shadow
+        [NSGraphicsContext saveGraphicsState];
 
-    [NSGraphicsContext saveGraphicsState];
+        NSShadow* shadow = [[NSShadow alloc] init];
+        shadow.shadowColor = [NSColor colorWithWhite:0 alpha:0.35];
+        shadow.shadowOffset = NSMakeSize(0, -1);
+        shadow.shadowBlurRadius = 2.0;
+        [shadow set];
 
-    NSShadow* shadow = [[NSShadow alloc] init];
-    shadow.shadowColor = [NSColor colorWithWhite:0 alpha:0.35];
-    shadow.shadowOffset = NSMakeSize(0, -1);
-    shadow.shadowBlurRadius = 2.0;
-    [shadow set];
+        // Draw icon slightly smaller and offset to make room for shadow
+        CGFloat const inset = 2.0;
+        NSRect contentRect = NSMakeRect(inset, inset + 1, dstRect.size.width - inset * 2, dstRect.size.height - inset * 2);
+        [icon drawInRect:contentRect fromRect:NSZeroRect operation:NSCompositingOperationSourceOver fraction:1.0];
 
-    CGFloat const inset = 2.0;
-    NSRect destRect = NSMakeRect(inset, inset + 1, size.width - inset * 2, size.height - inset * 2);
-    [icon drawInRect:destRect fromRect:NSZeroRect operation:NSCompositingOperationSourceOver fraction:1.0];
-
-    [NSGraphicsContext restoreGraphicsState];
-
-    [result unlockFocus];
-
-    return result;
+        [NSGraphicsContext restoreGraphicsState];
+        return YES;
+    }];
 }
 
 - (NSIndexSet*)indexes

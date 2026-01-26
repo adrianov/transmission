@@ -36,18 +36,18 @@ static CGFloat const kBorderWidth = 1.25;
 
 - (NSImage*)imageWithColor:(NSColor*)color
 {
-    NSImage* coloredImage = [self copy];
+    NSSize const size = self.size;
+    if (size.width <= 0 || size.height <= 0)
+    {
+        return [self copy];
+    }
 
-    [coloredImage lockFocus];
-
-    [color set];
-
-    NSSize const size = coloredImage.size;
-    NSRectFillUsingOperation(NSMakeRect(0.0, 0.0, size.width, size.height), NSCompositingOperationSourceAtop);
-
-    [coloredImage unlockFocus];
-
-    return coloredImage;
+    return [NSImage imageWithSize:size flipped:NO drawingHandler:^BOOL(NSRect dstRect) {
+        [color set];
+        [self drawInRect:dstRect fromRect:NSZeroRect operation:NSCompositingOperationSourceOver fraction:1.0];
+        NSRectFillUsingOperation(dstRect, NSCompositingOperationSourceAtop);
+        return YES;
+    }];
 }
 
 @end
