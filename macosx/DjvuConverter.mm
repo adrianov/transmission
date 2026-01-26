@@ -22,6 +22,7 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 // macOS defines `fract1` / `fract2` macros via CarbonCore's FixMath.h, which
@@ -642,6 +643,78 @@ static std::vector<OutlineNode> readDjvuOutline(ddjvu_context_t* ctx, ddjvu_docu
     return outline;
 }
 
+static std::unordered_map<std::string, std::string> readDjvuMetadata(ddjvu_context_t* ctx, ddjvu_document_t* doc)
+{
+    std::unordered_map<std::string, std::string> metadata;
+    if (ctx == nullptr || doc == nullptr)
+    {
+        return metadata;
+    }
+
+    miniexp_t exp = miniexp_dummy;
+    while (exp == miniexp_dummy)
+    {
+        exp = ddjvu_document_get_anno(doc, TRUE);
+        if (exp == miniexp_dummy)
+        {
+            ddjvu_message_t* msg = ddjvu_message_wait(ctx);
+            if (msg)
+            {
+                ddjvu_message_pop(ctx);
+            }
+        }
+    }
+
+    if (exp == miniexp_nil)
+    {
+        return metadata;
+    }
+
+    if (miniexp_symbolp(exp))
+    {
+        char const* name = miniexp_to_name(exp);
+        if (name != nullptr && (strcmp(name, "failed") == 0 || strcmp(name, "stopped") == 0))
+        {
+            ddjvu_miniexp_release(doc, exp);
+            return metadata;
+        }
+    }
+
+    miniexp_t list = exp;
+    while (miniexp_consp(list))
+    {
+        miniexp_t entry = miniexp_car(list);
+        if (miniexp_consp(entry) && miniexp_symbolp(miniexp_car(entry)))
+        {
+            char const* head = miniexp_to_name(miniexp_car(entry));
+            if (head != nullptr && strcmp(head, "metadata") == 0)
+            {
+                miniexp_t fields = miniexp_cdr(entry);
+                while (miniexp_consp(fields))
+                {
+                    miniexp_t field = miniexp_car(fields);
+                    if (miniexp_consp(field) && miniexp_symbolp(miniexp_car(field)) && miniexp_stringp(miniexp_cadr(field)))
+                    {
+                        char const* key = miniexp_to_name(miniexp_car(field));
+                        char const* val = miniexp_to_str(miniexp_cadr(field));
+                        if (key != nullptr && val != nullptr)
+                        {
+                            std::string k = key;
+                            std::transform(k.begin(), k.end(), k.begin(), [](unsigned char c) { return (char)std::tolower(c); });
+                            metadata[k] = val;
+                        }
+                    }
+                    fields = miniexp_cdr(fields);
+                }
+            }
+        }
+        list = miniexp_cdr(list);
+    }
+
+    ddjvu_miniexp_release(doc, exp);
+    return metadata;
+}
+
 // Use Otsu adaptive threshold to find content bounds (better than fixed threshold for light content)
 static bool findContentRectOtsu(unsigned char const* gray, int w, int h, size_t rowBytes, CropRect* out)
 {
@@ -1150,14 +1223,19 @@ static bool writePdfDeterministic(
     NSString* tmpPdfPath,
     std::vector<DjvuPdfPageInfo> const& pages,
     std::vector<std::vector<uint8_t>> const& jbig2Globals,
-    std::vector<OutlineNode> const& outlineNodes)
+    std::vector<OutlineNode> const& outlineNodes,
+    std::unordered_map<std::string, std::string> const& metadata)
 {
     if (tmpPdfPath == nil || pages.empty())
+    {
         return false;
+    }
 
     FILE* fp = fopen(tmpPdfPath.UTF8String, "wb");
     if (fp == nullptr)
+    {
         return false;
+    }
 
     auto const closeFile = std::unique_ptr<FILE, int (*)(FILE*)>(fp, fclose);
 
@@ -1178,6 +1256,7 @@ static bool writePdfDeterministic(
     int nextObj = 1;
     int const catalogObj = nextObj++;
     int const pagesObj = nextObj++;
+    int const infoObj = nextObj++;
     std::vector<int> jbig2GlobalsObjs(jbig2Globals.size(), 0);
     for (size_t i = 0; i < jbig2Globals.size(); ++i)
     {
@@ -1453,14 +1532,70 @@ static bool writePdfDeterministic(
         writeObjEnd();
     }
 
+    // 6) Info
+    writeObjBegin(infoObj);
+    fputs("<< ", fp);
+
+    auto const writeField = [&](char const* pdfKey, char const* djvuKey)
+    {
+        auto it = metadata.find(djvuKey);
+        if (it != metadata.end())
+        {
+            fprintf(fp, "%s %s ", pdfKey, pdfOutlineTitle(it->second).c_str());
+            return true;
+        }
+        return false;
+    };
+
+    writeField("/Title", "title");
+    writeField("/Author", "author");
+    if (!writeField("/Subject", "subject"))
+    {
+        writeField("/Subject", "description");
+    }
+    writeField("/Keywords", "keywords");
+
+    if (!writeField("/Creator", "creator"))
+    {
+        writeField("/Creator", "producer");
+    }
+
+    if (!writeField("/CreationDate", "date"))
+    {
+        writeField("/CreationDate", "year");
+    }
+
+    fputs("/Producer (Transmission) ", fp);
+
+    static std::unordered_set<std::string> const knownKeys = { "title",   "author", "subject", "description", "keywords",
+                                                               "creator", "date",   "year",    "producer" };
+    for (auto const& [key, val] : metadata)
+    {
+        if (knownKeys.find(key) == knownKeys.end())
+        {
+            std::string pdfKey = "/";
+            if (!key.empty())
+            {
+                pdfKey += (char)std::toupper((unsigned char)key[0]);
+                pdfKey += key.substr(1);
+            }
+            fprintf(fp, "%s %s ", pdfKey.c_str(), pdfOutlineTitle(val).c_str());
+        }
+    }
+
+    fputs(" >>\n", fp);
+    writeObjEnd();
+
     // XRef + trailer
     uint64_t const xrefOffset = (uint64_t)ftello(fp);
     fprintf(fp, "xref\n0 %d\n", objCount + 1);
     fputs("0000000000 65535 f \n", fp);
     for (int i = 1; i <= objCount; ++i)
+    {
         fprintf(fp, "%010llu 00000 n \n", (unsigned long long)offsets[(size_t)i]);
+    }
 
-    fprintf(fp, "trailer\n<< /Size %d /Root %d 0 R >>\nstartxref\n%llu\n%%%%EOF\n", objCount + 1, catalogObj, (unsigned long long)xrefOffset);
+    fprintf(fp, "trailer\n<< /Size %d /Root %d 0 R /Info %d 0 R >>\nstartxref\n%llu\n%%%%EOF\n", objCount + 1, catalogObj, infoObj, (unsigned long long)xrefOffset);
     return true;
 }
 
@@ -1509,6 +1644,7 @@ static BOOL convertDjvuFileDeterministic(NSString* djvuPath, NSString* tmpPdfPat
     setTotalPagesForPath(djvuPath, pageCount);
 
     std::vector<OutlineNode> outline = readDjvuOutline(ctx, doc, pageCount);
+    std::unordered_map<std::string, std::string> metadata = readDjvuMetadata(ctx, doc);
 
     std::vector<DjvuPdfPageInfo> pages((size_t)pageCount);
     DjvuPdfPageInfo* pagesPtr = pages.data();
@@ -2100,9 +2236,11 @@ static BOOL convertDjvuFileDeterministic(NSString* djvuPath, NSString* tmpPdfPat
 
     if (ok)
     {
-        ok = writePdfDeterministic(tmpPdfPath, pages, jbig2Globals, outline);
+        ok = writePdfDeterministic(tmpPdfPath, pages, jbig2Globals, outline, metadata);
         if (!ok)
+        {
             NSLog(@"DjvuConverter ERROR: writePdfDeterministic failed for %@", djvuPath);
+        }
     }
 
     ddjvu_format_release(rgb24);
