@@ -1352,19 +1352,10 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
                     if (!isDisc)
                     {
                         // Humanize album names
-                        NSString* humanized = name.humanReadableEpisodeName;
-                        if (humanized.length > 0)
-                        {
-                            name = humanized;
-                        }
+                        name = name.humanReadableFileName;
                     }
                 }
             }
-
-            BOOL const isAudio = [type isEqualToString:@"album"];
-            BOOL const isBooks = [type isEqualToString:@"books"];
-            NSString* icon = isBooks ? @"📖" : (isAudio ? @"♬" : @"⏵");  // ♬ double note for albums
-            NSString* baseTitle = [NSString stringWithFormat:@"%@ %@", icon, name];
 
             [entries addObject:@{
                 @"type" : type,
@@ -1372,7 +1363,7 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
                 @"path" : fullPath,
                 @"folder" : folder,
                 @"progress" : @(progress),
-                @"baseTitle" : baseTitle
+                @"baseTitle" : name
             }];
         }
 
@@ -1665,12 +1656,13 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
                 continue;
             }
         }
-        NSArray<NSNumber*>* episodeNumbers = isDocument ? nil : fileName.episodeNumbers;
+        NSString* category = [self mediaCategoryForFile:i];
+        NSArray<NSNumber*>* episodeNumbers = (isDocument || [category isEqualToString:@"audio"]) ? nil : fileName.episodeNumbers;
         NSNumber* season = episodeNumbers ? episodeNumbers[0] : @0;
         NSNumber* episode = episodeNumbers ? episodeNumbers[1] : @(i);
 
         NSString* displayName = nil;
-        if (isDocument)
+        if (isDocument || [category isEqualToString:@"audio"])
         {
             displayName = fileName.lastPathComponent.stringByDeletingPathExtension.humanReadableFileName;
         }
@@ -1687,6 +1679,7 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
         BOOL const opensInBooks = (isDocument && ![documentExternalExtensions containsObject:ext]) || useCompanionPdf || useCompanionEpub;
         [playable addObject:@{
             @"type" : isDocument ? (opensInBooks ? @"document-books" : @"document") : @"file",
+            @"category" : category ?: @"",
             @"index" : @(i),
             @"name" : displayName,
             @"path" : path,
@@ -1765,34 +1758,12 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
         return [aKey localizedStandardCompare:bKey];
     }];
 
-    // Determine season info for titles
-    NSMutableSet<NSNumber*>* seasons = [NSMutableSet set];
-    for (NSDictionary* f in playable)
-        [seasons addObject:f[@"season"]];
-    BOOL hasSeasonInfo = (seasons.count > 1) || (seasons.count == 1 && [[seasons anyObject] integerValue] > 0);
-
     // Build final entries with titles
     NSMutableArray<NSDictionary*>* result = [NSMutableArray arrayWithCapacity:playable.count];
-    BOOL isAudio = (self.fMediaType == TorrentMediaTypeAudio);
-    NSString* icon = isAudio ? @"♫" : @"⏵";  // ♫ single note for individual tracks
     for (NSDictionary* fileInfo in playable)
     {
-        NSString* baseTitle;
-        if ([fileInfo[@"type"] hasPrefix:@"document"])
-        {
-            baseTitle = fileInfo[@"name"];
-        }
-        else if (hasSeasonInfo && [fileInfo[@"season"] integerValue] > 0)
-        {
-            baseTitle = [NSString stringWithFormat:@"%@ E%@", icon, fileInfo[@"episode"]];
-        }
-        else
-        {
-            baseTitle = [NSString stringWithFormat:@"%@ %@", icon, fileInfo[@"name"]];
-        }
-
         NSMutableDictionary* entry = [fileInfo mutableCopy];
-        entry[@"baseTitle"] = baseTitle;
+        entry[@"baseTitle"] = fileInfo[@"name"];
         [result addObject:entry];
     }
 

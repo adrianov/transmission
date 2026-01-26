@@ -704,7 +704,7 @@ static CGFloat const kPlayButtonVerticalPadding = 4.0;
 
         if ([type isEqualToString:@"document-books"] || [category isEqualToString:@"books"])
         {
-            symbolName = @"books.vertical";  // Many books for document collections
+            symbolName = @"book";  // Single book for documents
         }
         else if ([type isEqualToString:@"album"])
         {
@@ -1399,25 +1399,18 @@ static NSString* folderForPlayButton(NSButton* sender, Torrent* torrent)
             }
             entry[@"category"] = category;
 
-            BOOL const itemIsAudio = [category isEqualToString:@"audio"];
             BOOL const itemIsBooks = [category isEqualToString:@"books"];
+            BOOL const itemIsAudio = [category isEqualToString:@"audio"];
             NSString* icon = itemIsBooks ? @"📖" : (itemIsAudio ? ([type isEqualToString:@"album"] ? @"♬" : @"♫") : @"⏵");
 
             if (singleItem)
             {
-                if (itemIsBooks)
-                    entry[@"baseTitle"] = [NSString stringWithFormat:@"%@ Read", icon];
-                else
-                    entry[@"baseTitle"] = [NSString stringWithFormat:@"%@ Play", icon];
+                entry[@"baseTitle"] = [NSString stringWithFormat:@"%@ %@", icon, itemIsBooks ? @"Read" : @"Play"];
             }
             else
             {
-                // Multiple items: use baseTitle from Torrent (already includes icon)
-                // Fall back to name with icon if baseTitle not set
-                if (!entry[@"baseTitle"])
-                {
-                    entry[@"baseTitle"] = [NSString stringWithFormat:@"%@ %@", icon, entry[@"name"] ?: @""];
-                }
+                // Multi-item: baseTitle humanized in Torrent.mm
+                entry[@"baseTitle"] = [NSString stringWithFormat:@"%@ %@", icon, entry[@"baseTitle"] ?: @""];
             }
             entry[@"title"] = entry[@"baseTitle"] ?: @"";
             entry[@"visible"] = @NO;
