@@ -22,7 +22,10 @@ export class Torrent extends EventTarget {
   }
 
   setLazyCollatedField(name, collated_name) {
-    this.notifyOnFieldChange(name, () => delete this.fields[collated_name]);
+    this.notifyOnFieldChange(name, () => {
+      delete this.fields[collated_name];
+      delete this._playableFiles;
+    });
   }
 
   notifyOnFieldChange(field, callback) {
@@ -187,7 +190,99 @@ export class Torrent extends EventTarget {
     return this.fields.name || 'Unknown';
   }
   getDisplayName() {
-    return Formatter.humanTitle(this.fields.name);
+    const name = this.fields.name;
+    const episode = Formatter.episodeTitle(name, name);
+    if (episode) {
+      return episode;
+    }
+    return Formatter.humanTitle(name);
+  }
+
+  getPlayableFiles() {
+    if (this._playableFiles) {
+      return this._playableFiles;
+    }
+
+    const files = this.getFiles();
+    const playable = [];
+    const torrentName = this.getName();
+
+    for (let i = 0; i < files.length; i++) {
+      const f = files[i];
+      const name = f.name;
+      const episode = Formatter.episodeTitle(name, torrentName);
+      if (episode) {
+        playable.push({
+          index: i,
+          name: episode,
+          originalName: name,
+        });
+      }
+    }
+
+    if (playable.length > 1) {
+      let changed = false;
+      do {
+        changed = false;
+        let commonPrefix = null;
+        let commonSuffix = null;
+        let prefixSame = true;
+        let suffixSame = true;
+
+        for (const item of playable) {
+          const { name } = item;
+          const dashIndex = name.indexOf(' - ');
+          if (dashIndex === -1) {
+            prefixSame = false;
+            suffixSame = false;
+            break;
+          }
+
+          const titlePart = name.slice(dashIndex + 3);
+          const words = titlePart.split(' ');
+          if (words.length < 2) {
+            prefixSame = false;
+            suffixSame = false;
+            break;
+          }
+
+          if (commonPrefix === null) {
+            commonPrefix = words[0];
+          } else if (commonPrefix !== words[0]) {
+            prefixSame = false;
+          }
+
+          if (commonSuffix === null) {
+            commonSuffix = words[words.length - 1];
+          } else if (commonSuffix !== words[words.length - 1]) {
+            suffixSame = false;
+          }
+        }
+
+        if (prefixSame && commonPrefix) {
+          for (const item of playable) {
+            const dashIndex = item.name.indexOf(' - ');
+            const prefix = item.name.slice(0, dashIndex + 3);
+            const titlePart = item.name.slice(dashIndex + 3);
+            const newTitle = titlePart.slice(commonPrefix.length).trim();
+            item.name = newTitle ? prefix + newTitle : prefix.replace(' - ', '');
+          }
+          changed = true;
+        } else if (suffixSame && commonSuffix) {
+          for (const item of playable) {
+            const dashIndex = item.name.indexOf(' - ');
+            const prefix = item.name.slice(0, dashIndex + 3);
+            const titlePart = item.name.slice(dashIndex + 3);
+            const newTitle = titlePart.slice(0, -commonSuffix.length).trim();
+            item.name = newTitle ? prefix + newTitle : prefix.replace(' - ', '');
+          }
+          changed = true;
+        }
+      } while (changed);
+    }
+
+    this._playableFiles = playable;
+    return playable;
   }
   getPeers() {
     return this.fields.peers || [];

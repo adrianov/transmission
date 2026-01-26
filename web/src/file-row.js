@@ -144,7 +144,9 @@ export class FileRow extends EventTarget {
     e = document.createElement('label');
     e.className = 'inspector-torrent-file-list-entry-name';
     e.setAttribute('for', check_id);
-    setTextContent(e, Formatter.humanFileName(subtree.name));
+    const playable = torrent.getPlayableFiles();
+    const playableFile = playable.find((p) => p.index === subtree.file_index);
+    setTextContent(e, playableFile ? playableFile.name : Formatter.humanFileName(subtree.name));
     root.append(e);
     root.name_container = e;
 

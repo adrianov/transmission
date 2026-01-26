@@ -57,17 +57,25 @@ const fmt_GBps = new Intl.NumberFormat(current_locale, {
   unit: 'gigabyte-per-second',
 });
 
-// Technical tags to filter from torrent names (split into groups to reduce regex complexity)
-const techTagsVideo = [
-  'WEBDL',
-  'WEB-DL',
-  'WEBRip',
-  'BDRip',
-  'BluRay',
-  'HDRip',
-  'DVDRip',
-  'HDTV',
-];
+    // Technical tags to filter from torrent names (split into groups to reduce regex complexity)
+    const techTagsVideo = [
+      'WEBDL',
+      'WEB-DL',
+      'WEBRip',
+      'BDRip',
+      'BluRay',
+      'HDRip',
+      'DVDRip',
+      'HDTV',
+      'WEB-DLRip',
+      'DLRip',
+    ];
+
+    // Remove any [Source]-?Rip variants (e.g., WEB-Rip, WEBRip, BD-Rip, BDRip)
+    title = title.replaceAll(/\b[a-z0-9]+-?rip\b/gi, ' ');
+
+    // Remove any [Source]HD variants (e.g., EniaHD, playHD)
+    title = title.replaceAll(/\b[a-z0-9]+HD\b/gi, ' ');
 const techTagsCodec = [
   'HEVC',
   'H264',
@@ -144,8 +152,8 @@ function formatHumanTitle(name) {
     return title;
   }
 
-  // Remove file extension
-  title = title.replace(/\.(mkv|avi|mp4|mov|wmv|flv|webm|m4v|torrent)$/i, '');
+  // Remove file extension (any 2-5 character alphanumeric extension)
+  title = title.replace(/\.[a-z0-9]{2,5}$/i, '');
 
   // Normalize bracketed metadata early to simplify parsing
   title = title.replaceAll('[', ' ').replaceAll(']', ' ');
@@ -461,6 +469,106 @@ export const Formatter = {
   /** Converts technical torrent name to human-friendly title */
   humanTitle(name) {
     return formatHumanTitle(name);
+  },
+
+  /**
+   * Detects episode title from a torrent name.
+   *
+   * Examples:
+   *   Ponies.S01E01.The.Beginning.1080p -> E1 - The Beginning
+   *   Ponies.S01E01.1080p -> E1
+   */
+  episodeTitle(name, torrentName) {
+    if (!name) {
+      return '';
+    }
+
+    // Match SxxExx or Exx pattern
+    const episodeMatch = name.match(/\b(?:S?\d{1,2})?E(\d{1,3})\b/i);
+    if (!episodeMatch) {
+      return '';
+    }
+
+    const episodeNum = Number.parseInt(episodeMatch[1], 10);
+    const episodePrefix = `E${episodeNum}`;
+
+    // Try to extract title after the episode marker
+    // Remove everything before and including the episode marker
+    let remaining = name.slice(episodeMatch.index + episodeMatch[0].length);
+
+    // If there's a dot or hyphen immediately after, skip it
+    remaining = remaining.replace(/^[.\-\s]+/, '');
+
+    if (!remaining) {
+      return episodePrefix;
+    }
+
+    // Cleanup the remaining part using humanFileName logic
+    let title = formatHumanFileName(remaining);
+
+    // Aggressively strip technical tags from the episode title
+    const tagsToStrip = [
+      '1080p', '720p', '2160p', '480p', '8K', '4K', 'UHD',
+      'WEB-DL', 'WEBDL', 'WEBRip', 'BDRip', 'BluRay', 'HDRip', 'DVDRip', 'HDTV',
+      'WEB-DLRip', 'DLRip',
+      'H264', 'H.264', 'H265', 'H.265', 'x264', 'x265', 'HEVC', 'AVC',
+      'AMZN', 'NF', 'DSNP', 'HMAX', 'PCOK', 'ATVP', 'APTV',
+      '2xRu', 'Ru', 'En', 'qqss44', 'WEB', 'DL'
+    ];
+
+    // Remove any [Source]-?Rip variants from episode title
+    title = title.replace(/\b[a-z0-9]+-?rip\b/gi, '');
+
+    // Remove any [Source]HD variants from episode title
+    title = title.replace(/\b[a-z0-9]+HD\b/gi, '');
+
+    for (const tag of tagsToStrip) {
+      const regex = new RegExp(`\\b${tag}\\b`, 'gi');
+      title = title.replace(regex, '');
+    }
+
+    // Remove file extension (any 2-5 character alphanumeric extension)
+    title = title.replace(/\.[a-z0-9]{2,5}$/i, '');
+
+    // Final cleanup
+    // Also remove empty brackets/parentheses like [] or ()
+    title = title.replace(/[\[\(]\s*[\]\)]/g, '');
+
+    // Remove stray closing brackets or parentheses
+    title = title.replace(/[\]\)]/g, '');
+
+    title = title.replace(/\s+/g, ' ').trim();
+    while (title.startsWith('-') || title.startsWith(' ') || title.startsWith('.')) title = title.slice(1);
+    while (title.endsWith('-') || title.endsWith(' ') || title.endsWith('.')) title = title.slice(0, -1);
+
+    // Final check for file extension
+    if (title.toLowerCase().endsWith('mkv')) {
+      title = title.slice(0, -3).trim();
+      while (title.endsWith('-') || title.endsWith(' ') || title.endsWith('.')) title = title.slice(0, -1);
+    }
+
+    if (title && title !== 'Unknown' && title.length > 1) {
+      // If the title is just a repeat of the torrent name, it's garbage
+      if (torrentName) {
+        const cleanTorrentName = formatHumanTitle(torrentName)
+          .replace(/\s*(- Season \d+|\(\d{4}\)|#\d+p|#\\w+)/gi, '')
+          .trim();
+        
+        // Check if title is just the series name, or the series name + year
+        if (title.toLowerCase() === cleanTorrentName.toLowerCase()) {
+          return episodePrefix;
+        }
+
+        const titleWithoutYear = title.replace(/\s*\(?\b(19|20)\d{2}\b\)?/g, '').trim();
+        if (titleWithoutYear.toLowerCase() === cleanTorrentName.toLowerCase()) {
+          return episodePrefix;
+        }
+      }
+
+      return `${episodePrefix} - ${title}`;
+    }
+
+    return episodePrefix;
   },
 
   // Formats a memory size into a human-readable string
