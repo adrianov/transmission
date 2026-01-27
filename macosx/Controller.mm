@@ -2579,20 +2579,13 @@ static NSTimeInterval const kLowPriorityDelay = 15.0;
 
 - (void)showInfo:(id)sender
 {
-    if (self.fInfoController.window.visible)
-    {
-        [self.fInfoController close];
-    }
-    else
-    {
-        [self.fInfoController updateInfoStats];
-        [self.fInfoController.window orderFront:nil];
+    [self.fInfoController updateInfoStats];
+    [self.fInfoController.window orderFront:nil];
 
-        if (self.fInfoController.canQuickLook && [QLPreviewPanel sharedPreviewPanelExists] &&
-            [QLPreviewPanel sharedPreviewPanel].visible)
-        {
-            [[QLPreviewPanel sharedPreviewPanel] reloadData];
-        }
+    if (self.fInfoController.canQuickLook && [QLPreviewPanel sharedPreviewPanelExists] &&
+        [QLPreviewPanel sharedPreviewPanel].visible)
+    {
+        [[QLPreviewPanel sharedPreviewPanel] reloadData];
     }
 
     [self.fWindow.toolbar validateVisibleItems];
@@ -5087,9 +5080,7 @@ static NSTimeInterval const kLowPriorityDelay = 15.0;
     //enable show info
     if (action == @selector(showInfo:))
     {
-        NSString* title = self.fInfoController.window.visible ? NSLocalizedString(@"Hide Inspector", "View menu -> Inspector") :
-                                                                NSLocalizedString(@"Show Inspector", "View menu -> Inspector");
-        menuItem.title = title;
+        menuItem.title = NSLocalizedString(@"Show Inspector", "View menu -> Inspector");
 
         return YES;
     }
