@@ -226,15 +226,24 @@
 
     // Always replace underscores with spaces and collapse multiple whitespaces
     title = [title stringByReplacingOccurrencesOfString:@"_" withString:@" "];
+    
+    // Remove pipe characters and lowercase 'l' as separators
+    title = [title stringByReplacingOccurrencesOfString:@"|" withString:@" "];
+    NSRegularExpression* lSeparatorRegex = [NSRegularExpression regularExpressionWithPattern:@"\\s+l\\s+" options:0 error:nil];
+    title = [lSeparatorRegex stringByReplacingMatchesInString:title options:0 range:NSMakeRange(0, title.length) withTemplate:@" "];
 
-    // Ensure space prior to '(', after ')', and after ','
-    title = [title stringByReplacingOccurrencesOfString:@"(" withString:@" ("];
-    title = [title stringByReplacingOccurrencesOfString:@")" withString:@") "];
+    // Ensure space after ','
     title = [title stringByReplacingOccurrencesOfString:@"," withString:@", "];
-
+    
     NSRegularExpression* multiSpaceRegex = [NSRegularExpression regularExpressionWithPattern:@"\\s+" options:0 error:nil];
     title = [multiSpaceRegex stringByReplacingMatchesInString:title options:0 range:NSMakeRange(0, title.length) withTemplate:@" "];
     title = [title stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet];
+    
+    // Ensure no space after '(' and no space before ')'
+    NSRegularExpression* spaceAfterParenRegex = [NSRegularExpression regularExpressionWithPattern:@"\\(\\s+" options:0 error:nil];
+    title = [spaceAfterParenRegex stringByReplacingMatchesInString:title options:0 range:NSMakeRange(0, title.length) withTemplate:@"("];
+    NSRegularExpression* spaceBeforeParenRegex = [NSRegularExpression regularExpressionWithPattern:@"\\s+\\)" options:0 error:nil];
+    title = [spaceBeforeParenRegex stringByReplacingMatchesInString:title options:0 range:NSMakeRange(0, title.length) withTemplate:@")"];
 
     // Shortcut: if title already looks clean, return it (after initial cleanup)
     // Note: '.' is NOT in the clean regex, so any title with '.' will go through full processing.
@@ -243,6 +252,11 @@
                                                                                        error:nil];
     if ([cleanTitleRegex firstMatchInString:title options:0 range:NSMakeRange(0, title.length)])
     {
+        // Final cleanup: ensure no space after '(' and no space before ')'
+        NSRegularExpression* finalSpaceAfterParen = [NSRegularExpression regularExpressionWithPattern:@"\\(\\s+" options:0 error:nil];
+        title = [finalSpaceAfterParen stringByReplacingMatchesInString:title options:0 range:NSMakeRange(0, title.length) withTemplate:@"("];
+        NSRegularExpression* finalSpaceBeforeParen = [NSRegularExpression regularExpressionWithPattern:@"\\s+\\)" options:0 error:nil];
+        title = [finalSpaceBeforeParen stringByReplacingMatchesInString:title options:0 range:NSMakeRange(0, title.length) withTemplate:@")"];
         return title;
     }
 
@@ -636,7 +650,14 @@
         [result appendFormat:@" #%@", resolution];
     }
 
-    return result.length > 0 ? result : self;
+    // Final cleanup: ensure no space after '(' and no space before ')'
+    NSString* finalResult = result;
+    NSRegularExpression* finalSpaceAfterParen = [NSRegularExpression regularExpressionWithPattern:@"\\(\\s+" options:0 error:nil];
+    finalResult = [finalSpaceAfterParen stringByReplacingMatchesInString:finalResult options:0 range:NSMakeRange(0, finalResult.length) withTemplate:@"("];
+    NSRegularExpression* finalSpaceBeforeParen = [NSRegularExpression regularExpressionWithPattern:@"\\s+\\)" options:0 error:nil];
+    finalResult = [finalSpaceBeforeParen stringByReplacingMatchesInString:finalResult options:0 range:NSMakeRange(0, finalResult.length) withTemplate:@")"];
+
+    return finalResult.length > 0 ? finalResult : self;
 }
 
 - (NSString*)humanReadableFileName
@@ -654,15 +675,24 @@
 
     // Always replace underscores with spaces and collapse multiple whitespaces
     name = [name stringByReplacingOccurrencesOfString:@"_" withString:@" "];
+    
+    // Remove pipe characters and lowercase 'l' as separators
+    name = [name stringByReplacingOccurrencesOfString:@"|" withString:@" "];
+    NSRegularExpression* lSeparatorRegex = [NSRegularExpression regularExpressionWithPattern:@"\\s+l\\s+" options:0 error:nil];
+    name = [lSeparatorRegex stringByReplacingMatchesInString:name options:0 range:NSMakeRange(0, name.length) withTemplate:@" "];
 
-    // Ensure space prior to '(', after ')', and after ','
-    name = [name stringByReplacingOccurrencesOfString:@"(" withString:@" ("];
-    name = [name stringByReplacingOccurrencesOfString:@")" withString:@") "];
+    // Ensure space after ','
     name = [name stringByReplacingOccurrencesOfString:@"," withString:@", "];
-
+    
     NSRegularExpression* multiSpaceRegex = [NSRegularExpression regularExpressionWithPattern:@"\\s+" options:0 error:nil];
     name = [multiSpaceRegex stringByReplacingMatchesInString:name options:0 range:NSMakeRange(0, name.length) withTemplate:@" "];
     name = [name stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet];
+    
+    // Ensure no space after '(' and no space before ')'
+    NSRegularExpression* spaceAfterParenRegex = [NSRegularExpression regularExpressionWithPattern:@"\\(\\s+" options:0 error:nil];
+    name = [spaceAfterParenRegex stringByReplacingMatchesInString:name options:0 range:NSMakeRange(0, name.length) withTemplate:@"("];
+    NSRegularExpression* spaceBeforeParenRegex = [NSRegularExpression regularExpressionWithPattern:@"\\s+\\)" options:0 error:nil];
+    name = [spaceBeforeParenRegex stringByReplacingMatchesInString:name options:0 range:NSMakeRange(0, name.length) withTemplate:@")"];
 
     NSUInteger whitespaceCount = 0;
     NSUInteger dotCount = 0;
@@ -891,6 +921,9 @@
     // Remove stray closing brackets or parentheses that might be left over
     title = [title stringByReplacingOccurrencesOfString:@"]" withString:@""];
     title = [title stringByReplacingOccurrencesOfString:@")" withString:@""];
+    title = [title stringByReplacingOccurrencesOfString:@"|" withString:@""];
+    NSRegularExpression* lSeparatorRegexEpisode = [NSRegularExpression regularExpressionWithPattern:@"\\s+l\\s+" options:0 error:nil];
+    title = [lSeparatorRegexEpisode stringByReplacingMatchesInString:title options:0 range:NSMakeRange(0, title.length) withTemplate:@" "];
 
     NSRegularExpression* spaceRegex = [NSRegularExpression regularExpressionWithPattern:@"\\s+" options:0 error:nil];
     if (spaceRegex != nil)
