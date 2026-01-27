@@ -876,6 +876,7 @@ void onTorrentCompletenessChanged(tr_torrent* tor, tr_completeness status, bool 
 
     [nc addObserver:self selector:@selector(updateWindowAfterToolbarChange) name:@"ToolbarDidChange" object:nil];
 
+    [nc addObserver:self selector:@selector(applicationWillBecomeActive:) name:NSApplicationWillBecomeActiveNotification object:nil];
     [nc addObserver:self selector:@selector(applicationDidBecomeActive:) name:NSApplicationDidBecomeActiveNotification object:nil];
     [nc addObserver:self selector:@selector(applicationDidResignActive:) name:NSApplicationDidResignActiveNotification object:nil];
 
@@ -1167,6 +1168,11 @@ void onTorrentCompletenessChanged(tr_torrent* tor, tr_completeness status, bool 
     return YES;
 }
 
+- (void)applicationWillBecomeActive:(NSNotification*)notification
+{
+    [self scheduleProcessPriorityUpdate];
+}
+
 - (void)applicationDidBecomeActive:(NSNotification*)notification
 {
     [self scheduleProcessPriorityUpdate];
@@ -1220,22 +1226,14 @@ void onTorrentCompletenessChanged(tr_torrent* tor, tr_completeness status, bool 
 
 #pragma mark -
 
-static NSTimeInterval const kLowPriorityDelay = 15.0;
-
 - (void)scheduleProcessPriorityUpdate
 {
-    [self.fLowPriorityTimer invalidate];
-    self.fLowPriorityTimer = nil;
-
     BOOL const shouldUseBackground = !NSApp.active || self.fWindowMiniaturized;
 
     if (shouldUseBackground)
     {
-        // Delay going to low priority by 15 seconds
-        self.fLowPriorityTimer = [NSTimer scheduledTimerWithTimeInterval:kLowPriorityDelay target:self
-                                                                selector:@selector(applyLowPriority)
-                                                                userInfo:nil
-                                                                 repeats:NO];
+        // Apply background priority immediately
+        [self applyLowPriority];
     }
     else
     {
@@ -1253,7 +1251,6 @@ static NSTimeInterval const kLowPriorityDelay = 15.0;
 
 - (void)applyLowPriority
 {
-    self.fLowPriorityTimer = nil;
     if (self.fUsingBackgroundPriority)
     {
         return;
