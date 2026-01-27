@@ -30,9 +30,9 @@ The alphabetical comparison is case-insensitive and handles special cases:
 - Files with the same extension where one name is a prefix of another are ordered by length (shorter first)
 - Directory structure is considered (files in earlier directories come first)
 
-### 3. File Tail Priority (Last 20 MB)
+### 3. File Tail Priority (Proportional)
 
-Pieces located in the last 20 MB of video files are prioritized over pieces earlier in the same file. This optimization benefits video playback:
+Pieces located in the tail portion of video files are prioritized over pieces earlier in the same file. The tail size is proportional to the file size (2% of file size), with a minimum of 1 MB and a maximum of 20 MB for very large files. This optimization benefits video playback:
 
 - **Video container indexes**: Many video formats (MP4, MKV, AVI, MOV, WEBM) store seeking indexes at the end of the file
 - **Subtitle tracks**: Often located near the end of container files
@@ -43,7 +43,7 @@ By downloading the file tail early, video players can:
 - Enable seeking functionality sooner
 - Access all audio/subtitle tracks
 
-This rule applies to video formats like `.avi`, `.mp4`, `.mkv`, `.mov`, `.m4v`, and `.webm`. For video files smaller than 20 MB, all pieces are considered "tail" pieces. Non-video files do not receive tail priority.
+This rule applies to video formats like `.avi`, `.mp4`, `.mkv`, `.mov`, `.m4v`, and `.webm`. For video files smaller than the calculated tail size, all pieces are considered "tail" pieces. Non-video files do not receive tail priority.
 
 ### 4. Piece Number (Sequential Order)
 
@@ -77,7 +77,7 @@ The piece selection logic is implemented in:
 // Returns true if file is a video file (for playback priority)
 bool tr_torrent::is_video_file(tr_file_index_t file) const noexcept;
 
-// Returns true if piece is in the last 20 MB of any video file it belongs to
+// Returns true if piece is in the tail portion (2% of file size, capped at 20 MB) of any video file it belongs to
 bool tr_torrent::is_piece_in_file_tail(tr_piece_index_t piece) const noexcept;
 
 // Returns the alphabetical file index for a piece
