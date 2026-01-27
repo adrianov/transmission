@@ -2060,7 +2060,10 @@ void tr_peerMsgsImpl::check_request_timeout(time_t const now)
             {
                 tr_logAddWarnTor(&tor_, fmt::format("Local data corrupt; rechecking from piece #{:d}", req.index));
                 tr_torrentVerify(&tor_);
-                tr_torrentStartNow(&tor_);
+                if (tr_isTorrent(&tor_))
+                {
+                    tr_torrentStartNow(&tor_);
+                }
             }
         }
     }
