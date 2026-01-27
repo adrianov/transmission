@@ -2215,6 +2215,12 @@ void onTorrentCompletenessChanged(tr_torrent* tor, tr_completeness status, bool 
 
     [self.fTorrents removeObjectsInArray:torrents];
 
+    // Remove from hash tracking to allow re-adding the same torrent
+    for (Torrent* torrent in torrents)
+    {
+        [self.fTorrentHashes removeObjectForKey:torrent.hashString];
+    }
+
     // Track completion of all deletions
     __block NSUInteger remainingDeletions = torrents.count;
     void (^onDeletionComplete)(void) = ^{
