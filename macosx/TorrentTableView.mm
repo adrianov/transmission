@@ -1350,7 +1350,7 @@ static CGFloat const kPlayButtonVerticalPadding = 4.0;
 
 /// Creates a play button from playable item info
 /// Item types: "file", "dvd", "bluray", "album"
-- (PlayButton*)createPlayButtonFromItem:(NSDictionary*)item
+- (PlayButton*)createPlayButtonFromItem:(NSDictionary*)item torrent:(Torrent*)torrent
 {
     NSString* type = item[@"type"] ?: @"file";
     NSString* path = item[@"path"];
@@ -1383,7 +1383,10 @@ static CGFloat const kPlayButtonVerticalPadding = 4.0;
     playButton.showsBorderOnlyWhileMouseInside = YES;
     playButton.font = [NSFont systemFontOfSize:11];
     playButton.controlSize = NSControlSizeSmall;
-    playButton.toolTip = path;
+    // Use .cue file path for tooltip if available (for audio files or album folders)
+    NSString* folder = item[@"folder"];
+    NSString* tooltipPath = [torrent tooltipPathForItemPath:path type:type folder:folder ?: @""];
+    playButton.toolTip = tooltipPath;
     playButton.identifier = path;
 
     // Store type for playback handling, base title for updates
@@ -1393,7 +1396,6 @@ static CGFloat const kPlayButtonVerticalPadding = 4.0;
     // For files, store index for progress updates; folders use NSNotFound
     NSNumber* index = item[@"index"];
     playButton.tag = index ? index.integerValue : NSNotFound;
-    NSString* folder = item[@"folder"];
     if (folder.length > 0)
     {
         objc_setAssociatedObject(playButton, @selector(folderForPlayButton:), folder, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
@@ -1756,7 +1758,7 @@ static NSString* folderForPlayButton(NSButton* sender, Torrent* torrent)
     return field;
 }
 
-- (PlayButton*)setupPlayButtonWithItem:(NSDictionary*)item
+- (PlayButton*)setupPlayButtonWithItem:(NSDictionary*)item torrent:(Torrent*)torrent
 {
     PlayButton* playButton = [self dequeuePlayButton];
     
@@ -1779,11 +1781,13 @@ static NSString* folderForPlayButton(NSButton* sender, Torrent* torrent)
     // Dynamic properties
     playButton.title = title;
     playButton.identifier = path;
-    playButton.toolTip = path;
+    // Use .cue file path for tooltip if available (for audio files or album folders)
+    NSString* folder = item[@"folder"];
+    NSString* tooltipPath = [torrent tooltipPathForItemPath:path type:type folder:folder ?: @""];
+    playButton.toolTip = tooltipPath;
     playButton.tag = [item[@"index"] integerValue];
     
     // Store type and folder via associated objects (lighter than accessibility properties)
-    NSString* folder = item[@"folder"];
     objc_setAssociatedObject(playButton, &kPlayButtonTypeKey, type, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     objc_setAssociatedObject(playButton, &kPlayButtonFolderKey, folder.length > 0 ? folder : nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 
@@ -1924,7 +1928,7 @@ static NSString* folderForPlayButton(NSButton* sender, Torrent* torrent)
         // Add all buttons at once (batched for performance)
         for (NSDictionary* entry in playButtonLayout)
         {
-            [self addPlayButtonLayoutEntry:entry toFlowView:flowView];
+            [self addPlayButtonLayoutEntry:entry toFlowView:flowView torrent:torrent];
         }
         [flowView finishBatchUpdates];
     }
@@ -1932,7 +1936,7 @@ static NSString* folderForPlayButton(NSButton* sender, Torrent* torrent)
     [self updatePlayButtonProgressForCell:cell torrent:torrent forceLayout:YES];
 }
 
-- (void)addPlayButtonLayoutEntry:(NSDictionary*)entry toFlowView:(FlowLayoutView*)flowView
+- (void)addPlayButtonLayoutEntry:(NSDictionary*)entry toFlowView:(FlowLayoutView*)flowView torrent:(Torrent*)torrent
 {
     NSString* kind = entry[@"kind"];
     if ([kind isEqualToString:@"header"])
@@ -1947,7 +1951,7 @@ static NSString* folderForPlayButton(NSButton* sender, Torrent* torrent)
         NSDictionary* item = entry[@"item"];
         if (item)
         {
-            [flowView addArrangedSubviewBatched:[self setupPlayButtonWithItem:item]];
+            [flowView addArrangedSubviewBatched:[self setupPlayButtonWithItem:item torrent:torrent]];
         }
     }
 }
@@ -2314,30 +2318,8 @@ static NSString* folderForPlayButton(NSButton* sender, Torrent* torrent)
         NSURL* iinaURL = [NSWorkspace.sharedWorkspace URLForApplicationWithBundleIdentifier:@"com.colliderli.iina"];
 
         // If this is an album folder, check if it contains a .cue file and use that instead of the folder path
-        __block NSString* cuePath = nil;
         NSString* folder = item[@"folder"];
-        if (folder.length > 0)
-        {
-            NSIndexSet* fileIndexes = [torrent fileIndexesForFolder:folder];
-            [fileIndexes enumerateIndexesUsingBlock:^(NSUInteger idx, BOOL* stop) {
-                auto const file = tr_torrentFile(torrent.torrentStruct, (tr_file_index_t)idx);
-                NSString* fileName = @(file.name);
-                if ([fileName.pathExtension.lowercaseString isEqualToString:@"cue"])
-                {
-                    auto const location = tr_torrentFindFile(torrent.torrentStruct, (tr_file_index_t)idx);
-                    if (!std::empty(location))
-                    {
-                        cuePath = @(location.c_str());
-                    }
-                    else
-                    {
-                        cuePath = [torrent.currentDirectory stringByAppendingPathComponent:fileName];
-                    }
-                    *stop = YES;
-                }
-            }];
-        }
-
+        NSString* cuePath = [torrent cueFilePathForFolder:folder];
         if (cuePath)
         {
             path = cuePath;
@@ -2396,6 +2378,7 @@ static NSString* folderForPlayButton(NSButton* sender, Torrent* torrent)
     [self setHighPriorityForItem:item forTorrent:torrent];
 }
 
+
 - (IBAction)playMediaFile:(NSButton*)sender
 {
     Torrent* torrent = [self itemAtRow:[self rowForView:[sender superview]]];
@@ -2406,78 +2389,11 @@ static NSString* folderForPlayButton(NSButton* sender, Torrent* torrent)
     NSString* folder = objc_getAssociatedObject(sender, &kPlayButtonFolderKey) ?: @"";
     NSString* path = sender.identifier ?: @"";
     
-    // Check if this is a cue-companion audio file (flac, ape, wav, etc.)
-    // If so, check if there's a matching .cue file with the same base name
-    static NSSet<NSString*>* cueCompanionExtensions;
-    static dispatch_once_t onceToken;
-    dispatch_once(&onceToken, ^{
-        cueCompanionExtensions = [NSSet setWithArray:@[ @"flac", @"ape", @"wav", @"wma", @"alac", @"aiff", @"wv" ]];
-    });
-    
-    NSString* ext = path.pathExtension.lowercaseString;
-    if ([cueCompanionExtensions containsObject:ext])
+    // Check if this is a cue-companion audio file and find matching .cue file
+    NSString* cuePath = [torrent cueFilePathForAudioPath:path];
+    if (cuePath)
     {
-        // Extract relative path from absolute path
-        NSString* torrentDir = torrent.currentDirectory;
-        NSString* relativePath = path;
-        if ([path hasPrefix:torrentDir])
-        {
-            relativePath = [path substringFromIndex:torrentDir.length];
-            if ([relativePath hasPrefix:@"/"])
-            {
-                relativePath = [relativePath substringFromIndex:1];
-            }
-        }
-        else
-        {
-            // If path doesn't start with torrent directory, try to find it by filename
-            relativePath = path.lastPathComponent;
-        }
-        
-        NSString* baseName = relativePath.lastPathComponent.stringByDeletingPathExtension;
-        NSString* directory = relativePath.stringByDeletingLastPathComponent;
-        // Normalize directory: empty string for root, remove leading/trailing slashes
-        if (directory.length == 0 || [directory isEqualToString:@"."] || [directory isEqualToString:@"/"])
-        {
-            directory = @"";
-        }
-        
-        // Search for a matching .cue file in the torrent
-        NSUInteger const count = torrent.fileCount;
-        for (NSUInteger i = 0; i < count; i++)
-        {
-            auto const file = tr_torrentFile(torrent.torrentStruct, (tr_file_index_t)i);
-            NSString* fileName = @(file.name);
-            NSString* fileExt = fileName.pathExtension.lowercaseString;
-            
-            if ([fileExt isEqualToString:@"cue"])
-            {
-                NSString* cueBaseName = fileName.lastPathComponent.stringByDeletingPathExtension;
-                NSString* cueDirectory = fileName.stringByDeletingLastPathComponent;
-                // Normalize directory: empty string for root
-                if (cueDirectory.length == 0 || [cueDirectory isEqualToString:@"."] || [cueDirectory isEqualToString:@"/"])
-                {
-                    cueDirectory = @"";
-                }
-                
-                // Check if base names match (case-insensitive) and directories match
-                if ([cueBaseName.lowercaseString isEqualToString:baseName.lowercaseString] &&
-                    [cueDirectory isEqualToString:directory])
-                {
-                    // Found matching .cue file, use it instead
-                    auto const location = tr_torrentFindFile(torrent.torrentStruct, (tr_file_index_t)i);
-                    if (!std::empty(location))
-                    {
-                        path = @(location.c_str());
-                    }
-                    else
-                    {
-                        path = [torrent.currentDirectory stringByAppendingPathComponent:fileName];
-                    }
-                    break;
-                }
-            }
-        }
+        path = cuePath;
     }
     
     NSDictionary* item = @{

@@ -2667,6 +2667,142 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
     }
 }
 
+- (NSString*)cueFilePathForAudioPath:(NSString*)audioPath
+{
+    static NSSet<NSString*>* cueCompanionExtensions;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        cueCompanionExtensions = [NSSet setWithArray:@[ @"flac", @"ape", @"wav", @"wma", @"alac", @"aiff", @"wv" ]];
+    });
+    
+    NSString* ext = audioPath.pathExtension.lowercaseString;
+    if (![cueCompanionExtensions containsObject:ext])
+    {
+        return nil;
+    }
+    
+    // Extract relative path from absolute path
+    NSString* torrentDir = self.currentDirectory;
+    NSString* relativePath = audioPath;
+    if ([audioPath hasPrefix:torrentDir])
+    {
+        relativePath = [audioPath substringFromIndex:torrentDir.length];
+        if ([relativePath hasPrefix:@"/"])
+        {
+            relativePath = [relativePath substringFromIndex:1];
+        }
+    }
+    else
+    {
+        // If path doesn't start with torrent directory, try to find it by filename
+        relativePath = audioPath.lastPathComponent;
+    }
+    
+    NSString* baseName = relativePath.lastPathComponent.stringByDeletingPathExtension;
+    NSString* directory = relativePath.stringByDeletingLastPathComponent;
+    // Normalize directory: empty string for root, remove leading/trailing slashes
+    if (directory.length == 0 || [directory isEqualToString:@"."] || [directory isEqualToString:@"/"])
+    {
+        directory = @"";
+    }
+    
+    // Search for a matching .cue file in the torrent
+    NSUInteger const count = self.fileCount;
+    for (NSUInteger i = 0; i < count; i++)
+    {
+        auto const file = tr_torrentFile(self.fHandle, (tr_file_index_t)i);
+        NSString* fileName = @(file.name);
+        NSString* fileExt = fileName.pathExtension.lowercaseString;
+        
+        if ([fileExt isEqualToString:@"cue"])
+        {
+            NSString* cueBaseName = fileName.lastPathComponent.stringByDeletingPathExtension;
+            NSString* cueDirectory = fileName.stringByDeletingLastPathComponent;
+            // Normalize directory: empty string for root
+            if (cueDirectory.length == 0 || [cueDirectory isEqualToString:@"."] || [cueDirectory isEqualToString:@"/"])
+            {
+                cueDirectory = @"";
+            }
+            
+            // Check if base names match (case-insensitive) and directories match
+            if ([cueBaseName.lowercaseString isEqualToString:baseName.lowercaseString] &&
+                [cueDirectory isEqualToString:directory])
+            {
+                // Found matching .cue file, return its path
+                auto const location = tr_torrentFindFile(self.fHandle, (tr_file_index_t)i);
+                if (!std::empty(location))
+                {
+                    return @(location.c_str());
+                }
+                else
+                {
+                    return [self.currentDirectory stringByAppendingPathComponent:fileName];
+                }
+            }
+        }
+    }
+    
+    return nil;
+}
+
+- (NSString*)cueFilePathForFolder:(NSString*)folder
+{
+    if (folder.length == 0)
+    {
+        return nil;
+    }
+    
+    NSIndexSet* fileIndexes = [self fileIndexesForFolder:folder];
+    if (fileIndexes.count == 0)
+    {
+        return nil;
+    }
+    
+    __block NSString* cuePath = nil;
+    [fileIndexes enumerateIndexesUsingBlock:^(NSUInteger idx, BOOL* stop) {
+        auto const file = tr_torrentFile(self.fHandle, (tr_file_index_t)idx);
+        NSString* fileName = @(file.name);
+        if ([fileName.pathExtension.lowercaseString isEqualToString:@"cue"])
+        {
+            auto const location = tr_torrentFindFile(self.fHandle, (tr_file_index_t)idx);
+            if (!std::empty(location))
+            {
+                cuePath = @(location.c_str());
+            }
+            else
+            {
+                cuePath = [self.currentDirectory stringByAppendingPathComponent:fileName];
+            }
+            *stop = YES;
+        }
+    }];
+    
+    return cuePath;
+}
+
+- (NSString*)tooltipPathForItemPath:(NSString*)path type:(NSString*)type folder:(NSString*)folder
+{
+    // For album folders, check if there's a .cue file in the folder
+    if ([type isEqualToString:@"album"] && folder.length > 0)
+    {
+        NSString* cuePath = [self cueFilePathForFolder:folder];
+        if (cuePath)
+        {
+            return cuePath;
+        }
+    }
+    
+    // For audio files, check if there's a matching .cue file
+    NSString* cuePath = [self cueFilePathForAudioPath:path];
+    if (cuePath)
+    {
+        return cuePath;
+    }
+    
+    // Default: return the original path
+    return path;
+}
+
 - (void)renameTorrent:(NSString*)newName completionHandler:(void (^)(BOOL didRename))completionHandler
 {
     NSParameterAssert(newName != nil);

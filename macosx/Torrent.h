@@ -167,6 +167,15 @@ extern NSString* const kTorrentDidChangeGroupNotification;
 @property(nonatomic, readonly) NSString* lastKnownDataLocation;
 - (NSString*)fileLocation:(FileListNode*)node;
 
+// Returns .cue file path for a given audio file path, or nil if no matching .cue file found
+- (NSString*)cueFilePathForAudioPath:(NSString*)audioPath;
+
+// Returns .cue file path for a given folder, or nil if no .cue file found in the folder
+- (NSString*)cueFilePathForFolder:(NSString*)folder;
+
+// Returns the path to show in tooltip (prefers .cue file if available for audio files or album folders)
+- (NSString*)tooltipPathForItemPath:(NSString*)path type:(NSString*)type folder:(NSString*)folder;
+
 - (void)renameTorrent:(NSString*)newName completionHandler:(void (^)(BOOL didRename))completionHandler;
 - (void)renameFileNode:(FileListNode*)node
               withName:(NSString*)newName

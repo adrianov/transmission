@@ -189,6 +189,27 @@ static CGFloat const kPaddingBetweenNameAndFolderStatus = 4.0;
     {
         path = [node.path stringByAppendingPathComponent:node.name];
     }
+    
+    // For folders, check if there's a .cue file in the folder
+    if (node.isFolder)
+    {
+        NSString* folderPath = [node.path stringByAppendingPathComponent:node.name];
+        NSString* cuePath = [torrent cueFilePathForFolder:folderPath];
+        if (cuePath)
+        {
+            path = cuePath;
+        }
+    }
+    else
+    {
+        // For files, use .cue file path for tooltip if this is a cue-companion audio file
+        NSString* cuePath = [torrent cueFilePathForAudioPath:path];
+        if (cuePath)
+        {
+            path = cuePath;
+        }
+    }
+    
     self.toolTip = path;
 }
 
