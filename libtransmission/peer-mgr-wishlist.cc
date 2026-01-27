@@ -23,7 +23,7 @@ class Wishlist::Impl
         tr_piece_index_t file_index;
         tr_block_span_t block_span;
         tr_priority_t priority;
-        bool is_in_file_tail; // last 20 MB of file - prioritized for video playback
+        bool is_in_file_tail; // tail portion of file (2% of size, capped at 20 MB) - prioritized for video playback
         bool is_in_priority_file; // index files (IFO, BUP, index.bdmv) - prioritized for disc playback
 
         // Sort by: priority (high first), file index, priority files (true first), file tail (true first), piece index

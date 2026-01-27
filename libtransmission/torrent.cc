@@ -2990,7 +2990,9 @@ bool tr_torrent::is_video_file(tr_file_index_t file) const noexcept
 
 bool tr_torrent::is_piece_in_file_tail(tr_piece_index_t piece) const noexcept
 {
-    static constexpr uint64_t TailSize = 20U * 1024U * 1024U; // 20 MB
+    static constexpr uint64_t MaxTailSize = 20U * 1024U * 1024U; // 20 MB cap for very large files
+    static constexpr uint64_t MinTailSize = 1024U * 1024U; // 1 MB minimum
+    static constexpr double TailPercentage = 0.02; // 2% of file size
 
     auto const [file_begin, file_end] = fpm_.file_span_for_piece(piece);
     for (auto file = file_begin; file < file_end; ++file)
@@ -3001,7 +3003,10 @@ bool tr_torrent::is_piece_in_file_tail(tr_piece_index_t piece) const noexcept
         }
 
         auto const file_size = metainfo_.file_size(file);
-        if (file_size <= TailSize)
+        // Calculate proportional tail size: 2% of file, capped at 20 MB, minimum 1 MB
+        auto const tail_size = std::min(MaxTailSize, std::max(MinTailSize, static_cast<uint64_t>(file_size * TailPercentage)));
+        
+        if (file_size <= tail_size)
         {
             // Small file - all pieces are in "tail"
             return true;
@@ -3012,8 +3017,8 @@ bool tr_torrent::is_piece_in_file_tail(tr_piece_index_t piece) const noexcept
         auto const piece_byte_begin = static_cast<uint64_t>(piece) * piece_size();
         auto const piece_byte_end = piece_byte_begin + piece_size(piece);
 
-        // Check if piece overlaps with the last 20 MB of the file
-        auto const tail_start = byte_span.end - TailSize;
+        // Check if piece overlaps with the tail portion of the file
+        auto const tail_start = byte_span.end - tail_size;
         if (piece_byte_end > tail_start && piece_byte_begin < byte_span.end)
         {
             return true;
