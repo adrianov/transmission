@@ -32,9 +32,9 @@ The alphabetical comparison is case-insensitive and handles special cases:
 
 ### 3. File Tail Priority (Last 20 MB)
 
-Pieces located in the last 20 MB of a file are prioritized over pieces earlier in the same file. This optimization benefits video playback:
+Pieces located in the last 20 MB of video files are prioritized over pieces earlier in the same file. This optimization benefits video playback:
 
-- **Video container indexes**: Many video formats (MP4, MKV, AVI) store seeking indexes at the end of the file
+- **Video container indexes**: Many video formats (MP4, MKV, AVI, MOV, WEBM) store seeking indexes at the end of the file
 - **Subtitle tracks**: Often located near the end of container files
 - **Audio tracks**: May be stored after the video stream
 
@@ -43,7 +43,7 @@ By downloading the file tail early, video players can:
 - Enable seeking functionality sooner
 - Access all audio/subtitle tracks
 
-For files smaller than 20 MB, all pieces are considered "tail" pieces.
+This rule applies to video formats like `.avi`, `.mp4`, `.mkv`, `.mov`, `.m4v`, and `.webm`. For video files smaller than 20 MB, all pieces are considered "tail" pieces. Non-video files do not receive tail priority.
 
 ### 4. Piece Number (Sequential Order)
 
@@ -74,7 +74,10 @@ The piece selection logic is implemented in:
 ### Key Functions
 
 ```cpp
-// Determines if a piece is in the last 20 MB of any file it belongs to
+// Returns true if file is a video file (for playback priority)
+bool tr_torrent::is_video_file(tr_file_index_t file) const noexcept;
+
+// Returns true if piece is in the last 20 MB of any video file it belongs to
 bool tr_torrent::is_piece_in_file_tail(tr_piece_index_t piece) const noexcept;
 
 // Returns the alphabetical file index for a piece
