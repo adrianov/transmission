@@ -281,6 +281,98 @@
         title = [extRegex stringByReplacingMatchesInString:title options:0 range:NSMakeRange(0, title.length) withTemplate:@""];
     }
 
+    // Extract format tags and year from parentheses metadata (e.g., (2016,LP) -> extract LP as format, (2025, Digital Release) -> extract 2025 as year)
+    // This must be done before normalizing brackets to preserve the metadata structure
+    // Only process parentheses that contain commas (metadata format), not simple year parentheses like (1975)
+    // Create regex objects once for reuse (performance optimization)
+    static NSRegularExpression* parenMetadataRegex = nil;
+    static NSRegularExpression* yearInMetadataRegex = nil;
+    static NSRegularExpression* formatTagRegex = nil;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        parenMetadataRegex = [NSRegularExpression regularExpressionWithPattern:@"\\(([^)]+)\\)" options:0 error:nil];
+        yearInMetadataRegex = [NSRegularExpression regularExpressionWithPattern:@"\\b(19\\d{2}|20\\d{2})\\b" options:0 error:nil];
+        formatTagRegex = [NSRegularExpression regularExpressionWithPattern:@"\\b(LP|CD|EP|DVD|BD|DVD5|DVD9|BD25|BD50|BD66|BD100)\\b"
+                                                                     options:NSRegularExpressionCaseInsensitive
+                                                                       error:nil];
+    });
+    
+    NSArray<NSTextCheckingResult*>* parenMatches = [parenMetadataRegex matchesInString:title options:0 range:NSMakeRange(0, title.length)];
+    NSString* extractedFormat = nil;
+    NSString* extractedYearFromMetadata = nil;
+    NSMutableArray<NSValue*>* rangesToRemove = [NSMutableArray array];
+    
+    for (NSTextCheckingResult* match in parenMatches)
+    {
+        if (match.numberOfRanges > 1)
+        {
+            NSString* content = [title substringWithRange:[match rangeAtIndex:1]];
+            // Check if this looks like metadata (contains comma-separated values like "2016,LP" or "2025, Digital Release")
+            // Skip simple year-only parentheses like "(1975)" - those are handled by year extraction
+            if ([content containsString:@","])
+            {
+                NSArray<NSString*>* parts = [content componentsSeparatedByString:@","];
+                for (NSString* part in parts)
+                {
+                    NSString* trimmed = [part stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet];
+                    // First, check if this part is a year (4-digit year 1900-2099)
+                    if (!extractedYearFromMetadata)
+                    {
+                        NSTextCheckingResult* yearMatch = [yearInMetadataRegex firstMatchInString:trimmed options:0 range:NSMakeRange(0, trimmed.length)];
+                        if (yearMatch)
+                        {
+                            extractedYearFromMetadata = [trimmed substringWithRange:yearMatch.range];
+                        }
+                    }
+                    // Check for format tags: LP, CD, DVD, BD, etc.
+                    if (!extractedFormat)
+                    {
+                        NSTextCheckingResult* formatMatch = [formatTagRegex firstMatchInString:trimmed options:0 range:NSMakeRange(0, trimmed.length)];
+                        if (formatMatch)
+                        {
+                            NSString* matched = [trimmed substringWithRange:formatMatch.range];
+                            // Normalize to uppercase for disc formats, lowercase for audio formats
+                            if ([matched.uppercaseString isEqualToString:@"LP"] || [matched.uppercaseString isEqualToString:@"CD"] || [matched.uppercaseString isEqualToString:@"EP"])
+                            {
+                                extractedFormat = matched.lowercaseString;
+                            }
+                            else
+                            {
+                                extractedFormat = matched.uppercaseString;
+                            }
+                        }
+                    }
+                    // Early exit if we found both
+                    if (extractedFormat && extractedYearFromMetadata)
+                    {
+                        break;
+                    }
+                }
+                // Mark this parentheses metadata group for removal
+                [rangesToRemove addObject:[NSValue valueWithRange:match.range]];
+            }
+        }
+    }
+    
+    // Remove parentheses metadata groups (in reverse order to preserve indices)
+    for (NSValue* rangeValue in [rangesToRemove reverseObjectEnumerator])
+    {
+        NSRange range = [rangeValue rangeValue];
+        title = [title stringByReplacingCharactersInRange:range withString:@" "];
+    }
+    
+    // Clean up any orphaned commas or parentheses artifacts left after metadata removal
+    // Remove patterns like ", )" that might be left after removing parentheses metadata
+    static NSRegularExpression* orphanCommaParenRegex = nil;
+    static NSRegularExpression* orphanFormatParenRegex = nil;
+    static dispatch_once_t cleanupOnceToken;
+    dispatch_once(&cleanupOnceToken, ^{
+        orphanCommaParenRegex = [NSRegularExpression regularExpressionWithPattern:@"\\s*,\\s*\\)" options:0 error:nil];
+        orphanFormatParenRegex = [NSRegularExpression regularExpressionWithPattern:@"\\s*,\\s*(LP|CD|EP)\\s*\\)" options:NSRegularExpressionCaseInsensitive error:nil];
+    });
+    title = [orphanCommaParenRegex stringByReplacingMatchesInString:title options:0 range:NSMakeRange(0, title.length) withTemplate:@""];
+    title = [orphanFormatParenRegex stringByReplacingMatchesInString:title options:0 range:NSMakeRange(0, title.length) withTemplate:@""];
+    
     // Normalize bracketed metadata early to simplify parsing
     title = [title stringByReplacingOccurrencesOfString:@"[" withString:@" "];
     title = [title stringByReplacingOccurrencesOfString:@"]" withString:@" "];
@@ -354,14 +446,16 @@
     // Also match Cyrillic МР3 (М=M, Р=P in Cyrillic)
     if (!resolution)
     {
-        NSRegularExpression* audioFormatRegex = [NSRegularExpression regularExpressionWithPattern:@"\\b(MP3|FLAC|OGG|AAC|WAV|APE|ALAC|WMA|OPUS|M4A)\\b"
+        NSRegularExpression* audioFormatRegex = [NSRegularExpression regularExpressionWithPattern:@"\\b(MP3|FLAC|OGG|AAC|WAV|APE|ALAC|WMA|OPUS|M4A|LP|CD|EP)\\b"
                                                                                           options:NSRegularExpressionCaseInsensitive
                                                                                             error:nil];
         NSTextCheckingResult* audioFormatMatch = [audioFormatRegex firstMatchInString:title options:0
                                                                                 range:NSMakeRange(0, title.length)];
         if (audioFormatMatch)
         {
-            resolution = [title substringWithRange:audioFormatMatch.range].lowercaseString;
+            NSString* matched = [title substringWithRange:audioFormatMatch.range];
+            // LP, CD, EP should be lowercase, others too
+            resolution = matched.lowercaseString;
         }
         else
         {
@@ -376,6 +470,12 @@
                 resolution = @"mp3";
             }
         }
+    }
+    
+    // Use format extracted from parentheses metadata if no resolution found yet
+    if (!resolution && extractedFormat)
+    {
+        resolution = extractedFormat;
     }
 
     // Extract season (S01, S02, etc.)
@@ -427,7 +527,7 @@
     }
 
     // Extract year (1900-2099) - but not if it's part of a date or interval
-    // Also use year extracted from bracket metadata if no other year found
+    // Also use year extracted from parentheses metadata if no other year found
     NSString* year = nil;
     if (!fullDateMatch && !yearInterval)
     {
@@ -435,6 +535,11 @@
                                                                                      error:nil];
         NSTextCheckingResult* yearMatch = [yearRegex firstMatchInString:title options:0 range:NSMakeRange(0, title.length)];
         year = yearMatch ? [title substringWithRange:yearMatch.range] : nil;
+        // If no year found in title, use year extracted from parentheses metadata
+        if (!year && extractedYearFromMetadata)
+        {
+            year = extractedYearFromMetadata;
+        }
     }
 
     // Remove any [Source]-?Rip variants (e.g., WEB-Rip, WEBRip, BD-Rip, BDRip)
@@ -556,7 +661,7 @@
     title = [resRemoveRegex stringByReplacingMatchesInString:title options:0 range:NSMakeRange(0, title.length) withTemplate:@""];
 
     NSRegularExpression* uhdRemoveRegex = [NSRegularExpression
-        regularExpressionWithPattern:@"\\.?#?\\(?(\\b(?:8K|4K|UHD|DVD5|DVD9|DVD|BD25|BD50|BD66|BD100|XviD|DivX|MP3|FLAC|OGG|AAC|WAV|APE|ALAC|WMA|OPUS|M4A)\\b)\\)?"
+        regularExpressionWithPattern:@"\\.?#?\\(?(\\b(?:8K|4K|UHD|DVD5|DVD9|DVD|BD25|BD50|BD66|BD100|XviD|DivX|MP3|FLAC|OGG|AAC|WAV|APE|ALAC|WMA|OPUS|M4A|LP|CD|EP)\\b)\\)?"
                              options:NSRegularExpressionCaseInsensitive
                                error:nil];
     title = [uhdRemoveRegex stringByReplacingMatchesInString:title options:0 range:NSMakeRange(0, title.length) withTemplate:@""];
