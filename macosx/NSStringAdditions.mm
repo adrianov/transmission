@@ -247,17 +247,29 @@
 
     // Shortcut: if title already looks clean, return it (after initial cleanup)
     // Note: '.' is NOT in the clean regex, so any title with '.' will go through full processing.
+    // Also check for technical patterns (resolution, season, year, tech tags) - if found, process the title
     NSRegularExpression* cleanTitleRegex = [NSRegularExpression regularExpressionWithPattern:@"^[\\p{L}\\p{N}\\s,\\[\\]\\(\\)\\{\\}\\-:;]+$"
                                                                                      options:0
                                                                                        error:nil];
-    if ([cleanTitleRegex firstMatchInString:title options:0 range:NSMakeRange(0, title.length)])
+    BOOL const looksClean = [cleanTitleRegex firstMatchInString:title options:0 range:NSMakeRange(0, title.length)] != nil;
+    
+    if (looksClean)
     {
-        // Final cleanup: ensure no space after '(' and no space before ')'
-        NSRegularExpression* finalSpaceAfterParen = [NSRegularExpression regularExpressionWithPattern:@"\\(\\s+" options:0 error:nil];
-        title = [finalSpaceAfterParen stringByReplacingMatchesInString:title options:0 range:NSMakeRange(0, title.length) withTemplate:@"("];
-        NSRegularExpression* finalSpaceBeforeParen = [NSRegularExpression regularExpressionWithPattern:@"\\s+\\)" options:0 error:nil];
-        title = [finalSpaceBeforeParen stringByReplacingMatchesInString:title options:0 range:NSMakeRange(0, title.length) withTemplate:@")"];
-        return title;
+        // Check for technical patterns that need processing
+        NSRegularExpression* techPatternRegex = [NSRegularExpression regularExpressionWithPattern:@"\\b(?:2160p|1080p|720p|480p|8K|4K|UHD|S\\d{1,2}|(?:19|20)\\d{2}|DVD|BD|WEB|Rip|HEVC|H264|H265|x264|x265|AAC|AC3|DTS|FLAC|MP3|Jaskier|MVO|ExKinoRay|RuTracker)\\b"
+                                                                                          options:NSRegularExpressionCaseInsensitive
+                                                                                            error:nil];
+        BOOL const hasTechPatterns = [techPatternRegex firstMatchInString:title options:0 range:NSMakeRange(0, title.length)] != nil;
+        
+        if (!hasTechPatterns)
+        {
+            // Final cleanup: ensure no space after '(' and no space before ')'
+            NSRegularExpression* finalSpaceAfterParen = [NSRegularExpression regularExpressionWithPattern:@"\\(\\s+" options:0 error:nil];
+            title = [finalSpaceAfterParen stringByReplacingMatchesInString:title options:0 range:NSMakeRange(0, title.length) withTemplate:@"("];
+            NSRegularExpression* finalSpaceBeforeParen = [NSRegularExpression regularExpressionWithPattern:@"\\s+\\)" options:0 error:nil];
+            title = [finalSpaceBeforeParen stringByReplacingMatchesInString:title options:0 range:NSMakeRange(0, title.length) withTemplate:@")"];
+            return title;
+        }
     }
 
     // Remove file extension (any 2-5 character alphanumeric extension)
@@ -292,7 +304,11 @@
                                                                               options:NSRegularExpressionCaseInsensitive
                                                                                 error:nil];
     NSTextCheckingResult* resMatch = [resRegex firstMatchInString:title options:0 range:NSMakeRange(0, title.length)];
-    NSString* resolution = resMatch ? [title substringWithRange:resMatch.range] : nil;
+    NSString* resolution = nil;
+    if (resMatch && resMatch.numberOfRanges > 1)
+    {
+        resolution = [title substringWithRange:[resMatch rangeAtIndex:1]];
+    }
 
     // Check for 8K/4K/UHD if no standard resolution found
     if (!resolution)
@@ -504,6 +520,9 @@
         @"EXTENDED",
         @"UNRATED",
         @"REMUX",
+        @"HDCLUB",
+        @"Jaskier",
+        @"MVO",
         // VR/3D format tags (technical, not content descriptors)
         @"180x180",
         @"180",
@@ -530,14 +549,14 @@
         title = [tagRegex stringByReplacingMatchesInString:title options:0 range:NSMakeRange(0, title.length) withTemplate:@""];
     }
 
-    // Remove resolution, season markers, year, date from title (and preceding dot or surrounding parentheses)
-    NSRegularExpression* resRemoveRegex = [NSRegularExpression regularExpressionWithPattern:@"\\.?\\(?(2160p|1080p|720p|480p)\\)?"
+    // Remove resolution, season markers, year, date from title (and preceding dot, #, or surrounding parentheses)
+    NSRegularExpression* resRemoveRegex = [NSRegularExpression regularExpressionWithPattern:@"\\.?#?\\(?\\b(2160p|1080p|720p|480p)\\b\\)?"
                                                                                     options:NSRegularExpressionCaseInsensitive
                                                                                       error:nil];
     title = [resRemoveRegex stringByReplacingMatchesInString:title options:0 range:NSMakeRange(0, title.length) withTemplate:@""];
 
     NSRegularExpression* uhdRemoveRegex = [NSRegularExpression
-        regularExpressionWithPattern:@"\\.?\\(?(\\b(?:8K|4K|UHD|DVD5|DVD9|DVD|BD25|BD50|BD66|BD100|XviD|DivX|MP3|FLAC|OGG|AAC|WAV|APE|ALAC|WMA|OPUS|M4A)\\b)\\)?"
+        regularExpressionWithPattern:@"\\.?#?\\(?(\\b(?:8K|4K|UHD|DVD5|DVD9|DVD|BD25|BD50|BD66|BD100|XviD|DivX|MP3|FLAC|OGG|AAC|WAV|APE|ALAC|WMA|OPUS|M4A)\\b)\\)?"
                              options:NSRegularExpressionCaseInsensitive
                                error:nil];
     title = [uhdRemoveRegex stringByReplacingMatchesInString:title options:0 range:NSMakeRange(0, title.length) withTemplate:@""];
@@ -615,6 +634,10 @@
     title = [trailingSingleDotRegex stringByReplacingMatchesInString:title options:0 range:NSMakeRange(0, title.length)
                                                         withTemplate:@"$1$2"];
     title = [title stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet];
+
+    // Remove empty parentheses (artifacts from tag removal)
+    NSRegularExpression* emptyParenRegex = [NSRegularExpression regularExpressionWithPattern:@"\\(\\s*\\)" options:0 error:nil];
+    title = [emptyParenRegex stringByReplacingMatchesInString:title options:0 range:NSMakeRange(0, title.length) withTemplate:@""];
 
     // Remove leading/trailing hyphens and spaces (but not dots - they may be ellipsis)
     while ([title hasPrefix:@"-"] || [title hasPrefix:@" "])
