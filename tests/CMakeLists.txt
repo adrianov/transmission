@@ -8,6 +8,10 @@ if(ENABLE_QT)
     add_subdirectory(qt)
 endif()
 
+if(APPLE)
+    add_subdirectory(macosx)
+endif()
+
 add_custom_target(all-tests)
 
 set_property(
@@ -24,4 +28,8 @@ endif()
 
 if(TARGET transmission-show)
     add_dependencies(all-tests transmission-show)
+endif()
+
+if(TARGET macosx-test)
+    add_dependencies(all-tests macosx-test)
 endif()
