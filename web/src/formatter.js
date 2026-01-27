@@ -140,11 +140,14 @@ function formatHumanTitle(name) {
   // Always replace underscores with spaces and collapse multiple whitespaces
   let title = name
     .replaceAll('_', ' ')
-    .replaceAll('(', ' (')
-    .replaceAll(')', ') ')
+    .replaceAll('|', ' ')
+    .replaceAll(/\s+l\s+/g, ' ')
     .replaceAll(',', ', ')
     .replaceAll(/\s+/g, ' ')
     .trim();
+  
+  // Ensure no space after '(' and no space before ')'
+  title = title.replaceAll(/\(\s+/g, '(').replaceAll(/\s+\)/g, ')');
 
   // Shortcut: if title already looks clean, return it (after initial cleanup)
   // Note: '.' is NOT in the clean regex, so any title with '.' will go through full processing.
@@ -337,6 +340,9 @@ function formatHumanTitle(name) {
     result += ` #${resolution}`;
   }
 
+  // Final cleanup: ensure no space after '(' and no space before ')'
+  result = result.replaceAll(/\(\s+/g, '(').replaceAll(/\s+\)/g, ')');
+
   return result || name;
 }
 
@@ -354,11 +360,14 @@ function formatHumanFileName(name) {
   // Always replace underscores with spaces and collapse multiple whitespaces
   name = name
     .replaceAll('_', ' ')
-    .replaceAll('(', ' (')
-    .replaceAll(')', ') ')
+    .replaceAll('|', ' ')
+    .replaceAll(/\s+l\s+/g, ' ')
     .replaceAll(',', ', ')
     .replaceAll(/\s+/g, ' ')
     .trim();
+  
+  // Ensure no space after '(' and no space before ')'
+  name = name.replaceAll(/\(\s+/g, '(').replaceAll(/\s+\)/g, ')');
 
   // Keep the file extension intact if it looks like one.
   const lastDot = name.lastIndexOf('.');
@@ -536,6 +545,8 @@ export const Formatter = {
 
     // Remove stray closing brackets or parentheses
     title = title.replace(/[\]\)]/g, '');
+    title = title.replace(/\|/g, '');
+    title = title.replace(/\s+l\s+/g, ' ');
 
     title = title.replace(/\s+/g, ' ').trim();
     while (title.startsWith('-') || title.startsWith(' ') || title.startsWith('.')) title = title.slice(1);
