@@ -758,9 +758,13 @@ static CGFloat const kPlayButtonVerticalPadding = 4.0;
     {
         NSString* type = fileItem[@"type"] ?: @"file";
         NSString* category = fileItem[@"category"];
+        NSString* path = fileItem[@"path"] ?: @"";
         
-        // Cache key based on type and category
-        NSString* cacheKey = [NSString stringWithFormat:@"%@:%@", type, category ?: @""];
+        // Check if path is a .cue file - always treat as album
+        BOOL const isCueFile = [path.pathExtension.lowercaseString isEqualToString:@"cue"];
+        
+        // Cache key based on type, category, and cue file status
+        NSString* cacheKey = [NSString stringWithFormat:@"%@:%@:%@", type, category ?: @"", isCueFile ? @"cue" : @""];
         NSImage* cached = [self.fIconCache objectForKey:cacheKey];
         if (cached)
             return cached;
@@ -771,7 +775,7 @@ static CGFloat const kPlayButtonVerticalPadding = 4.0;
         {
             symbolName = @"book";
         }
-        else if ([type isEqualToString:@"album"])
+        else if ([type isEqualToString:@"album"] || isCueFile)
         {
             symbolName = @"music.note.list";
         }
@@ -1028,7 +1032,20 @@ static CGFloat const kPlayButtonVerticalPadding = 4.0;
     if (@available(macOS 11.0, *))
     {
         // Use double note for audio (albums), book for documents, smaller play triangle for video
-        icon = [NSImage imageWithSystemSymbolName:(isBooks ? @"book" : (isAudio ? @"music.note.list" : @"play")) accessibilityDescription:nil];
+        // For audio, check if the play menu leads to a .cue file (always an album)
+        BOOL leadsToCue = NO;
+        if (playMenu.numberOfItems > 0)
+        {
+            NSMenuItem* firstItem = playMenu.itemArray[0];
+            NSDictionary* itemInfo = firstItem.representedObject;
+            if ([itemInfo isKindOfClass:[NSDictionary class]])
+            {
+                NSString* path = itemInfo[@"item"][@"path"] ?: itemInfo[@"path"];
+                leadsToCue = [path.pathExtension.lowercaseString isEqualToString:@"cue"];
+            }
+        }
+
+        icon = [NSImage imageWithSystemSymbolName:(isBooks ? @"book" : ((isAudio || leadsToCue) ? @"music.note.list" : @"play")) accessibilityDescription:nil];
     }
 
     if (playMenu.numberOfItems == 1 && !playMenu.itemArray[0].hasSubmenu)
@@ -1807,7 +1824,25 @@ static NSString* folderForPlayButton(NSButton* sender, Torrent* torrent)
     }
     
     // Image - set based on type/category (cached)
-    NSImage* icon = [self iconForPlayableFileItem:item];
+    // Check if this audio file has a .cue companion (always an album)
+    BOOL const leadsToCue = [path.pathExtension.lowercaseString isEqualToString:@"cue"] || 
+                            ([torrent cueFilePathForAudioPath:path] != nil);
+    NSImage* icon = nil;
+    if (leadsToCue)
+    {
+        if (@available(macOS 11.0, *))
+        {
+            icon = [NSImage imageWithSystemSymbolName:@"music.note.list" accessibilityDescription:nil];
+            NSImageSymbolConfiguration* config = [NSImageSymbolConfiguration configurationWithPointSize:11 weight:NSFontWeightMedium scale:NSImageSymbolScaleSmall];
+            icon = [icon imageWithSymbolConfiguration:config];
+            [icon setTemplate:YES];
+        }
+    }
+    
+    if (!icon)
+    {
+        icon = [self iconForPlayableFileItem:item];
+    }
     playButton.image = icon;
     playButton.imagePosition = icon ? NSImageLeft : NSNoImage;
 
