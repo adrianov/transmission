@@ -125,7 +125,8 @@ The following technical tags are filtered out:
 - `Paris .Bonus` → `Paris Bonus` (orphan dot removed)
 - Underscores (`_`) are replaced with spaces
 - Existing ` - ` separators are preserved
-- Hyphens (`-`) are replaced with spaces
+- Hyphens (`-`) between letters (hyphenated words like `Full-Moon`) are preserved
+- Other hyphens are replaced with spaces
 - Multiple spaces are collapsed to single space
 
 ### 9. Final Assembly
@@ -158,6 +159,7 @@ Parts are assembled with specific formatting:
 | `Golden Disco Hits - 2000 - 2003` | `Golden Disco Hits (2000-2003)` |
 | `Artist - Album Name (2020) [FLAC]` | `Artist - Album Name (2020) #flac` |
 | `Artist.Album.2019.MP3` | `Artist Album (2019) #mp3` |
+| `The.White.Lotus.S03E05.Full-Moon.Party.1080p.AMZN.WEB-DL.H.264-EniaHD.mkv` | Episode button: `▶ E5 - Full-Moon Party` |
 
 ## Play Buttons (macOS)
 
@@ -175,14 +177,17 @@ Media torrents display Play buttons below the status line for quick access to do
 - **Single document:** The button label is `Read`
 - **Document readiness:** Read buttons appear only when the file is 100% downloaded
 - **Episode detection:** Files with `S01E05` or `1x05` patterns show as `▶ E1`, `▶ E2`, etc.
-- **Episode title detection:** If a title follows the episode marker, it is extracted and cleaned (e.g., `▶ E1 - The Beginning`).
-- **Technical tag removal:** Titles are aggressively cleaned of technical tags like `1080p`, `WEB-DL`, `H264`, etc.
-- **Redundancy removal:** If the detected episode title is just a repeat of the series name, it is simplified to just the episode number.
+- **Episode title detection:** If a title follows the episode marker, it is extracted and cleaned (e.g., `▶ E1 - The Beginning`, `▶ E5 - Full-Moon Party`)
+- **Technical tag removal:** Titles are aggressively cleaned of technical tags like `1080p`, `WEB-DL`, `H264`, `AMZN`, `EniaHD`, etc. before title extraction
+- **Hyphen preservation:** Hyphens in hyphenated words (e.g., `Full-Moon`) are preserved and not converted to spaces
+- **Dot-to-space conversion:** Dots between words in episode titles are converted to spaces (e.g., `Full-Moon.Party` → `Full-Moon Party`)
+- **Redundancy removal:** If the detected episode title is just a repeat of the series name, it is simplified to just the episode number
 - **Common lexeme removal:** If all episodes in a torrent share the same tag at the same position (start or end of the title), that tag is automatically removed as garbage.
 - **Season grouping:** Multiple seasons show headers (`Season 1:`, `Season 2:`) followed by episode buttons
 - **Single season:** No header shown, just episode buttons (`▶ E1`, `▶ E2`, ...)
 - **Non-episode files:** Show lightly humanized filename (separator cleanup) (e.g., `▶ Artist Track Name`)
 - **CUE file support:** If a `.cue` file exists alongside an audio file, the `.cue` is opened instead
+- **Tooltip paths:** Play button tooltips always show the full, uncut absolute file path, with symlinks resolved to canonical paths
 - **DVD/Blu-ray support:** Torrents with `VIDEO_TS` or `BDMV` folders are detected as disc media
 - **Multi-disc torrents:** Torrents with multiple discs (e.g., `Disk.1/VIDEO_TS`, `Disk.2/VIDEO_TS`) show individual play buttons for each disc
 - **Up to 100 files:** Maximum of 100 play buttons per torrent
@@ -247,8 +252,17 @@ Filenames are converted to readable episode names:
 | `Show.S01E05.720p.mkv` | `▶ E5` |
 | `Show.S1.E12.HDTV.mp4` | `▶ E12` |
 | `Show.1x05.720p.mkv` | `▶ E5` |
+| `Show.S03E05.Full-Moon.Party.1080p.AMZN.WEB-DL.H.264-EniaHD.mkv` | `▶ E5 - Full-Moon Party` |
 | `Artist.Track.Name.mp3` | `▶ Artist Track Name` |
 | `Concert.2160p.FLAC.flac` | `▶ Concert 2160p FLAC` |
+
+**Episode Title Extraction Rules:**
+- Episode titles are extracted from text following the episode marker (e.g., `S03E05` or `E05`)
+- Dots (`.`) between words are converted to spaces (e.g., `Full-Moon.Party` → `Full-Moon Party`)
+- Hyphens in hyphenated words are preserved (e.g., `Full-Moon` stays as `Full-Moon`, not `Full Moon`)
+- Technical tags (resolutions, codecs, release info) are stripped before title processing
+- Only known video file extensions (`.mkv`, `.mp4`, `.avi`, etc.) are removed; words that look like extensions (e.g., `.Party`) are preserved
+- If the extracted title is just a repeat of the series name, it's simplified to just the episode number
 
 ## Implementation
 

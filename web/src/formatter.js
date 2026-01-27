@@ -101,6 +101,9 @@ const techTagsOther = [
   'EXTENDED',
   'UNRATED',
   'REMUX',
+  'HDCLUB',
+  'Jaskier',
+  'MVO',
 ];
 
 // VR/3D format tags to filter (technical, not content descriptors)
@@ -151,8 +154,14 @@ function formatHumanTitle(name) {
 
   // Shortcut: if title already looks clean, return it (after initial cleanup)
   // Note: '.' is NOT in the clean regex, so any title with '.' will go through full processing.
-  if (/^[\p{L}\p{N}\s,()[\]{}\-:;]+$/u.test(title)) {
-    return title;
+  // Also check for technical patterns (resolution, season, year, tech tags) - if found, process the title
+  const looksClean = /^[\p{L}\p{N}\s,()[\]{}\-:;]+$/u.test(title);
+  if (looksClean) {
+    // Check for technical patterns that need processing
+    const hasTechPatterns = /\b(?:2160p|1080p|720p|480p|8K|4K|UHD|S\d{1,2}|(?:19|20)\d{2}|DVD|BD|WEB|Rip|HEVC|H264|H265|x264|x265|AAC|AC3|DTS|FLAC|MP3|Jaskier|MVO|ExKinoRay|RuTracker)\b/i.test(title);
+    if (!hasTechPatterns) {
+      return title;
+    }
   }
 
   // Remove file extension (any 2-5 character alphanumeric extension)
@@ -257,13 +266,13 @@ function formatHumanTitle(name) {
     );
   }
 
-  // Remove resolution, season markers, year, date (and preceding dot if used as separator)
+  // Remove resolution, season markers, year, date (and preceding dot or # if used as separator)
   // Also remove Cyrillic audio format variants and surrounding parentheses
   title = title
-    .replaceAll(/\.?\(?(2160p|1080p|720p|480p|8K|4K|UHD)\)?/gi, '')
-    .replaceAll(/\.?\(?(DVD5|DVD9|DVD|BD25|BD50|BD66|BD100)\)?/gi, '')
+    .replaceAll(/\.?#?\(?\b(2160p|1080p|720p|480p|8K|4K|UHD)\b\)?/gi, '')
+    .replaceAll(/\.?#?\(?(DVD5|DVD9|DVD|BD25|BD50|BD66|BD100)\)?/gi, '')
     .replaceAll(
-      /\.?\(?\b(XviD|DivX|MP3|FLAC|OGG|AAC|WAV|APE|ALAC|WMA|OPUS|M4A)\b\)?/gi,
+      /\.?#?\(?\b(XviD|DivX|MP3|FLAC|OGG|AAC|WAV|APE|ALAC|WMA|OPUS|M4A)\b\)?/gi,
       '',
     )
     .replaceAll(/\(?\(?(МР3|МРЗ)\)?/gi, '')
@@ -313,6 +322,9 @@ function formatHumanTitle(name) {
     .replaceAll(/([^.])\.$/g, '$1')
     .trim();
   /* eslint-enable sonarjs/slow-regex */
+
+  // Remove empty parentheses (artifacts from tag removal)
+  title = title.replaceAll(/\(\s*\)/g, '');
 
   // Remove trailing/leading hyphens and spaces (but not dots - they may be ellipsis)
   while (title.startsWith(' ') || title.startsWith('-')) {

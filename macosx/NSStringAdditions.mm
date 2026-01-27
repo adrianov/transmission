@@ -775,7 +775,10 @@
         else if (c == '-')
         {
             BOOL const spacedDash = prev == ' ' && next == ' ';
-            if (betweenDigits || spacedDash)
+            BOOL const isHyphenatedWord = i > 0 && i + 1 < name.length &&
+                                          [[NSCharacterSet letterCharacterSet] characterIsMember:prev] &&
+                                          [[NSCharacterSet letterCharacterSet] characterIsMember:next];
+            if (betweenDigits || spacedDash || isHyphenatedWord)
             {
                 [out appendFormat:@"%C", c];
             }
@@ -867,7 +870,7 @@
     NSString* remaining = [filename substringFromIndex:episodeMatch.range.location + episodeMatch.range.length];
 
     // If there's a dot or hyphen immediately after, skip it
-    NSRegularExpression* separatorRegex = [NSRegularExpression regularExpressionWithPattern:@"^[.\\-\\s]+" options:0 error:nil];
+    NSRegularExpression* separatorRegex = [NSRegularExpression regularExpressionWithPattern:@"^[.\\s]+" options:0 error:nil];
     if (separatorRegex != nil)
     {
         remaining = [separatorRegex stringByReplacingMatchesInString:remaining options:0 range:NSMakeRange(0, remaining.length) withTemplate:@""];
@@ -878,10 +881,7 @@
         return episodePrefix;
     }
 
-    // Cleanup the remaining part using humanReadableFileName logic
-    NSString* title = remaining.humanReadableFileName;
-
-    // Aggressively strip technical tags from the episode title specifically
+    // Strip technical tags from the original string BEFORE processing (so patterns with dots like H.264 work correctly)
     NSArray* tagsToStrip = @[
         @"1080p", @"720p", @"2160p", @"480p", @"8K", @"4K", @"UHD",
         @"WEB-DL", @"WEBDL", @"WEBRip", @"BDRip", @"BluRay", @"HDRip", @"DVDRip", @"HDTV",
@@ -890,48 +890,94 @@
         @"AMZN", @"NF", @"DSNP", @"HMAX", @"PCOK", @"ATVP", @"APTV",
         @"2xRu", @"Ru", @"En", @"qqss44", @"WEB", @"DL"
     ];
-
-    // Remove any [Source]-?Rip variants from episode title
+    
+    // Remove any [Source]-?Rip variants from episode title (before dot replacement)
     NSRegularExpression* ripRegexEpisode = [NSRegularExpression regularExpressionWithPattern:@"\\b[a-z0-9]+-?rip\\b"
                                                                                      options:NSRegularExpressionCaseInsensitive
                                                                                        error:nil];
     if (ripRegexEpisode != nil)
     {
-        title = [ripRegexEpisode stringByReplacingMatchesInString:title options:0 range:NSMakeRange(0, title.length) withTemplate:@""];
+        remaining = [ripRegexEpisode stringByReplacingMatchesInString:remaining options:0 range:NSMakeRange(0, remaining.length) withTemplate:@" "];
     }
 
-    // Remove any [Source]HD variants from episode title
+    // Remove any [Source]HD variants from episode title (before dot replacement)
     NSRegularExpression* hdRegexEpisode = [NSRegularExpression regularExpressionWithPattern:@"\\b[a-z0-9]+HD\\b"
                                                                                     options:NSRegularExpressionCaseInsensitive
                                                                                       error:nil];
     if (hdRegexEpisode != nil)
     {
-        title = [hdRegexEpisode stringByReplacingMatchesInString:title options:0 range:NSMakeRange(0, title.length) withTemplate:@""];
+        remaining = [hdRegexEpisode stringByReplacingMatchesInString:remaining options:0 range:NSMakeRange(0, remaining.length) withTemplate:@" "];
     }
 
-    // Remove any [Source]-?SbR variants from episode title
+    // Remove any [Source]-?SbR variants from episode title (before dot replacement)
     NSRegularExpression* sbrRegexEpisode = [NSRegularExpression regularExpressionWithPattern:@"\\b[a-z0-9]*-?SbR\\b"
                                                                                      options:NSRegularExpressionCaseInsensitive
                                                                                        error:nil];
     if (sbrRegexEpisode != nil)
     {
-        title = [sbrRegexEpisode stringByReplacingMatchesInString:title options:0 range:NSMakeRange(0, title.length) withTemplate:@""];
+        remaining = [sbrRegexEpisode stringByReplacingMatchesInString:remaining options:0 range:NSMakeRange(0, remaining.length) withTemplate:@" "];
     }
 
     for (NSString* tag in tagsToStrip)
     {
-        NSString* pattern = [NSString stringWithFormat:@"\\b%@\\b", tag];
+        NSString* escapedTag = [NSRegularExpression escapedPatternForString:tag];
+        NSString* pattern = [NSString stringWithFormat:@"\\b%@\\b", escapedTag];
         NSRegularExpression* tagRegex = [NSRegularExpression regularExpressionWithPattern:pattern
                                                                                   options:NSRegularExpressionCaseInsensitive
                                                                                     error:nil];
         if (tagRegex != nil)
         {
-            title = [tagRegex stringByReplacingMatchesInString:title options:0 range:NSMakeRange(0, title.length) withTemplate:@""];
+            remaining = [tagRegex stringByReplacingMatchesInString:remaining options:0 range:NSMakeRange(0, remaining.length) withTemplate:@" "];
         }
     }
 
-    // Remove file extension if it survived
-    title = title.stringByDeletingPathExtension;
+    // Remove known video file extensions explicitly (NOT stringByDeletingPathExtension which might remove valid words like ".Party")
+    NSRegularExpression* extRegex = [NSRegularExpression regularExpressionWithPattern:@"\\.(mkv|mp4|avi|mov|wmv|flv|webm|m4v|mpg|mpeg|ts|m2ts)$"
+                                                                              options:NSRegularExpressionCaseInsensitive
+                                                                                error:nil];
+    if (extRegex != nil)
+    {
+        remaining = [extRegex stringByReplacingMatchesInString:remaining options:0 range:NSMakeRange(0, remaining.length) withTemplate:@""];
+    }
+    
+    // Clean up multiple spaces left by tag removal
+    NSRegularExpression* multiSpaceRegex = [NSRegularExpression regularExpressionWithPattern:@"\\s+" options:0 error:nil];
+    if (multiSpaceRegex != nil)
+    {
+        remaining = [multiSpaceRegex stringByReplacingMatchesInString:remaining options:0 range:NSMakeRange(0, remaining.length) withTemplate:@" "];
+    }
+    remaining = [remaining stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet];
+    
+    // Replace dots with spaces (they are word separators in episode titles)
+    // But preserve dots between digits (e.g., "2.0" in titles)
+    NSMutableString* dotCleaned = [NSMutableString stringWithCapacity:remaining.length];
+    NSCharacterSet* digits = NSCharacterSet.decimalDigitCharacterSet;
+    for (NSUInteger i = 0; i < remaining.length; i++)
+    {
+        unichar c = [remaining characterAtIndex:i];
+        if (c == '.')
+        {
+            unichar prev = i > 0 ? [remaining characterAtIndex:i - 1] : 0;
+            unichar next = i + 1 < remaining.length ? [remaining characterAtIndex:i + 1] : 0;
+            BOOL betweenDigits = [digits characterIsMember:prev] && [digits characterIsMember:next];
+            [dotCleaned appendString:betweenDigits ? @"." : @" "];
+        }
+        else
+        {
+            [dotCleaned appendFormat:@"%C", c];
+        }
+    }
+    remaining = dotCleaned;
+    
+    // Clean up spaces again after dot replacement
+    if (multiSpaceRegex != nil)
+    {
+        remaining = [multiSpaceRegex stringByReplacingMatchesInString:remaining options:0 range:NSMakeRange(0, remaining.length) withTemplate:@" "];
+    }
+    remaining = [remaining stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet];
+    
+    // Cleanup the remaining part using humanReadableFileName logic (handles hyphens correctly)
+    NSString* title = remaining.humanReadableFileName;
 
     // Final cleanup of spaces and separators
     // Also remove empty brackets/parentheses like [] or ()
@@ -948,6 +994,9 @@
     NSRegularExpression* lSeparatorRegexEpisode = [NSRegularExpression regularExpressionWithPattern:@"\\s+l\\s+" options:0 error:nil];
     title = [lSeparatorRegexEpisode stringByReplacingMatchesInString:title options:0 range:NSMakeRange(0, title.length) withTemplate:@" "];
 
+    // Ensure space after ','
+    title = [title stringByReplacingOccurrencesOfString:@"," withString:@", "];
+
     NSRegularExpression* spaceRegex = [NSRegularExpression regularExpressionWithPattern:@"\\s+" options:0 error:nil];
     if (spaceRegex != nil)
     {
@@ -955,8 +1004,8 @@
     }
     title = [title stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet];
 
-    // Remove trailing/leading hyphens, dots, and spaces
-    NSCharacterSet* trimSet = [NSCharacterSet characterSetWithCharactersInString:@"- ."];
+    // Remove trailing/leading dots and spaces
+    NSCharacterSet* trimSet = [NSCharacterSet characterSetWithCharactersInString:@". "];
     title = [title stringByTrimmingCharactersInSet:trimSet];
 
     // Final check for file extension that might have survived the stringByDeletingPathExtension

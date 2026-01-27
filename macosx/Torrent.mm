@@ -2782,25 +2782,45 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
 
 - (NSString*)tooltipPathForItemPath:(NSString*)path type:(NSString*)type folder:(NSString*)folder
 {
+    NSString* resultPath = path;
+    
     // For album folders, check if there's a .cue file in the folder
     if ([type isEqualToString:@"album"] && folder.length > 0)
     {
         NSString* cuePath = [self cueFilePathForFolder:folder];
         if (cuePath)
         {
-            return cuePath;
+            resultPath = cuePath;
         }
     }
     
     // For audio files, check if there's a matching .cue file
-    NSString* cuePath = [self cueFilePathForAudioPath:path];
-    if (cuePath)
+    if (resultPath && resultPath.length > 0)
     {
-        return cuePath;
+        NSString* cuePath = [self cueFilePathForAudioPath:resultPath];
+        if (cuePath)
+        {
+            resultPath = cuePath;
+        }
     }
     
-    // Default: return the original path
-    return path;
+    // Ensure we always return an absolute path
+    if (resultPath && resultPath.length > 0)
+    {
+        if (![resultPath isAbsolutePath])
+        {
+            resultPath = [self.currentDirectory stringByAppendingPathComponent:resultPath];
+        }
+        
+        // Resolve any symlinks and get the canonical absolute path
+        NSString* resolvedPath = [resultPath stringByResolvingSymlinksInPath];
+        if (resolvedPath && resolvedPath.length > 0)
+        {
+            resultPath = resolvedPath;
+        }
+    }
+    
+    return resultPath ?: path;
 }
 
 - (void)renameTorrent:(NSString*)newName completionHandler:(void (^)(BOOL didRename))completionHandler
