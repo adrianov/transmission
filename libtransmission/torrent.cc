@@ -2962,6 +2962,32 @@ tr_piece_index_t tr_torrent::file_index_for_piece(tr_piece_index_t piece) const 
     return 0;
 }
 
+bool tr_torrent::is_video_file(tr_file_index_t file) const noexcept
+{
+    auto const mime_type = tr_get_mime_type_for_filename(metainfo_.file_subpath(file));
+    if (tr_strv_starts_with(mime_type, "video/"sv))
+    {
+        return true;
+    }
+
+    // Fallback for common video extensions that might not be in the mime-type list
+    // or might have different mime-types but still benefit from tail priority.
+    auto const path = metainfo_.file_subpath(file);
+    auto const path_sv = std::string_view{ path };
+    auto const pos = path_sv.rfind('.');
+    if (pos == std::string_view::npos || pos + 1 == path_sv.size())
+    {
+        return false;
+    }
+
+    auto ext = std::string{ path_sv.substr(pos + 1) };
+    std::transform(ext.begin(), ext.end(), ext.begin(), [](unsigned char c) { return std::tolower(c); });
+
+    // These formats often have important metadata at the end of the file (e.g. MOOV atom in MP4,
+    // index in MKV/AVI) which is required for seeking or even starting playback.
+    return ext == "avi" || ext == "mp4" || ext == "mkv" || ext == "mov" || ext == "m4v" || ext == "webm";
+}
+
 bool tr_torrent::is_piece_in_file_tail(tr_piece_index_t piece) const noexcept
 {
     static constexpr uint64_t TailSize = 20U * 1024U * 1024U; // 20 MB
@@ -2969,7 +2995,7 @@ bool tr_torrent::is_piece_in_file_tail(tr_piece_index_t piece) const noexcept
     auto const [file_begin, file_end] = fpm_.file_span_for_piece(piece);
     for (auto file = file_begin; file < file_end; ++file)
     {
-        if (!files_wanted_.file_wanted(file))
+        if (!files_wanted_.file_wanted(file) || !is_video_file(file))
         {
             continue;
         }
