@@ -2425,11 +2425,8 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
         }
         else
         {
-            // Cache the human-readable title result
-            if (!self.fCachedHumanReadableTitle)
-            {
-                self.fCachedHumanReadableTitle = self.name.humanReadableTitle;
-            }
+            // Always regenerate to ensure latest formatting rules are applied
+            self.fCachedHumanReadableTitle = self.name.humanReadableTitle;
             self.fDisplayName = self.fCachedHumanReadableTitle;
         }
     }

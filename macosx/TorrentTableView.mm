@@ -2404,9 +2404,84 @@ static NSString* folderForPlayButton(NSButton* sender, Torrent* torrent)
 
     NSString* type = objc_getAssociatedObject(sender, &kPlayButtonTypeKey) ?: @"";
     NSString* folder = objc_getAssociatedObject(sender, &kPlayButtonFolderKey) ?: @"";
+    NSString* path = sender.identifier ?: @"";
+    
+    // Check if this is a cue-companion audio file (flac, ape, wav, etc.)
+    // If so, check if there's a matching .cue file with the same base name
+    static NSSet<NSString*>* cueCompanionExtensions;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        cueCompanionExtensions = [NSSet setWithArray:@[ @"flac", @"ape", @"wav", @"wma", @"alac", @"aiff", @"wv" ]];
+    });
+    
+    NSString* ext = path.pathExtension.lowercaseString;
+    if ([cueCompanionExtensions containsObject:ext])
+    {
+        // Extract relative path from absolute path
+        NSString* torrentDir = torrent.currentDirectory;
+        NSString* relativePath = path;
+        if ([path hasPrefix:torrentDir])
+        {
+            relativePath = [path substringFromIndex:torrentDir.length];
+            if ([relativePath hasPrefix:@"/"])
+            {
+                relativePath = [relativePath substringFromIndex:1];
+            }
+        }
+        else
+        {
+            // If path doesn't start with torrent directory, try to find it by filename
+            relativePath = path.lastPathComponent;
+        }
+        
+        NSString* baseName = relativePath.lastPathComponent.stringByDeletingPathExtension;
+        NSString* directory = relativePath.stringByDeletingLastPathComponent;
+        // Normalize directory: empty string for root, remove leading/trailing slashes
+        if (directory.length == 0 || [directory isEqualToString:@"."] || [directory isEqualToString:@"/"])
+        {
+            directory = @"";
+        }
+        
+        // Search for a matching .cue file in the torrent
+        NSUInteger const count = torrent.fileCount;
+        for (NSUInteger i = 0; i < count; i++)
+        {
+            auto const file = tr_torrentFile(torrent.torrentStruct, (tr_file_index_t)i);
+            NSString* fileName = @(file.name);
+            NSString* fileExt = fileName.pathExtension.lowercaseString;
+            
+            if ([fileExt isEqualToString:@"cue"])
+            {
+                NSString* cueBaseName = fileName.lastPathComponent.stringByDeletingPathExtension;
+                NSString* cueDirectory = fileName.stringByDeletingLastPathComponent;
+                // Normalize directory: empty string for root
+                if (cueDirectory.length == 0 || [cueDirectory isEqualToString:@"."] || [cueDirectory isEqualToString:@"/"])
+                {
+                    cueDirectory = @"";
+                }
+                
+                // Check if base names match (case-insensitive) and directories match
+                if ([cueBaseName.lowercaseString isEqualToString:baseName.lowercaseString] &&
+                    [cueDirectory isEqualToString:directory])
+                {
+                    // Found matching .cue file, use it instead
+                    auto const location = tr_torrentFindFile(torrent.torrentStruct, (tr_file_index_t)i);
+                    if (!std::empty(location))
+                    {
+                        path = @(location.c_str());
+                    }
+                    else
+                    {
+                        path = [torrent.currentDirectory stringByAppendingPathComponent:fileName];
+                    }
+                    break;
+                }
+            }
+        }
+    }
     
     NSDictionary* item = @{
-        @"path" : sender.identifier ?: @"",
+        @"path" : path,
         @"type" : type,
         @"index" : @(sender.tag),
         @"folder" : folder
