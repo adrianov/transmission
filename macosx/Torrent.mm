@@ -1690,9 +1690,10 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
         // Include all wanted files regardless of progress
         // (visibility will be controlled by TorrentTableView based on progress)
 
-        NSString* path;
-        auto const location = tr_torrentFindFile(self.fHandle, i);
-        path = !std::empty(location) ? @(location.c_str()) : [self.currentDirectory stringByAppendingPathComponent:fileName];
+        // Construct path from torrent metadata + download path (not real disk file names)
+        // This ensures correct paths for newly added torrents before files are fully downloaded
+        // Use originalFileName to preserve full filename from torrent metadata
+        NSString* path = [self.currentDirectory stringByAppendingPathComponent:originalFileName];
 
         BOOL const isDocument = [documentExtensions containsObject:ext];
         BOOL useCompanionPdf = NO;
@@ -1774,7 +1775,41 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
         }];
     }
 
-    if (playable.count == 0 && cueBaseNames.count == 0)
+    // Add .cue files that have audio companions to the playable list
+    for (NSString* cueBaseName in cueBaseNames)
+    {
+        NSNumber* cueIndex = cueFileIndexes[cueBaseName];
+        NSNumber* audioIndex = cueAudioIndexes[cueBaseName];
+        if (cueIndex && audioIndex)
+        {
+            // This .cue file has an audio companion, add it to playable list
+            NSString* cueFileName = cueFileNames[cueBaseName];
+            CGFloat progress = cueProgress[cueBaseName] ? cueProgress[cueBaseName].doubleValue : 0.0;
+            if (progress < 0)
+                progress = 0;
+            
+            // Construct path from torrent metadata (not real disk file names)
+            NSString* path = [self.currentDirectory stringByAppendingPathComponent:cueFileName];
+            
+            NSString* displayName = cueBaseName.humanReadableFileName;
+            
+            [playable addObject:@{
+                @"type" : @"file",
+                @"category" : @"audio",
+                @"index" : cueIndex,
+                @"name" : displayName,
+                @"path" : path,
+                @"season" : @0,
+                @"episode" : cueIndex,
+                @"progress" : @(progress),
+                @"sortKey" : cueFileName,
+                @"originalExt" : @"cue",
+                @"isCompanion" : @NO
+            }];
+        }
+    }
+
+    if (playable.count == 0)
         return nil;
 
     // Sort by original file name to match download order
@@ -2672,7 +2707,7 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
     static NSSet<NSString*>* cueCompanionExtensions;
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
-        cueCompanionExtensions = [NSSet setWithArray:@[ @"flac", @"ape", @"wav", @"wma", @"alac", @"aiff", @"wv" ]];
+        cueCompanionExtensions = [NSSet setWithArray:@[ @"flac", @"ape", @"wav", @"wma", @"alac", @"aiff", @"wv", @"cue" ]];
     });
     
     NSString* ext = audioPath.pathExtension.lowercaseString;
@@ -2681,9 +2716,59 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
         return nil;
     }
     
-    // Extract relative path from absolute path
+    // If this is already a .cue file, return it as-is (constructing from metadata if needed)
+    if ([ext isEqualToString:@"cue"])
+    {
+        // Extract relative path from absolute path, relying on torrent metadata
+        NSString* torrentDir = self.currentDirectory;
+        NSString* relativePath = nil;
+        
+        // Try to extract relative path from absolute path
+        if ([audioPath hasPrefix:torrentDir])
+        {
+            relativePath = [audioPath substringFromIndex:torrentDir.length];
+            if ([relativePath hasPrefix:@"/"])
+            {
+                relativePath = [relativePath substringFromIndex:1];
+            }
+        }
+        else if (![audioPath isAbsolutePath])
+        {
+            relativePath = audioPath;
+        }
+        
+        // If we have a relative path, verify it exists in torrent metadata and return full path
+        if (relativePath && relativePath.length > 0)
+        {
+            NSUInteger const count = self.fileCount;
+            for (NSUInteger i = 0; i < count; i++)
+            {
+                auto const file = tr_torrentFile(self.fHandle, (tr_file_index_t)i);
+                NSString* fileName = @(file.name);
+                // Match by full path or last component
+                if ([fileName isEqualToString:relativePath] || 
+                    [fileName.lastPathComponent.lowercaseString isEqualToString:relativePath.lastPathComponent.lowercaseString])
+                {
+                    // Found matching .cue file in metadata, construct path from metadata
+                    return [self.currentDirectory stringByAppendingPathComponent:fileName];
+                }
+            }
+        }
+        
+        // Fallback: if already absolute and looks valid, return as-is
+        if ([audioPath isAbsolutePath])
+        {
+            return audioPath;
+        }
+        
+        return nil;
+    }
+    
+    // Extract relative path from absolute path, relying on torrent metadata
     NSString* torrentDir = self.currentDirectory;
-    NSString* relativePath = audioPath;
+    NSString* relativePath = nil;
+    
+    // Try to extract relative path from absolute path
     if ([audioPath hasPrefix:torrentDir])
     {
         relativePath = [audioPath substringFromIndex:torrentDir.length];
@@ -2692,9 +2777,28 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
             relativePath = [relativePath substringFromIndex:1];
         }
     }
-    else
+    
+    // If we couldn't extract relative path, or if it's incomplete, find the file in torrent metadata
+    // This ensures we use the full filename from metadata, not just what's on disk
+    if (!relativePath || relativePath.length == 0)
     {
-        // If path doesn't start with torrent directory, try to find it by filename
+        NSString* lastComponent = audioPath.lastPathComponent;
+        NSUInteger const count = self.fileCount;
+        for (NSUInteger i = 0; i < count; i++)
+        {
+            auto const file = tr_torrentFile(self.fHandle, (tr_file_index_t)i);
+            NSString* fileName = @(file.name);
+            if ([fileName.lastPathComponent.lowercaseString isEqualToString:lastComponent.lowercaseString])
+            {
+                relativePath = fileName;
+                break;
+            }
+        }
+    }
+    
+    // If still not found, use the last component as fallback
+    if (!relativePath || relativePath.length == 0)
+    {
         relativePath = audioPath.lastPathComponent;
     }
     
@@ -2706,7 +2810,7 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
         directory = @"";
     }
     
-    // Search for a matching .cue file in the torrent
+    // Search for a matching .cue file in the torrent metadata
     NSUInteger const count = self.fileCount;
     for (NSUInteger i = 0; i < count; i++)
     {
@@ -2728,16 +2832,9 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
             if ([cueBaseName.lowercaseString isEqualToString:baseName.lowercaseString] &&
                 [cueDirectory isEqualToString:directory])
             {
-                // Found matching .cue file, return its path
-                auto const location = tr_torrentFindFile(self.fHandle, (tr_file_index_t)i);
-                if (!std::empty(location))
-                {
-                    return @(location.c_str());
-                }
-                else
-                {
-                    return [self.currentDirectory stringByAppendingPathComponent:fileName];
-                }
+                // Found matching .cue file, construct path from metadata (not disk existence)
+                // This ensures correct paths for newly added torrents before files are fully downloaded
+                return [self.currentDirectory stringByAppendingPathComponent:fileName];
             }
         }
     }
@@ -2764,15 +2861,8 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
         NSString* fileName = @(file.name);
         if ([fileName.pathExtension.lowercaseString isEqualToString:@"cue"])
         {
-            auto const location = tr_torrentFindFile(self.fHandle, (tr_file_index_t)idx);
-            if (!std::empty(location))
-            {
-                cuePath = @(location.c_str());
-            }
-            else
-            {
-                cuePath = [self.currentDirectory stringByAppendingPathComponent:fileName];
-            }
+            // Construct path from metadata (not disk existence)
+            cuePath = [self.currentDirectory stringByAppendingPathComponent:fileName];
             *stop = YES;
         }
     }];
@@ -2794,17 +2884,60 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
         }
     }
     
-    // For audio files, check if there's a matching .cue file
+    // For audio files or .cue files, check if there's a matching .cue file
+    // This handles both audio files that should show their .cue companion,
+    // and .cue files that should show their own path
     if (resultPath && resultPath.length > 0)
     {
-        NSString* cuePath = [self cueFilePathForAudioPath:resultPath];
-        if (cuePath)
+        // Extract relative path from absolute path to match against torrent metadata
+        NSString* torrentDir = self.currentDirectory;
+        NSString* relativePath = nil;
+        
+        if ([resultPath hasPrefix:torrentDir])
         {
-            resultPath = cuePath;
+            relativePath = [resultPath substringFromIndex:torrentDir.length];
+            if ([relativePath hasPrefix:@"/"])
+            {
+                relativePath = [relativePath substringFromIndex:1];
+            }
+        }
+        else if (![resultPath isAbsolutePath])
+        {
+            relativePath = resultPath;
+        }
+        
+        // If we have a relative path, try to find matching .cue file in torrent metadata
+        if (relativePath && relativePath.length > 0)
+        {
+            NSString* ext = relativePath.pathExtension.lowercaseString;
+            static NSSet<NSString*>* cueCompanionExtensions;
+            static dispatch_once_t onceToken;
+            dispatch_once(&onceToken, ^{
+                cueCompanionExtensions = [NSSet setWithArray:@[ @"flac", @"ape", @"wav", @"wma", @"alac", @"aiff", @"wv", @"cue" ]];
+            });
+            
+            // Check if this is an audio file or .cue file that might have a companion
+            if ([cueCompanionExtensions containsObject:ext])
+            {
+                NSString* cuePath = [self cueFilePathForAudioPath:resultPath];
+                if (cuePath)
+                {
+                    resultPath = cuePath;
+                }
+            }
+        }
+        else
+        {
+            // Fallback: try to find .cue file using the path as-is
+            NSString* cuePath = [self cueFilePathForAudioPath:resultPath];
+            if (cuePath)
+            {
+                resultPath = cuePath;
+            }
         }
     }
     
-    // Ensure we always return an absolute path
+    // Ensure we always return an absolute path based on torrent metadata
     if (resultPath && resultPath.length > 0)
     {
         if (![resultPath isAbsolutePath])
@@ -2812,11 +2945,15 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
             resultPath = [self.currentDirectory stringByAppendingPathComponent:resultPath];
         }
         
-        // Resolve any symlinks and get the canonical absolute path
-        NSString* resolvedPath = [resultPath stringByResolvingSymlinksInPath];
-        if (resolvedPath && resolvedPath.length > 0)
+        // For newly added torrents, files may not exist on disk yet
+        // Only resolve symlinks if the file actually exists, otherwise rely on torrent metadata
+        if ([NSFileManager.defaultManager fileExistsAtPath:resultPath])
         {
-            resultPath = resolvedPath;
+            NSString* resolvedPath = [resultPath stringByResolvingSymlinksInPath];
+            if (resolvedPath && resolvedPath.length > 0)
+            {
+                resultPath = resolvedPath;
+            }
         }
     }
     
