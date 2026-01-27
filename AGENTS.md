@@ -132,7 +132,7 @@ npm run lint:fix          # Fix
 ### General Guidelines
 
 - Follow C++ Core Guidelines: https://isocpp.github.io/CppCoreGuidelines/CppCoreGuidelines
-- Before starting a task, search the `docs/` directory for relevant documentation. This often provides critical context on existing features and implementation rules (e.g., `Human-Friendly-Titles.md`).
+- **Documentation**: Before starting a task, search the `docs/` directory for relevant documentation (e.g., `docs/*.md` files). This often provides critical context on existing features and implementation rules (e.g., `Human-Friendly-Titles.md`). After making changes that affect documented behavior or add new features, update the relevant `docs/*.md` files if appropriate.
 - Fix all warnings before merging code
 - Address compiler warnings that occur during the build process immediately, even if they don't prevent compilation
 - Use standard library containers (`std::vector`, `std::map`) over custom implementations
@@ -146,3 +146,33 @@ npm run lint:fix          # Fix
 - macOS and GTK clients use C API from `transmission.h`
 - Web UI, transmission-remote, and external apps use RPC/JSON API
 - All new features must work through both APIs
+
+## macOS Development Guidelines
+
+### Objective-C++ Code Style
+
+- macOS client code is in `macosx/` directory using Objective-C++ (`.mm` files)
+- Follow Objective-C naming conventions: methods use camelCase, classes use PascalCase
+- Use `@property` declarations in headers, synthesize in implementation
+- Prefer `NSString*` over C strings for path handling
+- Use Foundation collections: `NSArray`, `NSDictionary`, `NSSet` for Objective-C code
+- Use `dispatch_once` for thread-safe static initialization
+- Use `objc_getAssociatedObject`/`objc_setAssociatedObject` for associating data with UI elements when needed
+
+### File Association Patterns
+
+- **Associated file handling**: When files have companion files (e.g., `.cue` files for audio files), centralize the association logic in the `Torrent` class
+- **Example pattern**: For `.cue` file associations:
+  - `cueFilePathForAudioPath:` - Finds companion `.cue` file for an audio file path
+  - `cueFilePathForFolder:` - Finds `.cue` file within a folder (for album directories)
+  - `tooltipPathForItemPath:type:folder:` - Centralized method to determine the correct path to display in tooltips
+- Keep file association logic in the data model (`Torrent` class), not in UI components
+
+### UI Component Architecture
+
+- **`Torrent` class**: Central data model containing torrent state and file operations
+- **`TorrentTableView`**: Manages table view UI and user interactions (play buttons, file opening)
+- **`FileNameCellView`**: Displays individual file/folder names and tooltips
+- **DRY Principle**: When multiple UI components need the same logic (e.g., determining tooltip paths, finding associated files), implement it once in the `Torrent` class and have UI components call those methods
+- UI components should access `Torrent` through `FileListNode.torrent` property
+- Avoid duplicating file path resolution or association logic across UI components
