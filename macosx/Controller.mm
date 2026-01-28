@@ -3739,11 +3739,31 @@ void onTorrentCompletenessChanged(tr_torrent* tor, tr_completeness status, bool 
         if (firstNew)
         {
             dispatch_async(dispatch_get_main_queue(), ^{
+                // Ensure table view layout is complete before finding row
                 NSInteger row = [self.fTableView rowForItem:firstNew];
-                if (row >= 0)
+                
+                // If row not found and grouping is enabled, check if torrent is in a collapsed group
+                if (row == -1 && [self.fDefaults boolForKey:@"SortByGroup"])
                 {
-                    [self.fTableView selectRowIndexes:[NSIndexSet indexSetWithIndex:row] byExtendingSelection:NO];
-                    [self.fTableView scrollRowToVisible:row];
+                    __block TorrentGroup* parent = nil;
+                    [self.fDisplayedTorrents enumerateObjectsWithOptions:NSEnumerationConcurrent
+                                                              usingBlock:^(TorrentGroup* group, NSUInteger /*idx*/, BOOL* stop) {
+                                                                  if ([group.torrents containsObject:firstNew])
+                                                                  {
+                                                                      parent = group;
+                                                                      *stop = YES;
+                                                                  }
+                                                              }];
+                    if (parent)
+                    {
+                        [self.fTableView expandItem:parent];
+                        row = [self.fTableView rowForItem:firstNew];
+                    }
+                }
+                
+                if (row >= 0 && row < self.fTableView.numberOfRows)
+                {
+                    [self.fTableView selectAndScrollToRow:row];
                 }
             });
         }
