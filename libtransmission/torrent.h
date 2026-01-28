@@ -1300,6 +1300,12 @@ private:
         {
             set_dirty();
             recheck_completeness();
+
+            // Create empty files for newly wanted zero-byte files when torrent is running
+            if (is_running())
+            {
+                create_empty_files();
+            }
         }
     }
 
