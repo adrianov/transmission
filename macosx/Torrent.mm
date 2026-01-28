@@ -33,6 +33,25 @@ static NSTimeInterval const kDiskSpaceCheckThrottleSeconds = 5.0;
 
 static dispatch_queue_t timeMachineExcludeQueue;
 
+/// Shared extension sets for media category (video/audio/books). Used for group assignment on add and file list.
+static NSSet<NSString*>* sVideoExtensions;
+static NSSet<NSString*>* sAudioExtensions;
+static NSSet<NSString*>* sBookExtensions;
+static dispatch_once_t sMediaExtensionsOnce;
+static void initMediaExtensionSets(void)
+{
+    dispatch_once(&sMediaExtensionsOnce, ^{
+        sVideoExtensions = [NSSet setWithArray:@[
+            @"mkv", @"avi", @"mp4", @"mov", @"wmv", @"flv", @"webm", @"m4v", @"mpg", @"mpeg",
+            @"ts", @"m2ts", @"vob", @"3gp", @"ogv"
+        ]];
+        sAudioExtensions = [NSSet setWithArray:@[
+            @"mp3", @"flac", @"wav", @"aac", @"ogg", @"wma", @"m4a", @"ape", @"alac", @"aiff", @"opus", @"wv"
+        ]];
+        sBookExtensions = [NSSet setWithArray:@[ @"pdf", @"epub", @"djv", @"djvu", @"fb2", @"mobi" ]];
+    });
+}
+
 /// Media type for folder torrents
 typedef NS_ENUM(NSInteger, TorrentMediaType) {
     TorrentMediaTypeNone = 0,
@@ -2073,63 +2092,23 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
         return self.fMediaType != TorrentMediaTypeNone;
     }
 
-    // For single-file torrents, check if it's a media file
-    static NSSet<NSString*>* mediaExtensions;
-    static dispatch_once_t onceToken;
-    dispatch_once(&onceToken, ^{
-        mediaExtensions = [NSSet setWithArray:@[
-            @"mkv", @"avi", @"mp4", @"mov",  @"wmv", @"flv", @"webm", @"m4v", @"mpg", @"mpeg", @"ts",   @"m2ts", @"vob",
-            @"3gp", @"ogv", @"mp3", @"flac", @"wav", @"aac", @"ogg",  @"wma", @"m4a", @"ape",  @"alac", @"aiff", @"opus"
-        ]];
-    });
-    return [mediaExtensions containsObject:self.name.pathExtension.lowercaseString];
+    // For single-file torrents, check if it's a media file (video or audio)
+    initMediaExtensionSets();
+    NSString* ext = self.name.pathExtension.lowercaseString;
+    return [sVideoExtensions containsObject:ext] || [sAudioExtensions containsObject:ext];
 }
 
 - (NSString*)mediaCategoryForFile:(NSUInteger)index
 {
-    static NSSet<NSString*>* videoExtensions;
-    static NSSet<NSString*>* audioExtensions;
-    static NSSet<NSString*>* bookExtensions;
-    static dispatch_once_t onceToken;
-    dispatch_once(&onceToken, ^{
-        videoExtensions = [NSSet setWithArray:@[
-            @"mkv",
-            @"avi",
-            @"mp4",
-            @"mov",
-            @"wmv",
-            @"flv",
-            @"webm",
-            @"m4v",
-            @"mpg",
-            @"mpeg",
-            @"ts",
-            @"m2ts",
-            @"vob",
-            @"3gp",
-            @"ogv"
-        ]];
-        audioExtensions = [NSSet
-            setWithArray:
-                @[ @"mp3", @"flac", @"wav", @"aac", @"ogg", @"wma", @"m4a", @"ape", @"alac", @"aiff", @"opus", @"wv" ]];
-        bookExtensions = [NSSet setWithArray:@[ @"pdf", @"epub", @"djv", @"djvu", @"fb2", @"mobi" ]];
-    });
-
+    initMediaExtensionSets();
     auto const file = tr_torrentFile(self.fHandle, (tr_file_index_t)index);
     NSString* ext = @(file.name).pathExtension.lowercaseString;
-
-    if ([videoExtensions containsObject:ext])
-    {
+    if ([sVideoExtensions containsObject:ext])
         return @"video";
-    }
-    if ([audioExtensions containsObject:ext])
-    {
+    if ([sAudioExtensions containsObject:ext])
         return @"audio";
-    }
-    if ([bookExtensions containsObject:ext])
-    {
+    if ([sBookExtensions containsObject:ext])
         return @"books";
-    }
     return nil;
 }
 
@@ -2157,48 +2136,15 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
         }
     }
 
-    // For single-file torrents, check extension
-    static NSSet<NSString*>* videoExtensions;
-    static NSSet<NSString*>* audioExtensions;
-    static NSSet<NSString*>* bookExtensions;
-    static dispatch_once_t onceToken;
-    dispatch_once(&onceToken, ^{
-        videoExtensions = [NSSet setWithArray:@[
-            @"mkv",
-            @"avi",
-            @"mp4",
-            @"mov",
-            @"wmv",
-            @"flv",
-            @"webm",
-            @"m4v",
-            @"mpg",
-            @"mpeg",
-            @"ts",
-            @"m2ts",
-            @"vob",
-            @"3gp",
-            @"ogv"
-        ]];
-        audioExtensions = [NSSet
-            setWithArray:
-                @[ @"mp3", @"flac", @"wav", @"aac", @"ogg", @"wma", @"m4a", @"ape", @"alac", @"aiff", @"opus", @"wv" ]];
-        bookExtensions = [NSSet setWithArray:@[ @"pdf", @"epub", @"djv", @"djvu", @"fb2", @"mobi" ]];
-    });
-
+    // For single-file torrents, check extension (used for group assignment on add)
+    initMediaExtensionSets();
     NSString* ext = self.name.pathExtension.lowercaseString;
-    if ([videoExtensions containsObject:ext])
-    {
+    if ([sVideoExtensions containsObject:ext])
         return @"video";
-    }
-    if ([audioExtensions containsObject:ext])
-    {
+    if ([sAudioExtensions containsObject:ext])
         return @"audio";
-    }
-    if ([bookExtensions containsObject:ext])
-    {
+    if ([sBookExtensions containsObject:ext])
         return @"books";
-    }
     return nil;
 }
 
@@ -2218,34 +2164,7 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
         return;
     }
 
-    static NSSet<NSString*>* videoExtensions;
-    static NSSet<NSString*>* audioExtensions;
-    static NSSet<NSString*>* bookExtensions;
-    static dispatch_once_t onceToken2;
-    dispatch_once(&onceToken2, ^{
-        videoExtensions = [NSSet setWithArray:@[
-            @"mkv",
-            @"avi",
-            @"mp4",
-            @"mov",
-            @"wmv",
-            @"flv",
-            @"webm",
-            @"m4v",
-            @"mpg",
-            @"mpeg",
-            @"ts",
-            @"m2ts",
-            @"vob",
-            @"3gp",
-            @"ogv"
-        ]];
-        audioExtensions = [NSSet
-            setWithArray:
-                @[ @"mp3", @"flac", @"wav", @"aac", @"ogg", @"wma", @"m4a", @"ape", @"alac", @"aiff", @"opus", @"wv" ]];
-        bookExtensions = [NSSet setWithArray:@[ @"pdf", @"epub", @"djv", @"djvu", @"fb2", @"mobi" ]];
-    });
-
+    initMediaExtensionSets();
     NSMutableDictionary<NSString*, NSNumber*>* videoExtCounts = [NSMutableDictionary dictionary];
     NSMutableDictionary<NSString*, NSNumber*>* audioExtCounts = [NSMutableDictionary dictionary];
     NSMutableDictionary<NSString*, NSNumber*>* bookExtCounts = [NSMutableDictionary dictionary];
@@ -2309,15 +2228,15 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
             }
         }
 
-        if ([videoExtensions containsObject:ext])
+        if ([sVideoExtensions containsObject:ext])
         {
             videoExtCounts[ext] = @(videoExtCounts[ext].unsignedIntegerValue + 1);
         }
-        else if ([audioExtensions containsObject:ext])
+        else if ([sAudioExtensions containsObject:ext])
         {
             audioExtCounts[ext] = @(audioExtCounts[ext].unsignedIntegerValue + 1);
         }
-        else if ([bookExtensions containsObject:ext])
+        else if ([sBookExtensions containsObject:ext])
         {
             bookExtCounts[ext] = @(bookExtCounts[ext].unsignedIntegerValue + 1);
         }
@@ -2331,7 +2250,7 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
         NSString* fileName = @(file.name);
         NSString* ext = fileName.pathExtension.lowercaseString;
 
-        if ([audioExtensions containsObject:ext])
+        if ([sAudioExtensions containsObject:ext])
         {
             // Get the immediate parent folder of the audio file
             NSString* parentFolder = fileName.stringByDeletingLastPathComponent;

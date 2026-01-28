@@ -193,6 +193,15 @@ TEST_F(NSStringAdditionsTest, HumanReadableTitle_ComplexCase)
     EXPECT_FALSE([result containsString:@"SDR"]) << "Should remove SDR, got: " << [result UTF8String];
 }
 
+TEST_F(NSStringAdditionsTest, HumanReadableTitle_HyphenatedWordNoSpaces)
+{
+    // Hyphenated words (e.g., Butt-Head) must not get spaces around the hyphen
+    NSString* input = @"Beavis.and.Butt-Head.Do";
+    NSString* result = input.humanReadableTitle;
+    EXPECT_TRUE([result containsString:@"Butt-Head"]) << "Should preserve Butt-Head, got: " << [result UTF8String];
+    EXPECT_FALSE([result containsString:@"Butt - Head"]) << "Should not add spaces around hyphen, got: " << [result UTF8String];
+}
+
 class PlayButtonIconTest : public ::testing::Test
 {
 protected:
