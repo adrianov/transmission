@@ -17,6 +17,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -38,10 +39,95 @@
 #include <jbig2enc.h>
 #include <turbojpeg.h>
 
+#import "IncrementalPdfWriter.h"
+
 // Track files that have been queued for conversion (by torrent hash -> set of file paths)
 static NSMutableDictionary<NSString*, NSMutableSet<NSString*>*>* sConversionQueue = nil;
 static NSMutableDictionary<NSString*, NSNumber*>* sLastScanTime = nil;
 static dispatch_queue_t sConversionDispatchQueue = nil;
+static dispatch_semaphore_t sConversionSemaphore = nil;
+
+// Global semaphore to limit concurrent JBIG2 encoding across all files
+// Each file has its own serial queue, but we limit total concurrent batches
+// to prevent thread pool exhaustion
+static dispatch_semaphore_t sJbig2Semaphore = nil;
+
+// Global tracking for cross-torrent concurrency control.
+// Some DJVU files might need to wait for pages in all DJVUs across all transfers
+// before they can write a final PDF.
+static NSMutableSet<NSString*>* sActiveConversions = nil;
+static NSMutableSet<NSString*>* sPendingConversions = nil;
+static NSMutableDictionary<NSString*, NSMutableSet<NSString*>*>* sFailedConversions = nil;
+static NSMutableDictionary<NSString*, NSString*>* sFailedConversionErrors = nil; // Maps djvuPath -> error message
+static dispatch_queue_t sTrackingQueue = nil;
+static const void* const sTrackingQueueKey = &sTrackingQueueKey;
+
+// Helper to safely dispatch to sTrackingQueue, avoiding deadlocks
+static void safeDispatchSync(dispatch_block_t block)
+{
+    if (dispatch_get_specific(sTrackingQueueKey) == sTrackingQueueKey)
+    {
+        // Already on the tracking queue, execute directly
+        block();
+    }
+    else
+    {
+        dispatch_sync(sTrackingQueue, block);
+    }
+}
+
+static void setFailedConversionError(NSString* djvuPath, NSString* message)
+{
+    if (djvuPath == nil || message == nil || message.length == 0 || sTrackingQueue == nil)
+        return;
+
+    safeDispatchSync(^{
+        if (!sFailedConversionErrors)
+            sFailedConversionErrors = [NSMutableDictionary dictionary];
+        if (sFailedConversionErrors[djvuPath] == nil)
+            sFailedConversionErrors[djvuPath] = message;
+    });
+}
+
+static NSString* firstFailedPathForTorrent(Torrent* torrent)
+{
+    if (!torrent || torrent.magnet || !sFailedConversions || !sTrackingQueue)
+        return nil;
+
+    NSString* torrentHash = torrent.hashString;
+    __block NSMutableSet<NSString*>* failedFiles = nil;
+    __block NSString* firstFailed = nil;
+    __block NSMutableArray<NSString*>* toRemove = [NSMutableArray array];
+
+    safeDispatchSync(^{
+        failedFiles = sFailedConversions[torrentHash];
+        if (!failedFiles || failedFiles.count == 0)
+            return;
+
+        for (NSString* djvuPath in failedFiles)
+        {
+            NSString* pdfPath = [djvuPath.stringByDeletingPathExtension stringByAppendingPathExtension:@"pdf"];
+            if ([NSFileManager.defaultManager fileExistsAtPath:pdfPath])
+            {
+                [toRemove addObject:djvuPath];
+                continue;
+            }
+
+            if (firstFailed == nil)
+                firstFailed = djvuPath;
+        }
+
+        for (NSString* path in toRemove)
+        {
+            [failedFiles removeObject:path];
+            [sFailedConversionErrors removeObjectForKey:path];
+        }
+    });
+
+    return firstFailed;
+}
+static NSMutableDictionary<NSString*, NSNumber*>* sConversionTotalPages = nil;
+static NSMutableDictionary<NSString*, NSNumber*>* sConversionDonePages = nil;
 
 // Forward declarations for per-file page tracking helpers (used by conversion backends)
 static void setTotalPagesForPath(NSString* djvuPath, int total);
@@ -65,41 +151,6 @@ static void computeRenderDimensions(int pageWidth, int pageHeight, int pageDpi, 
     *outHeight = renderHeight;
 }
 
-
-enum class DjvuPdfImageKind
-{
-    None,
-    Jpeg,
-    Jbig2
-};
-
-struct DjvuPdfImageInfo
-{
-    DjvuPdfImageKind kind = DjvuPdfImageKind::None;
-    bool gray = false;
-    int w = 0;
-    int h = 0;
-    int jbig2GlobalsIndex = -1;
-
-    // Placement in PDF user space (points).
-    double x = 0.0;
-    double y = 0.0;
-    double pdfW = 0.0;
-    double pdfH = 0.0;
-
-    // Encoded bytes. For JPEG: DCTDecode stream. For JBIG2: JBIG2Decode page stream.
-    std::vector<uint8_t> bytes;
-};
-
-struct DjvuPdfPageInfo
-{
-    double pdfWidth = 0.0;
-    double pdfHeight = 0.0;
-    DjvuPdfImageInfo image;
-    // For compound pages: background picture layer + foreground text mask overlay
-    DjvuPdfImageInfo bgImage; // Background: JPEG grayscale/RGB
-    DjvuPdfImageInfo fgMask; // JBIG2 ImageMask (transparent bg)
-};
 
 static bool isGrayscaleRgb24(unsigned char const* rgb, int width, int height, size_t rowBytes)
 {
@@ -198,14 +249,6 @@ struct CropRect
     int y0 = 0;
     int x1 = 0; // exclusive
     int y1 = 0; // exclusive
-};
-
-struct OutlineNode
-{
-    std::string title;
-    int rawPage = -1; // numeric page reference when not directly resolved
-    int pageIndex = -1; // resolved 0-based page index
-    std::vector<OutlineNode> children;
 };
 
 using PageTargetMap = std::unordered_map<std::string, int>;
@@ -880,14 +923,25 @@ static int pageTypeToJpegQuality(ddjvu_page_type_t pageType)
     }
 }
 
-static bool encodeJpegTurbo(std::vector<uint8_t>* out, unsigned char const* pixels, int w, int h, size_t stride, bool gray, int quality)
+static bool encodeJpegTurbo(std::vector<uint8_t>* out, unsigned char const* pixels, int w, int h, size_t stride, bool gray, int quality, NSString* djvuPath = nil, int pageNum = -1)
 {
     if (out == nullptr || pixels == nullptr || w <= 0 || h <= 0 || stride == 0)
+    {
+        if (djvuPath && pageNum >= 0)
+            NSLog(@"DjvuConverter ERROR: invalid parameters for JPEG encoding (w=%d h=%d stride=%zu) page %d in %@", w, h, stride, pageNum, djvuPath);
+        setFailedConversionError(djvuPath, @"Invalid JPEG encode parameters");
         return false;
+    }
 
+    // libjpeg-turbo is thread-safe as long as each thread uses its own handle.
     tjhandle handle = tjInitCompress();
     if (handle == nullptr)
+    {
+        if (djvuPath && pageNum >= 0)
+            NSLog(@"DjvuConverter ERROR: tjInitCompress failed for page %d in %@", pageNum, djvuPath);
+        setFailedConversionError(djvuPath, @"JPEG encoder init failed");
         return false;
+    }
 
     unsigned char* jpegBuf = nullptr;
     unsigned long jpegSize = 0;
@@ -909,6 +963,16 @@ static bool encodeJpegTurbo(std::vector<uint8_t>* out, unsigned char const* pixe
         TJFLAG_FASTDCT);
 
     bool ok = (ret == 0 && jpegBuf != nullptr && jpegSize > 0);
+    if (!ok && djvuPath && pageNum >= 0)
+    {
+        char const* errMsg = tjGetErrorStr2(handle);
+        NSLog(@"DjvuConverter ERROR: tjCompress2 failed (ret=%d size=%lu) for page %d in %@: %s", 
+              ret, jpegSize, pageNum, djvuPath, errMsg ? errMsg : "unknown");
+        setFailedConversionError(
+            djvuPath,
+            [NSString stringWithFormat:@"JPEG encode failed (page %d)", pageNum]);
+    }
+    
     if (ok)
         out->assign(jpegBuf, jpegBuf + jpegSize);
 
@@ -925,19 +989,34 @@ struct Jbig2Batch
     std::vector<int> pageNums;
 };
 
-// Async JBIG2 encoding context
+
+
+// Async JBIG2 encoding context - ONE PER FILE
+// IMPORTANT: Each file must have its own context to ensure:
+// 1. Pages from different files never mix in the same batch
+// 2. Batches from the same file are processed sequentially (via queue)
+// 3. Pages within each batch are consecutive from the same file
 struct Jbig2AsyncContext
 {
     dispatch_group_t group;
-    dispatch_queue_t queue;
+    dispatch_queue_t queue; // Per-file serial queue for JBIG2 batches - ensures batches are sequential
     std::mutex mutex; // Protects pages and globals
     std::vector<DjvuPdfPageInfo>* pages;
     std::vector<std::vector<uint8_t>>* globals;
+    std::shared_ptr<IncrementalPdfWriter> pdfWriter;
     std::atomic<bool> ok{ true };
     NSString* djvuPath;
+    int pageCount = 0; // Total pages expected
+    std::atomic<bool> jbig2Complete{ false }; // Track if all JBIG2 batches are complete
 };
 
-static void flushJbig2BatchAsync(Jbig2Batch batch, Jbig2AsyncContext* ctx)
+// Encode a batch of pages from ONE file using JBIG2
+// CRITICAL CONSTRAINTS:
+// 1. All pages in this batch MUST be from the same file (same ctx->djvuPath)
+// 2. Pages should be consecutive within the file for proper encoding
+// 3. Maximum 20 pages per batch (jbig2enc library limitation)
+// 4. Each batch creates its own jbig2ctx instance
+static void flushJbig2BatchAsync(Jbig2Batch batch, std::shared_ptr<Jbig2AsyncContext> ctx)
 {
     if (batch.pixes.empty() || ctx == nullptr)
     {
@@ -947,16 +1026,36 @@ static void flushJbig2BatchAsync(Jbig2Batch batch, Jbig2AsyncContext* ctx)
     }
 
     dispatch_group_async(ctx->group, ctx->queue, ^{
+        // Limit concurrent JBIG2 encoding across all files to avoid thread pool exhaustion
+        // This semaphore prevents too many CPU-intensive JBIG2 operations from blocking GCD threads
+        if (sJbig2Semaphore)
+            dispatch_semaphore_wait(sJbig2Semaphore, DISPATCH_TIME_FOREVER);
+
+        // Each file has its own serial queue, so batches from the same file are sequential
+        // This ensures consecutive pages are processed in order
+        // Pages from different files never mix in the same batch
+        // Different files use different queues and can encode in parallel
+
+        NSDate* batchStartTime = [NSDate date];
+        NSLog(@"DjvuConverter: Starting JBIG2 batch with %zu images for %@", batch.pixes.size(), ctx->djvuPath);
+
+        // Create a new jbig2ctx for this batch
+        // CONSTRAINT: Can only add pages from ONE file, maximum 20 pages
         jbig2ctx* jb2 = jbig2_init(0.85f, 0.5f, 0, 0, false, -1);
         if (jb2 == nullptr)
         {
             NSLog(@"DjvuConverter ERROR: jbig2_init failed for %@", ctx->djvuPath);
+            setFailedConversionError(ctx->djvuPath, @"JBIG2 init failed");
             for (auto* pix : batch.pixes)
                 pixDestroy(&pix);
             ctx->ok = false;
+            if (sJbig2Semaphore)
+                dispatch_semaphore_signal(sJbig2Semaphore);
             return;
         }
 
+        // Add all pages from this batch to the jbig2 context
+        // All pages are from the same file and are consecutive
         for (auto* pix : batch.pixes)
             jbig2_add_page(jb2, pix);
 
@@ -965,10 +1064,13 @@ static void flushJbig2BatchAsync(Jbig2Batch batch, Jbig2AsyncContext* ctx)
         if (globalsBuf == nullptr || globalsLen <= 0)
         {
             NSLog(@"DjvuConverter ERROR: jbig2_pages_complete failed for %@", ctx->djvuPath);
+            setFailedConversionError(ctx->djvuPath, @"JBIG2 globals encode failed");
             jbig2_destroy(jb2);
             for (auto* pix : batch.pixes)
                 pixDestroy(&pix);
             ctx->ok = false;
+            if (sJbig2Semaphore)
+                dispatch_semaphore_signal(sJbig2Semaphore);
             return;
         }
 
@@ -986,6 +1088,7 @@ static void flushJbig2BatchAsync(Jbig2Batch batch, Jbig2AsyncContext* ctx)
             if (pageBuf == nullptr || len <= 0)
             {
                 NSLog(@"DjvuConverter ERROR: jbig2_produce_page failed for batch index %zu in %@", i, ctx->djvuPath);
+                setFailedConversionError(ctx->djvuPath, @"JBIG2 page encode failed");
                 ctx->ok = false;
                 break;
             }
@@ -1011,516 +1114,64 @@ static void flushJbig2BatchAsync(Jbig2Batch batch, Jbig2AsyncContext* ctx)
         jbig2_destroy(jb2);
         for (auto* pix : batch.pixes)
             pixDestroy(&pix);
+
+        // Count unique page indices in this batch
+        std::unordered_set<int> uniquePageIndices;
+        for (int rawPageNum : batch.pageNums)
+        {
+            int pageIndex = (rawPageNum < 0) ? (-1 - rawPageNum) : rawPageNum;
+            uniquePageIndices.insert(pageIndex);
+        }
+
+        // Increment done pages for all unique pages in this batch
+        int pagesCompleted = (int)uniquePageIndices.size();
+        for (int i = 0; i < pagesCompleted; ++i)
+            incrementDonePagesForPath(ctx->djvuPath);
+
+        NSTimeInterval elapsed = -[batchStartTime timeIntervalSinceNow];
+        NSLog(@"DjvuConverter: Completed JBIG2 batch for %@ (%d pages in %.1f seconds)", ctx->djvuPath, pagesCompleted, elapsed);
+
+        // Release semaphore to allow next JBIG2 batch to start
+        if (sJbig2Semaphore)
+            dispatch_semaphore_signal(sJbig2Semaphore);
     });
 }
 
-struct PdfOutlineItem
-{
-    std::string title;
-    int pageIndex = -1;
-    int parent = -1;
-    int firstChild = -1;
-    int lastChild = -1;
-    int prev = -1;
-    int next = -1;
-    int count = 0;
-};
-
-struct OutlineBuildResult
-{
-    int first = -1;
-    int last = -1;
-    int descendants = 0;
-};
-
-static OutlineBuildResult buildOutlineItems(std::vector<PdfOutlineItem>* items, std::vector<OutlineNode> const& nodes, int parent)
-{
-    OutlineBuildResult result;
-    int prev = -1;
-
-    for (auto const& node : nodes)
-    {
-        int const idx = (int)items->size();
-        items->push_back({ node.title, node.pageIndex, parent });
-
-        if (result.first == -1)
-            result.first = idx;
-        if (prev != -1)
-        {
-            (*items)[prev].next = idx;
-            (*items)[idx].prev = prev;
-        }
-        prev = idx;
-
-        OutlineBuildResult childResult;
-        if (!node.children.empty())
-        {
-            childResult = buildOutlineItems(items, node.children, idx);
-            (*items)[idx].firstChild = childResult.first;
-            (*items)[idx].lastChild = childResult.last;
-            (*items)[idx].count = childResult.descendants;
-        }
-
-        result.last = idx;
-        result.descendants += 1 + (*items)[idx].count;
-    }
-
-    return result;
-}
-
-static std::string pdfEscapeString(std::string_view text)
-{
-    std::string out;
-    out.reserve(text.size() + 8);
-    for (unsigned char ch : text)
-    {
-        switch (ch)
-        {
-        case '\\':
-        case '(':
-        case ')':
-            out.push_back('\\');
-            out.push_back((char)ch);
-            break;
-        case '\n':
-            out.append("\\n");
-            break;
-        case '\r':
-            out.append("\\r");
-            break;
-        case '\t':
-            out.append("\\t");
-            break;
-        default:
-            out.push_back((char)ch);
-            break;
-        }
-    }
-    return out;
-}
-
-static void appendHexByte(std::string* out, unsigned char value)
-{
-    static char constexpr Hex[] = "0123456789ABCDEF";
-    out->push_back(Hex[value >> 4]);
-    out->push_back(Hex[value & 0x0F]);
-}
-
-static std::string pdfOutlineTitle(std::string_view text)
-{
-    NSString* ns = [[NSString alloc] initWithBytes:text.data() length:text.size() encoding:NSUTF8StringEncoding];
-    if (ns == nil)
-        return "(" + pdfEscapeString(text) + ")";
-
-    NSData* data = [ns dataUsingEncoding:NSUTF16BigEndianStringEncoding];
-    if (data == nil)
-        return "(" + pdfEscapeString(text) + ")";
-
-    std::string out;
-    out.reserve(2 + (data.length + 2) * 2);
-    out.push_back('<');
-    out.append("FEFF");
-    unsigned char const* bytes = static_cast<unsigned char const*>(data.bytes);
-    for (NSUInteger i = 0; i < data.length; ++i)
-        appendHexByte(&out, bytes[i]);
-    out.push_back('>');
-    return out;
-}
-
-static bool writePdfDeterministic(
-    NSString* tmpPdfPath,
-    std::vector<DjvuPdfPageInfo> const& pages,
-    std::vector<std::vector<uint8_t>> const& jbig2Globals,
-    std::vector<OutlineNode> const& outlineNodes,
-    std::unordered_map<std::string, std::string> const& metadata)
-{
-    if (tmpPdfPath == nil || pages.empty())
-    {
-        return false;
-    }
-
-    FILE* fp = fopen(tmpPdfPath.UTF8String, "wb");
-    if (fp == nullptr)
-    {
-        return false;
-    }
-
-    auto const closeFile = std::unique_ptr<FILE, int (*)(FILE*)>(fp, fclose);
-
-    // PDF header + binary marker.
-    fputs("%PDF-1.7\n%\xE2\xE3\xCF\xD3\n", fp);
-
-    struct PageObjs
-    {
-        int img = 0; // Single image (non-compound) or unused for compound
-        int bgImg = 0; // Background image for compound pages
-        int fgMask = 0; // Foreground mask for compound pages
-        int contents = 0;
-        int page = 0;
-    };
-
-    std::vector<PageObjs> pageObjs(pages.size());
-
-    int nextObj = 1;
-    int const catalogObj = nextObj++;
-    int const pagesObj = nextObj++;
-    int const infoObj = nextObj++;
-    std::vector<int> jbig2GlobalsObjs(jbig2Globals.size(), 0);
-    for (size_t i = 0; i < jbig2Globals.size(); ++i)
-    {
-        if (!jbig2Globals[i].empty())
-            jbig2GlobalsObjs[i] = nextObj++;
-    }
-
-    std::vector<PdfOutlineItem> outlineItems;
-    std::vector<int> outlineObjs;
-    int outlinesObj = 0;
-    OutlineBuildResult outlineResult;
-    if (!outlineNodes.empty())
-    {
-        outlineResult = buildOutlineItems(&outlineItems, outlineNodes, -1);
-        if (!outlineItems.empty())
-        {
-            outlinesObj = nextObj++;
-            outlineObjs.resize(outlineItems.size(), 0);
-            for (size_t i = 0; i < outlineItems.size(); ++i)
-                outlineObjs[i] = nextObj++;
-        }
-    }
-
-    for (size_t i = 0; i < pages.size(); ++i)
-    {
-        bool const isCompound =
-            (pages[i].bgImage.kind != DjvuPdfImageKind::None && !pages[i].bgImage.bytes.empty() &&
-             pages[i].fgMask.kind != DjvuPdfImageKind::None && !pages[i].fgMask.bytes.empty());
-        if (isCompound)
-        {
-            pageObjs[i].bgImg = nextObj++;
-            pageObjs[i].fgMask = nextObj++;
-        }
-        else if (pages[i].image.kind != DjvuPdfImageKind::None && !pages[i].image.bytes.empty())
-        {
-            pageObjs[i].img = nextObj++;
-        }
-        pageObjs[i].contents = nextObj++;
-        pageObjs[i].page = nextObj++;
-    }
-
-    int const objCount = nextObj - 1;
-    std::vector<uint64_t> offsets((size_t)objCount + 1U, 0);
-
-    auto writeObjBegin = [&](int objNum)
-    {
-        offsets[(size_t)objNum] = (uint64_t)ftello(fp);
-        fprintf(fp, "%d 0 obj\n", objNum);
-    };
-
-    auto writeObjEnd = [&]()
-    {
-        fputs("endobj\n", fp);
-    };
-
-    auto writeStreamObj = [&](int objNum, char const* dictPrefix, uint8_t const* bytes, size_t len)
-    {
-        writeObjBegin(objNum);
-        fprintf(fp, "%s/Length %zu >>\nstream\n", dictPrefix, len);
-        if (len != 0)
-            fwrite(bytes, 1, len, fp);
-        fputs("\nendstream\n", fp);
-        writeObjEnd();
-    };
-
-    // 1) Catalog
-    writeObjBegin(catalogObj);
-    if (outlinesObj != 0)
-        fprintf(fp, "<< /Type /Catalog /Pages %d 0 R /Outlines %d 0 R /PageMode /UseOutlines >>\n", pagesObj, outlinesObj);
-    else
-        fprintf(fp, "<< /Type /Catalog /Pages %d 0 R >>\n", pagesObj);
-    writeObjEnd();
-
-    // 2) Pages tree
-    writeObjBegin(pagesObj);
-    fputs("<< /Type /Pages /Kids [", fp);
-    for (size_t i = 0; i < pages.size(); ++i)
-        fprintf(fp, " %d 0 R", pageObjs[i].page);
-    fprintf(fp, " ] /Count %zu >>\n", pages.size());
-    writeObjEnd();
-
-    // 3) Outlines
-    if (outlinesObj != 0)
-    {
-        writeObjBegin(outlinesObj);
-        if (outlineResult.first != -1)
-        {
-            fprintf(
-                fp,
-                "<< /Type /Outlines /First %d 0 R /Last %d 0 R /Count %d >>\n",
-                outlineObjs[(size_t)outlineResult.first],
-                outlineObjs[(size_t)outlineResult.last],
-                outlineResult.descendants);
-        }
-        else
-        {
-            fputs("<< /Type /Outlines >>\n", fp);
-        }
-        writeObjEnd();
-
-        for (size_t i = 0; i < outlineItems.size(); ++i)
-        {
-            auto const& item = outlineItems[i];
-            int const parentObj = item.parent == -1 ? outlinesObj : outlineObjs[(size_t)item.parent];
-            int pageIndex = item.pageIndex;
-            if (pageIndex < 0 || (size_t)pageIndex >= pageObjs.size())
-                pageIndex = 0;
-
-            std::string const titleToken = pdfOutlineTitle(item.title);
-
-            writeObjBegin(outlineObjs[i]);
-            fprintf(
-                fp,
-                "<< /Title %s /Parent %d 0 R /Dest [%d 0 R /Fit]",
-                titleToken.c_str(),
-                parentObj,
-                pageObjs[(size_t)pageIndex].page);
-            if (item.prev != -1)
-                fprintf(fp, " /Prev %d 0 R", outlineObjs[(size_t)item.prev]);
-            if (item.next != -1)
-                fprintf(fp, " /Next %d 0 R", outlineObjs[(size_t)item.next]);
-            if (item.firstChild != -1)
-            {
-                fprintf(
-                    fp,
-                    " /First %d 0 R /Last %d 0 R /Count %d",
-                    outlineObjs[(size_t)item.firstChild],
-                    outlineObjs[(size_t)item.lastChild],
-                    item.count);
-            }
-            fputs(" >>\n", fp);
-            writeObjEnd();
-        }
-    }
-
-    // 4) JBIG2Globals
-    for (size_t i = 0; i < jbig2Globals.size(); ++i)
-    {
-        int obj = jbig2GlobalsObjs[i];
-        if (obj != 0)
-            writeStreamObj(obj, "<< ", jbig2Globals[i].data(), jbig2Globals[i].size());
-    }
-
-    // 5) Per-page objects
-    for (size_t i = 0; i < pages.size(); ++i)
-    {
-        DjvuPdfPageInfo const& p = pages[i];
-        PageObjs const& o = pageObjs[i];
-        bool const isCompound = (o.bgImg != 0 && o.fgMask != 0);
-
-        if (isCompound)
-        {
-            // Write background image (JPEG)
-            DjvuPdfImageInfo const& bgImg = p.bgImage;
-            writeObjBegin(o.bgImg);
-            char const* bgCs = bgImg.gray ? "/DeviceGray" : "/DeviceRGB";
-            fprintf(
-                fp,
-                "<< /Type /XObject /Subtype /Image /Width %d /Height %d /ColorSpace %s /BitsPerComponent 8 /Filter /DCTDecode /Length %zu >>\nstream\n",
-                bgImg.w,
-                bgImg.h,
-                bgCs,
-                bgImg.bytes.size());
-            fwrite(bgImg.bytes.data(), 1, bgImg.bytes.size(), fp);
-            fputs("\nendstream\n", fp);
-            writeObjEnd();
-
-            // Write foreground mask (JBIG2 ImageMask)
-            DjvuPdfImageInfo const& fgMask = p.fgMask;
-            if (fgMask.jbig2GlobalsIndex < 0 || (size_t)fgMask.jbig2GlobalsIndex >= jbig2GlobalsObjs.size())
-                return false;
-            int const fgGlobalsObj = jbig2GlobalsObjs[(size_t)fgMask.jbig2GlobalsIndex];
-            if (fgGlobalsObj == 0)
-                return false;
-            writeObjBegin(o.fgMask);
-            // ImageMask: sample 1 paints with fill color, sample 0 is transparent (default Decode [0 1])
-            // JBIG2: 1 = black text, 0 = white background
-            // Result: black text paints, white background is transparent
-            fprintf(
-                fp,
-                "<< /Type /XObject /Subtype /Image /Width %d /Height %d /ImageMask true /BitsPerComponent 1 /Filter /JBIG2Decode /DecodeParms << /JBIG2Globals %d 0 R >> /Length %zu >>\nstream\n",
-                fgMask.w,
-                fgMask.h,
-                fgGlobalsObj,
-                fgMask.bytes.size());
-            fwrite(fgMask.bytes.data(), 1, fgMask.bytes.size(), fp);
-            fputs("\nendstream\n", fp);
-            writeObjEnd();
-        }
-        else if (o.img != 0)
-        {
-            DjvuPdfImageInfo const& img = p.image;
-            writeObjBegin(o.img);
-            if (img.kind == DjvuPdfImageKind::Jpeg)
-            {
-                char const* cs = img.gray ? "/DeviceGray" : "/DeviceRGB";
-                fprintf(
-                    fp,
-                    "<< /Type /XObject /Subtype /Image /Width %d /Height %d /ColorSpace %s /BitsPerComponent 8 /Filter /DCTDecode /Length %zu >>\nstream\n",
-                    img.w,
-                    img.h,
-                    cs,
-                    img.bytes.size());
-            }
-            else if (img.kind == DjvuPdfImageKind::Jbig2)
-            {
-                if (img.jbig2GlobalsIndex < 0 || (size_t)img.jbig2GlobalsIndex >= jbig2GlobalsObjs.size())
-                    return false;
-                int const globalsObj = jbig2GlobalsObjs[(size_t)img.jbig2GlobalsIndex];
-                if (globalsObj == 0)
-                    return false;
-                fprintf(
-                    fp,
-                    "<< /Type /XObject /Subtype /Image /Width %d /Height %d /ColorSpace /DeviceGray /BitsPerComponent 1 /Filter /JBIG2Decode /DecodeParms << /JBIG2Globals %d 0 R >> /Length %zu >>\nstream\n",
-                    img.w,
-                    img.h,
-                    globalsObj,
-                    img.bytes.size());
-            }
-            else
-            {
-                writeObjEnd();
-                return false;
-            }
-
-            fwrite(img.bytes.data(), 1, img.bytes.size(), fp);
-            fputs("\nendstream\n", fp);
-            writeObjEnd();
-        }
-
-        // Contents stream
-        std::string contents;
-        contents.reserve(256);
-        if (isCompound)
-        {
-            DjvuPdfImageInfo const& bgImg = p.bgImage;
-            DjvuPdfImageInfo const& fgMask = p.fgMask;
-            char tmp[256];
-            // Draw background picture first
-            snprintf(tmp, sizeof(tmp), "q\n%g 0 0 %g %g %g cm\n/BgIm Do\nQ\n", bgImg.pdfW, bgImg.pdfH, bgImg.x, bgImg.y);
-            contents.append(tmp);
-            // Draw foreground text mask on top (black fill color for text)
-            snprintf(tmp, sizeof(tmp), "q\n0 g\n%g 0 0 %g %g %g cm\n/FgMask Do\nQ\n", fgMask.pdfW, fgMask.pdfH, fgMask.x, fgMask.y);
-            contents.append(tmp);
-        }
-        else if (o.img != 0)
-        {
-            DjvuPdfImageInfo const& img = p.image;
-            char tmp[256];
-            snprintf(tmp, sizeof(tmp), "q\n%g 0 0 %g %g %g cm\n/Im Do\nQ\n", img.pdfW, img.pdfH, img.x, img.y);
-            contents.append(tmp);
-        }
-
-        writeStreamObj(o.contents, "<< ", (uint8_t const*)contents.data(), contents.size());
-
-        // Page dictionary
-        writeObjBegin(o.page);
-        fprintf(fp, "<< /Type /Page /Parent %d 0 R /MediaBox [0 0 %g %g] ", pagesObj, p.pdfWidth, p.pdfHeight);
-        fputs("/Resources << ", fp);
-        if (isCompound)
-        {
-            fputs("/XObject << ", fp);
-            fprintf(fp, "/BgIm %d 0 R /FgMask %d 0 R ", o.bgImg, o.fgMask);
-            fputs(">> ", fp);
-        }
-        else if (o.img != 0)
-        {
-            fputs("/XObject << ", fp);
-            fprintf(fp, "/Im %d 0 R ", o.img);
-            fputs(">> ", fp);
-        }
-        fprintf(fp, ">> /Contents %d 0 R >>\n", o.contents);
-        writeObjEnd();
-    }
-
-    // 6) Info
-    writeObjBegin(infoObj);
-    fputs("<< ", fp);
-
-    auto const writeField = [&](char const* pdfKey, char const* djvuKey)
-    {
-        auto it = metadata.find(djvuKey);
-        if (it != metadata.end())
-        {
-            fprintf(fp, "%s %s ", pdfKey, pdfOutlineTitle(it->second).c_str());
-            return true;
-        }
-        return false;
-    };
-
-    writeField("/Title", "title");
-    writeField("/Author", "author");
-    if (!writeField("/Subject", "subject"))
-    {
-        writeField("/Subject", "description");
-    }
-    writeField("/Keywords", "keywords");
-
-    if (!writeField("/Creator", "creator"))
-    {
-        writeField("/Creator", "producer");
-    }
-
-    if (!writeField("/CreationDate", "date"))
-    {
-        writeField("/CreationDate", "year");
-    }
-
-    fputs("/Producer (Transmission) ", fp);
-
-    static std::unordered_set<std::string> const knownKeys = { "title",   "author", "subject", "description", "keywords",
-                                                               "creator", "date",   "year",    "producer" };
-    for (auto const& [key, val] : metadata)
-    {
-        if (knownKeys.find(key) == knownKeys.end())
-        {
-            std::string pdfKey = "/";
-            if (!key.empty())
-            {
-                pdfKey += (char)std::toupper((unsigned char)key[0]);
-                pdfKey += key.substr(1);
-            }
-            fprintf(fp, "%s %s ", pdfKey.c_str(), pdfOutlineTitle(val).c_str());
-        }
-    }
-
-    fputs(" >>\n", fp);
-    writeObjEnd();
-
-    // XRef + trailer
-    uint64_t const xrefOffset = (uint64_t)ftello(fp);
-    fprintf(fp, "xref\n0 %d\n", objCount + 1);
-    fputs("0000000000 65535 f \n", fp);
-    for (int i = 1; i <= objCount; ++i)
-    {
-        fprintf(fp, "%010llu 00000 n \n", (unsigned long long)offsets[(size_t)i]);
-    }
-
-    fprintf(fp, "trailer\n<< /Size %d /Root %d 0 R /Info %d 0 R >>\nstartxref\n%llu\n%%%%EOF\n", objCount + 1, catalogObj, infoObj, (unsigned long long)xrefOffset);
-    return true;
-}
 
 static BOOL convertDjvuFileDeterministic(NSString* djvuPath, NSString* tmpPdfPath)
 {
+    if (!djvuPath || djvuPath.length == 0)
+    {
+        NSLog(@"DjvuConverter ERROR: invalid DJVU path");
+        setFailedConversionError(djvuPath, @"Invalid DJVU path");
+        return NO;
+    }
+
     // Create DJVU context
     ddjvu_context_t* ctx = ddjvu_context_create("Transmission");
     if (!ctx)
     {
         NSLog(@"DjvuConverter ERROR: failed to create DJVU context for %@", djvuPath);
+        setFailedConversionError(djvuPath, @"Failed to create DJVU context");
         return NO;
     }
 
-    ddjvu_document_t* doc = ddjvu_document_create_by_filename_utf8(ctx, djvuPath.UTF8String, TRUE);
+    // DjvuLib document and page operations are generally thread-safe on the same context,
+    // but message handling must be coordinated.
+    const char* utf8Path = djvuPath.UTF8String;
+    if (!utf8Path)
+    {
+        NSLog(@"DjvuConverter ERROR: failed to get UTF8 string from path: %@", djvuPath);
+        setFailedConversionError(djvuPath, @"Failed to read DJVU path");
+        ddjvu_context_release(ctx);
+        return NO;
+    }
+
+    ddjvu_document_t* doc = ddjvu_document_create_by_filename_utf8(ctx, utf8Path, TRUE);
     if (!doc)
     {
         NSLog(@"DjvuConverter ERROR: failed to open DJVU document: %@", djvuPath);
+        setFailedConversionError(djvuPath, @"Failed to open DJVU document");
         ddjvu_context_release(ctx);
         return NO;
     }
@@ -1535,6 +1186,7 @@ static BOOL convertDjvuFileDeterministic(NSString* djvuPath, NSString* tmpPdfPat
     if (ddjvu_document_decoding_error(doc))
     {
         NSLog(@"DjvuConverter ERROR: DJVU document decoding failed: %@", djvuPath);
+        setFailedConversionError(djvuPath, @"DJVU document decoding failed");
         ddjvu_document_release(doc);
         ddjvu_context_release(ctx);
         return NO;
@@ -1544,6 +1196,7 @@ static BOOL convertDjvuFileDeterministic(NSString* djvuPath, NSString* tmpPdfPat
     if (pageCount <= 0)
     {
         NSLog(@"DjvuConverter ERROR: invalid page count (%d) for %@", pageCount, djvuPath);
+        setFailedConversionError(djvuPath, @"Invalid page count");
         ddjvu_document_release(doc);
         ddjvu_context_release(ctx);
         return NO;
@@ -1554,6 +1207,8 @@ static BOOL convertDjvuFileDeterministic(NSString* djvuPath, NSString* tmpPdfPat
     std::vector<OutlineNode> outline = readDjvuOutline(ctx, doc, pageCount);
     std::unordered_map<std::string, std::string> metadata = readDjvuMetadata(ctx, doc);
 
+    // Vector of all page data - automatically freed when function returns
+    // This can be large (hundreds of MB for JPEG/JBIG2 encoded pages)
     std::vector<DjvuPdfPageInfo> pages((size_t)pageCount);
     DjvuPdfPageInfo* pagesPtr = pages.data();
 
@@ -1563,6 +1218,7 @@ static BOOL convertDjvuFileDeterministic(NSString* djvuPath, NSString* tmpPdfPat
     if (!rgb24 || !grey8 || !msb)
     {
         NSLog(@"DjvuConverter ERROR: failed to create pixel format for %@", djvuPath);
+        setFailedConversionError(djvuPath, @"Failed to create pixel format");
         if (rgb24)
             ddjvu_format_release(rgb24);
         if (grey8)
@@ -1584,39 +1240,157 @@ static BOOL convertDjvuFileDeterministic(NSString* djvuPath, NSString* tmpPdfPat
     dispatch_queue_t encQ = dispatch_queue_create("transmission.djvu.jpeg.encode", DISPATCH_QUEUE_CONCURRENT);
     dispatch_group_t encGroup = dispatch_group_create();
 
-    // Allow concurrent JPEG encodes. Limit concurrency based on CPU count.
+    // Allow concurrent JPEG encodes up to CPU count
+    // JPEG encoding is fast and separate from JBIG2, so we can use full CPU count
     NSInteger cpu = NSProcessInfo.processInfo.activeProcessorCount;
-    NSInteger maxJpegConcurrent = MAX(2, cpu);
+    NSInteger maxJpegConcurrent = MAX(4, cpu);
     dispatch_semaphore_t sem = dispatch_semaphore_create(maxJpegConcurrent);
 
     bool ok = true;
     // Smaller batches = more parallelism, larger = better symbol sharing
-    int const Jbig2BatchSize = MAX(8, MIN(20, pageCount / (int)cpu));
-    Jbig2Batch jbig2Batch;
+    // JBIG2 ENCODING CONSTRAINTS:
+    // 1. Maximum 20 pages per jbig2ctx (library limitation)
+    // 2. All pages in a batch must be from THIS FILE ONLY (no mixing files)
+    // 3. Pages should be consecutive for optimal encoding
+    // 
+    // Balance JBIG2 encoding speed vs. file size:
+    // - Small batches (10) = fast but +200KB (many globals dictionaries)
+    // - Larger batches (20) = better compression, fewer globals
+    // Cap at 20 pages per batch due to jbig2enc constraints
+    int const Jbig2BatchSize = MIN(20, MAX(10, pageCount / 20)); // 10-20 pages per batch
+    // Use shared_ptr for batch and mutex to ensure they live as long as the lambda
+    auto jbig2Batch = std::make_shared<Jbig2Batch>();
+    auto jbig2BatchMutex = std::make_shared<std::mutex>();
+    // JBIG2 globals dictionaries - one per batch, automatically freed when function returns
+    // This grows as batches complete, but is released after PDF finalization
     std::vector<std::vector<uint8_t>> jbig2Globals;
+    
+    // Initialize incremental PDF writer early - we'll write pages as they complete
+    // Estimate max JBIG2 globals (one per batch, worst case: one per page)
+    int const estimatedMaxJbig2Globals = (pageCount + Jbig2BatchSize - 1) / Jbig2BatchSize;
+    jbig2Globals.reserve((size_t)estimatedMaxJbig2Globals);
+    
+    auto pdfWriterPtr = std::make_shared<IncrementalPdfWriter>();
+    if (!pdfWriterPtr->init(tmpPdfPath, pageCount, jbig2Globals, outline, metadata, estimatedMaxJbig2Globals))
+    {
+        NSLog(@"DjvuConverter ERROR: failed to initialize PDF writer for %@", djvuPath);
+        setFailedConversionError(djvuPath, @"Failed to initialize PDF writer");
+        ddjvu_format_release(rgb24);
+        ddjvu_format_release(grey8);
+        ddjvu_format_release(msb);
+        ddjvu_document_release(doc);
+        ddjvu_context_release(ctx);
+        return NO;
+    }
+    
+    // Helper to safely add to jbig2Batch and flush if needed (defined after jbig2Ctx)
+    std::function<void(int, PIX*)> addToJbig2Batch;
 
     // Async JBIG2 context - allows overlapping JBIG2 encoding with page rendering
-    Jbig2AsyncContext jbig2Ctx;
-    jbig2Ctx.group = dispatch_group_create();
-    jbig2Ctx.queue = dispatch_queue_create("transmission.djvu.jbig2.encode", DISPATCH_QUEUE_CONCURRENT);
-    jbig2Ctx.pages = &pages;
-    jbig2Ctx.globals = &jbig2Globals;
-    jbig2Ctx.djvuPath = djvuPath;
+    // Each file uses a serial queue for its batches, running in separate helper processes
+    // Different files can encode in parallel since each uses a separate process
+    // Create JBIG2 context for THIS FILE ONLY
+    // IMPORTANT: This context is used for ALL batches from this file
+    // - Each batch will create its own jbig2ctx (max 20 pages)
+    // - Batches are processed sequentially on this file's queue
+    // - Pages from different files NEVER mix in the same batch
+    auto jbig2Ctx = std::make_shared<Jbig2AsyncContext>();
+    jbig2Ctx->group = dispatch_group_create();
+    // Each file gets its own serial queue for JBIG2 batches
+    // This ensures batches from the same file are processed sequentially (consecutive pages)
+    // Different files use different queues and can encode in parallel
+    jbig2Ctx->queue = dispatch_queue_create("com.transmissionbt.djvuconverter.jbig2.file", DISPATCH_QUEUE_SERIAL);
+    jbig2Ctx->pages = &pages;
+    jbig2Ctx->globals = &jbig2Globals;
+    jbig2Ctx->pdfWriter = pdfWriterPtr;
+    jbig2Ctx->djvuPath = djvuPath;
+    jbig2Ctx->pageCount = pageCount;
 
-    for (int pageNum = 0; pageNum < pageCount && ok; ++pageNum)
-    {
-        @autoreleasepool
+    // Now define the lambda after jbig2Ctx is available
+    // Capture mutex and batch by value (shared_ptr) to ensure they live as long as needed
+    // Release lock before async call to avoid holding lock during async operation
+    // Use a weak_ptr to avoid extending lifetime unintentionally
+    std::weak_ptr<Jbig2AsyncContext> jbig2CtxWeak = jbig2Ctx;
+    addToJbig2Batch = [jbig2Batch, jbig2BatchMutex, jbig2CtxWeak, Jbig2BatchSize](int pageNum, PIX* pix) {
+        Jbig2Batch batchToFlush;
+        bool shouldFlush = false;
+        
         {
+            std::lock_guard<std::mutex> lock(*jbig2BatchMutex);
+            jbig2Batch->pageNums.push_back(pageNum);
+            jbig2Batch->pixes.push_back(pix);
+            if ((int)jbig2Batch->pixes.size() >= Jbig2BatchSize)
+            {
+                batchToFlush = std::move(*jbig2Batch);
+                *jbig2Batch = Jbig2Batch{};
+                shouldFlush = true;
+            }
+        }
+        
+    // Release lock before async call
+    if (shouldFlush)
+    {
+        if (auto ctx = jbig2CtxWeak.lock())
+        {
+            flushJbig2BatchAsync(std::move(batchToFlush), ctx);
+        }
+        else
+        {
+            for (auto* p : batchToFlush.pixes)
+                pixDestroy(&p);
+        }
+    }
+    };
+
+    // Parallelize page rendering - create concurrent queue for page processing
+    // Leptonica and libjpeg-turbo are thread-safe for these operations.
+    dispatch_queue_t pageRenderQueue = dispatch_queue_create("transmission.djvu.page.render", DISPATCH_QUEUE_CONCURRENT);
+    dispatch_group_t pageRenderGroup = dispatch_group_create();
+    std::atomic<bool>* pageRenderOkPtr = new std::atomic<bool>(true);
+
+    // First, decode all pages in parallel where possible.
+    // ddjvu_page_create_by_pageno and ddjvu_message_wait are thread-safe on the context.
+    // Use custom deleter to automatically clean up pages, document and context.
+    // The deleter captures doc and ctx to ensure they live as long as the pages.
+    auto decodedPages = std::shared_ptr<std::vector<ddjvu_page_t*>>(
+        new std::vector<ddjvu_page_t*>((size_t)pageCount, nullptr),
+        [doc, ctx](std::vector<ddjvu_page_t*>* pages) {
+            if (pages != nullptr)
+            {
+                for (auto* page : *pages)
+                {
+                    if (page != nullptr)
+                        ddjvu_page_release(page);
+                }
+                delete pages;
+            }
+            if (doc != nullptr)
+                ddjvu_document_release(doc);
+            if (ctx != nullptr)
+                ddjvu_context_release(ctx);
+        });
+    auto decodedPagesMutex = std::make_shared<std::mutex>();
+    std::vector<ddjvu_page_t*>* decodedPagesPtr = decodedPages.get();
+    dispatch_queue_t decodeQueue = dispatch_queue_create("transmission.djvu.page.decode", DISPATCH_QUEUE_SERIAL);
+    dispatch_group_t decodeGroup = dispatch_group_create();
+
+    for (int pageNum = 0; pageNum < pageCount; ++pageNum)
+    {
+        dispatch_group_async(decodeGroup, decodeQueue, ^{
             ddjvu_page_t* page = ddjvu_page_create_by_pageno(doc, pageNum);
             if (!page)
             {
                 NSLog(@"DjvuConverter ERROR: failed to create page %d in %@", pageNum, djvuPath);
-                ok = false;
-                break;
+                setFailedConversionError(djvuPath, @"Failed to decode a page");
+                return;
             }
 
             while (!ddjvu_page_decoding_done(page))
             {
+                // We need to wait for messages on the context for this page.
+                // ddjvu_message_wait is blocking.
+                // DjvuLib context message queue is shared; use a serial queue for decoding to avoid
+                // multiple threads waiting on the same context simultaneously which can be problematic.
                 ddjvu_message_t* msg = ddjvu_message_wait(ctx);
                 if (msg)
                     ddjvu_message_pop(ctx);
@@ -1625,10 +1399,63 @@ static BOOL convertDjvuFileDeterministic(NSString* djvuPath, NSString* tmpPdfPat
             if (ddjvu_page_decoding_error(page))
             {
                 NSLog(@"DjvuConverter ERROR: page %d decoding failed in %@", pageNum, djvuPath);
+                setFailedConversionError(djvuPath, @"Page decoding failed");
                 ddjvu_page_release(page);
-                ok = false;
-                break;
+                return;
             }
+
+            std::lock_guard<std::mutex> lock(*decodedPagesMutex);
+            (*decodedPagesPtr)[(size_t)pageNum] = page;
+        });
+    }
+    dispatch_group_wait(decodeGroup, DISPATCH_TIME_FOREVER);
+
+    // Check if all pages were decoded successfully
+    for (int pageNum = 0; pageNum < pageCount; ++pageNum)
+    {
+        if ((*decodedPages)[(size_t)pageNum] == nullptr)
+        {
+            ok = false;
+            break;
+        }
+    }
+
+    if (!ok)
+    {
+        // decodedPages will be automatically cleaned up by shared_ptr deleter
+        // which also handles releasing doc and ctx
+        ddjvu_format_release(rgb24);
+        ddjvu_format_release(grey8);
+        ddjvu_format_release(msb);
+        return NO;
+    }
+
+    // All pages are decoded and we've extracted outline/metadata.
+    // doc and ctx will be released by decodedPages deleter when all pages are done.
+
+    // Now process all decoded pages in parallel
+    // Capture variables needed in the block
+    DjvuPdfPageInfo* capturedPagesPtr = pagesPtr;
+    ddjvu_format_t* capturedRgb24 = rgb24;
+    ddjvu_format_t* capturedGrey8 = grey8;
+    ddjvu_format_t* capturedMsb = msb;
+    NSString* capturedDjvuPath = djvuPath;
+    dispatch_group_t capturedEncGroup = encGroup;
+    dispatch_queue_t capturedEncQ = encQ;
+    dispatch_semaphore_t capturedSem = sem;
+    auto capturedAddToJbig2Batch = addToJbig2Batch;
+
+    for (int pageNum = 0; pageNum < pageCount; ++pageNum)
+    {
+        ddjvu_page_t* page = (*decodedPages)[(size_t)pageNum];
+        int capturedPageNum = pageNum; // Capture by value
+        dispatch_group_async(pageRenderGroup, pageRenderQueue, ^{
+            @autoreleasepool
+            {
+                if (!pageRenderOkPtr->load())
+                {
+                    return;
+                }
 
             ddjvu_page_type_t pageType = ddjvu_page_get_type(page);
             int pageWidth = ddjvu_page_get_width(page);
@@ -1636,13 +1463,13 @@ static BOOL convertDjvuFileDeterministic(NSString* djvuPath, NSString* tmpPdfPat
             int pageDpi = ddjvu_page_get_resolution(page);
             if (pageWidth <= 0 || pageHeight <= 0 || pageDpi <= 0)
             {
-                NSLog(@"DjvuConverter ERROR: invalid page dimensions (w=%d h=%d dpi=%d) for page %d in %@", pageWidth, pageHeight, pageDpi, pageNum, djvuPath);
-                ddjvu_page_release(page);
-                ok = false;
-                break;
+                NSLog(@"DjvuConverter ERROR: invalid page dimensions (w=%d h=%d dpi=%d) for page %d in %@", pageWidth, pageHeight, pageDpi, capturedPageNum, capturedDjvuPath);
+                setFailedConversionError(capturedDjvuPath, @"Invalid page dimensions");
+                pageRenderOkPtr->store(false);
+                return;
             }
 
-            DjvuPdfPageInfo& p = pagesPtr[pageNum];
+            DjvuPdfPageInfo& p = capturedPagesPtr[capturedPageNum];
             p.pdfWidth = (double)pageWidth * 72.0 / (double)pageDpi;
             p.pdfHeight = (double)pageHeight * 72.0 / (double)pageDpi;
 
@@ -1653,9 +1480,8 @@ static BOOL convertDjvuFileDeterministic(NSString* djvuPath, NSString* tmpPdfPat
             computeRenderDimensions(pageWidth, pageHeight, pageDpi, renderDpi, &renderW, &renderH);
             if (renderW <= 0 || renderH <= 0)
             {
-                ddjvu_page_release(page);
-                ok = false;
-                break;
+                pageRenderOkPtr->store(false);
+                return;
             }
 
             // Handle compound pages (text over picture) specially
@@ -1677,7 +1503,7 @@ static BOOL convertDjvuFileDeterministic(NSString* djvuPath, NSString* tmpPdfPat
                         DDJVU_RENDER_COLOR,
                         &checkRect,
                         &checkRect,
-                        rgb24,
+                        capturedRgb24,
                         (unsigned long)checkRowBytes,
                         (char*)checkRgb.data());
                     fullPageBitonal = (checkRendered != 0) &&
@@ -1688,7 +1514,7 @@ static BOOL convertDjvuFileDeterministic(NSString* djvuPath, NSString* tmpPdfPat
                 // Render foreground text mask to check if compound mode is worthwhile
                 double maskCoverage = 0.0;
                 bool const preferBitonal = (renderDpi == pageDpi) && (renderW == pageWidth) && (renderH == pageHeight);
-                NSData* fgPbm = renderDjvuMaskPbmData(page, grey8, msb, renderW, renderH, preferBitonal, &maskCoverage);
+                NSData* fgPbm = renderDjvuMaskPbmData(page, capturedGrey8, capturedMsb, renderW, renderH, preferBitonal, &maskCoverage);
                 PIX* fgPix = (fgPbm != nil && fgPbm.length != 0) ? pixReadMemPnm((l_uint8 const*)fgPbm.bytes, fgPbm.length) : nullptr;
 
                 // Only proceed with compound rendering if we have meaningful text coverage
@@ -1709,7 +1535,7 @@ static BOOL convertDjvuFileDeterministic(NSString* djvuPath, NSString* tmpPdfPat
                         DDJVU_RENDER_BACKGROUND,
                         &bgRect,
                         &bgRect,
-                        rgb24,
+                        capturedRgb24,
                         (unsigned long)bgRowBytes,
                         (char*)bgRgb.data());
 
@@ -1867,17 +1693,10 @@ static BOOL convertDjvuFileDeterministic(NSString* djvuPath, NSString* tmpPdfPat
                                                         p.image.w = pixGetWidth(mergedCropped);
                                                         p.image.h = pixGetHeight(mergedCropped);
                                                         setPdfPlacementForCrop(&p.image, renderW, renderH, mergeCrop, p.pdfWidth, p.pdfHeight);
-                                                        jbig2Batch.pageNums.push_back(pageNum);
-                                                        jbig2Batch.pixes.push_back(mergedCropped);
-                                                        if ((int)jbig2Batch.pixes.size() >= Jbig2BatchSize)
-                                                        {
-                                                            flushJbig2BatchAsync(std::move(jbig2Batch), &jbig2Ctx);
-                                                            jbig2Batch = Jbig2Batch{};
-                                                        }
+                                                        capturedAddToJbig2Batch(capturedPageNum, mergedCropped);
                                                         pixDestroy(&fgPix);
-                                                        ddjvu_page_release(page);
-                                                        incrementDonePagesForPath(djvuPath);
-                                                        continue;
+                                                        incrementDonePagesForPath(capturedDjvuPath);
+                                                        return;
                                                     }
                                                     if (mergedCropped != nullptr)
                                                         pixDestroy(&mergedCropped);
@@ -1926,30 +1745,36 @@ static BOOL convertDjvuFileDeterministic(NSString* djvuPath, NSString* tmpPdfPat
                             {
                                 std::vector<unsigned char> grayBuf = rgb24ToGrayscale(bgRgb.data(), bgW, bgH, bgRowBytes);
                                 std::vector<unsigned char> croppedGray = extractGrayCrop(grayBuf.data(), bgW, bgCrop);
-                                dispatch_group_async(encGroup, encQ, ^{
+                                dispatch_group_async(capturedEncGroup, capturedEncQ, ^{
                                     @autoreleasepool
                                     {
-                                        dispatch_semaphore_wait(sem, DISPATCH_TIME_FOREVER);
+                                        dispatch_semaphore_wait(capturedSem, DISPATCH_TIME_FOREVER);
                                         std::vector<uint8_t> jpeg;
-                                        (void)encodeJpegTurbo(&jpeg, croppedGray.data(), bgCropW, bgCropH, (size_t)bgCropW, true, 60);
-                                        if (!jpeg.empty())
-                                            pagesPtr[pageNum].bgImage.bytes = std::move(jpeg);
-                                        dispatch_semaphore_signal(sem);
+                                        bool bgEncoded = encodeJpegTurbo(&jpeg, croppedGray.data(), bgCropW, bgCropH, (size_t)bgCropW, true, 60, capturedDjvuPath, capturedPageNum);
+                                        if (bgEncoded && !jpeg.empty())
+                                        {
+                                            capturedPagesPtr[capturedPageNum].bgImage.bytes = std::move(jpeg);
+                                            // Page will be written after all processing is complete
+                                        }
+                                        dispatch_semaphore_signal(capturedSem);
                                     }
                                 });
                             }
                             else
                             {
                                 std::vector<uint8_t> croppedBg = extractRgbCrop(bgRgb.data(), bgRowBytes, bgCrop);
-                                dispatch_group_async(encGroup, encQ, ^{
+                                dispatch_group_async(capturedEncGroup, capturedEncQ, ^{
                                     @autoreleasepool
                                     {
-                                        dispatch_semaphore_wait(sem, DISPATCH_TIME_FOREVER);
+                                        dispatch_semaphore_wait(capturedSem, DISPATCH_TIME_FOREVER);
                                         std::vector<uint8_t> jpeg;
-                                        (void)encodeJpegTurbo(&jpeg, croppedBg.data(), bgCropW, bgCropH, (size_t)bgCropW * 3U, false, 60);
-                                        if (!jpeg.empty())
-                                            pagesPtr[pageNum].bgImage.bytes = std::move(jpeg);
-                                        dispatch_semaphore_signal(sem);
+                                        bool bgEncoded = encodeJpegTurbo(&jpeg, croppedBg.data(), bgCropW, bgCropH, (size_t)bgCropW * 3U, false, 60, capturedDjvuPath, capturedPageNum);
+                                        if (bgEncoded && !jpeg.empty())
+                                        {
+                                            capturedPagesPtr[capturedPageNum].bgImage.bytes = std::move(jpeg);
+                                            // Page will be written after all processing is complete
+                                        }
+                                        dispatch_semaphore_signal(capturedSem);
                                     }
                                 });
                             }
@@ -1978,18 +1803,11 @@ static BOOL convertDjvuFileDeterministic(NSString* djvuPath, NSString* tmpPdfPat
                                 p.fgMask.pdfH = fgPdfH;
 
                                 // Add foreground mask to JBIG2 batch
-                                jbig2Batch.pageNums.push_back(-1 - pageNum); // Negative to indicate it's a foreground mask
-                                jbig2Batch.pixes.push_back(fgCropped);
+                                // Negative page number to indicate it's a foreground mask
+                                capturedAddToJbig2Batch(-1 - capturedPageNum, fgCropped);
 
-                                if ((int)jbig2Batch.pixes.size() >= Jbig2BatchSize)
-                                {
-                                    flushJbig2BatchAsync(std::move(jbig2Batch), &jbig2Ctx);
-                                    jbig2Batch = Jbig2Batch{};
-                                }
-
-                                ddjvu_page_release(page);
-                                incrementDonePagesForPath(djvuPath);
-                                continue; // Skip normal rendering path
+                                incrementDonePagesForPath(capturedDjvuPath);
+                                return; // Skip normal rendering path
                             }
                         }
                     }
@@ -2034,7 +1852,7 @@ static BOOL convertDjvuFileDeterministic(NSString* djvuPath, NSString* tmpPdfPat
                         mode,
                         &nativeRect,
                         &nativeRect,
-                        rgb24,
+                        capturedRgb24,
                         (unsigned long)nativeRowBytes,
                         (char*)nativeRgb.data());
                     if (rendered)
@@ -2077,7 +1895,7 @@ static BOOL convertDjvuFileDeterministic(NSString* djvuPath, NSString* tmpPdfPat
                     if (bitonal)
                     {
                         bool const preferBitonal = (renderDpi == pageDpi) && (renderW == pageWidth) && (renderH == pageHeight);
-                        NSData* pbm = renderDjvuMaskPbmData(page, grey8, msb, renderW, renderH, preferBitonal, nullptr);
+                        NSData* pbm = renderDjvuMaskPbmData(page, capturedGrey8, capturedMsb, renderW, renderH, preferBitonal, nullptr);
                         PIX* pix = (pbm != nil && pbm.length != 0) ? pixReadMemPnm((l_uint8 const*)pbm.bytes, pbm.length) : nullptr;
                         if (pix != nullptr)
                         {
@@ -2108,13 +1926,7 @@ static BOOL convertDjvuFileDeterministic(NSString* djvuPath, NSString* tmpPdfPat
                                     p.image.w = pixGetWidth(pixCropped);
                                     p.image.h = pixGetHeight(pixCropped);
                                     setPdfPlacementForCrop(&p.image, renderW, renderH, cr, p.pdfWidth, p.pdfHeight);
-                                    jbig2Batch.pageNums.push_back(pageNum);
-                                    jbig2Batch.pixes.push_back(pixCropped);
-                                    if ((int)jbig2Batch.pixes.size() >= Jbig2BatchSize)
-                                    {
-                                        flushJbig2BatchAsync(std::move(jbig2Batch), &jbig2Ctx);
-                                        jbig2Batch = Jbig2Batch{};
-                                    }
+                                    capturedAddToJbig2Batch(capturedPageNum, pixCropped);
                                 }
                                 else if (pixCropped != nullptr)
                                 {
@@ -2171,13 +1983,7 @@ static BOOL convertDjvuFileDeterministic(NSString* djvuPath, NSString* tmpPdfPat
                                     p.image.w = pixGetWidth(pix1);
                                     p.image.h = pixGetHeight(pix1);
                                     setPdfPlacementForCrop(&p.image, renderW, renderH, cr, p.pdfWidth, p.pdfHeight);
-                                    jbig2Batch.pageNums.push_back(pageNum);
-                                    jbig2Batch.pixes.push_back(pix1);
-                                    if ((int)jbig2Batch.pixes.size() >= Jbig2BatchSize)
-                                    {
-                                        flushJbig2BatchAsync(std::move(jbig2Batch), &jbig2Ctx);
-                                        jbig2Batch = Jbig2Batch{};
-                                    }
+                                    capturedAddToJbig2Batch(capturedPageNum, pix1);
                                 }
                                 else if (pix1 != nullptr)
                                 {
@@ -2219,9 +2025,12 @@ static BOOL convertDjvuFileDeterministic(NSString* djvuPath, NSString* tmpPdfPat
                             {
                                 dispatch_semaphore_wait(sem, DISPATCH_TIME_FOREVER);
                                 std::vector<uint8_t> encoded;
-                                bool encodedOk = encodeJpegTurbo(&encoded, pixels.data(), cropW, cropH, (size_t)cropW, true, quality);
+                                bool encodedOk = encodeJpegTurbo(&encoded, pixels.data(), cropW, cropH, (size_t)cropW, true, quality, capturedDjvuPath, capturedPageNum);
                                 if (encodedOk)
-                                    pagesPtr[pageNum].image.bytes = std::move(encoded);
+                                {
+                                    capturedPagesPtr[capturedPageNum].image.bytes = std::move(encoded);
+                                    incrementDonePagesForPath(capturedDjvuPath);
+                                }
                                 dispatch_semaphore_signal(sem);
                             }
                         });
@@ -2260,31 +2069,44 @@ static BOOL convertDjvuFileDeterministic(NSString* djvuPath, NSString* tmpPdfPat
                         {
                             dispatch_semaphore_wait(sem, DISPATCH_TIME_FOREVER);
                             std::vector<uint8_t> encoded;
-                            bool encodedOk = encodeJpegTurbo(&encoded, pixels.data(), cropW, cropH, (size_t)cropW * 3U, false, quality);
+                            bool encodedOk = encodeJpegTurbo(&encoded, pixels.data(), cropW, cropH, (size_t)cropW * 3U, false, quality, capturedDjvuPath, pageNum);
                             if (encodedOk)
+                            {
                                 pagesPtr[pageNum].image.bytes = std::move(encoded);
+                                incrementDonePagesForPath(capturedDjvuPath);
+                            }
                             dispatch_semaphore_signal(sem);
                         }
                     });
                 }
             }
-
-            ddjvu_page_release(page);
-
-            incrementDonePagesForPath(djvuPath);
-        }
+            // Note: Don't increment done pages here - pages are incremented when their encoding completes
+            // For JBIG2 pages: incremented in flushJbig2BatchAsync after batch encoding
+            // For JPEG pages: incremented in the JPEG encoding async block
+            }
+        });
     }
+
+    // Wait for all page rendering to complete
+    dispatch_group_wait(pageRenderGroup, DISPATCH_TIME_FOREVER);
+    if (!pageRenderOkPtr->load())
+        ok = false;
+    delete pageRenderOkPtr;
 
     // Wait for all JPEG encoding to complete
     dispatch_group_wait(encGroup, DISPATCH_TIME_FOREVER);
 
     // Clean up PIXes if there was an error
-    if (!ok && !jbig2Batch.pixes.empty())
+    if (!ok)
     {
-        for (auto*& pix : jbig2Batch.pixes)
-            pixDestroy(&pix);
-        jbig2Batch.pixes.clear();
-        jbig2Batch.pageNums.clear();
+        std::lock_guard<std::mutex> lock(*jbig2BatchMutex);
+        if (!jbig2Batch->pixes.empty())
+        {
+            for (auto*& pix : jbig2Batch->pixes)
+                pixDestroy(&pix);
+            jbig2Batch->pixes.clear();
+            jbig2Batch->pageNums.clear();
+        }
     }
 
     if (ok)
@@ -2295,45 +2117,133 @@ static BOOL convertDjvuFileDeterministic(NSString* djvuPath, NSString* tmpPdfPat
             if (pagesPtr[i].bgImage.kind == DjvuPdfImageKind::Jpeg && pagesPtr[i].bgImage.bytes.empty())
             {
                 NSLog(@"DjvuConverter ERROR: JPEG encoding failed for compound page %d background in %@", i, djvuPath);
+                setFailedConversionError(djvuPath, @"JPEG encoding failed");
                 ok = false;
             }
             // Check regular page encoding
             else if (pagesPtr[i].image.kind == DjvuPdfImageKind::Jpeg && pagesPtr[i].image.bytes.empty())
             {
                 NSLog(@"DjvuConverter ERROR: JPEG encoding failed for page %d in %@", i, djvuPath);
+                setFailedConversionError(djvuPath, @"JPEG encoding failed");
                 ok = false;
             }
         }
     }
 
     // Flush remaining JBIG2 batch
-    if (ok && !jbig2Batch.pixes.empty())
+    if (ok)
     {
-        flushJbig2BatchAsync(std::move(jbig2Batch), &jbig2Ctx);
-        jbig2Batch = Jbig2Batch{};
+        Jbig2Batch batchToFlush;
+        {
+            std::lock_guard<std::mutex> lock(*jbig2BatchMutex);
+            if (!jbig2Batch->pixes.empty())
+            {
+                batchToFlush = std::move(*jbig2Batch);
+                *jbig2Batch = Jbig2Batch{};
+            }
+        }
+        // Release lock before async call
+        if (!batchToFlush.pixes.empty())
+        {
+            flushJbig2BatchAsync(std::move(batchToFlush), jbig2Ctx);
+        }
+        // Mark JBIG2 as complete - no more batches will be added
+        jbig2Ctx->jbig2Complete = true;
+    }
+    else
+    {
+        // Even on error, mark as complete to avoid waiting forever
+        jbig2Ctx->jbig2Complete = true;
     }
 
-    // Wait for all async JBIG2 encoding to complete
-    dispatch_group_wait(jbig2Ctx.group, DISPATCH_TIME_FOREVER);
+    // Wait for all async JBIG2 encoding to complete for THIS file
+    // Ensure all JBIG2 work finishes before continuing to avoid use-after-free
+    // Scale timeout with page count: ~2 seconds per page for JBIG2 encoding
+    double timeoutSeconds = MAX(180.0, pageCount * 2.0);
+    dispatch_time_t timeout = dispatch_time(DISPATCH_TIME_NOW, (int64_t)(timeoutSeconds * NSEC_PER_SEC));
+    NSLog(@"DjvuConverter: Waiting for JBIG2 completion for %@ (timeout: %.0f seconds)", djvuPath, timeoutSeconds);
+    if (dispatch_group_wait(jbig2Ctx->group, timeout) != 0)
+    {
+        NSLog(@"DjvuConverter WARNING: timeout (%.0fs) waiting for JBIG2 encoding for %@", timeoutSeconds, djvuPath);
+        setFailedConversionError(djvuPath, @"JBIG2 encoding timed out");
+        ok = false;
+        // Still wait for completion to keep async work from using freed state
+        NSLog(@"DjvuConverter: Waiting indefinitely for JBIG2 to complete for %@...", djvuPath);
+        dispatch_group_wait(jbig2Ctx->group, DISPATCH_TIME_FOREVER);
+        NSLog(@"DjvuConverter: JBIG2 eventually completed for %@", djvuPath);
+    }
+    else
+    {
+        NSLog(@"DjvuConverter: JBIG2 encoding completed for %@", djvuPath);
+    }
 
     // Check JBIG2 async status
-    if (!jbig2Ctx.ok)
+    if (!jbig2Ctx->ok.load())
+    {
+        NSLog(@"DjvuConverter ERROR: JBIG2 encoding failed for %@", djvuPath);
+        setFailedConversionError(djvuPath, @"JBIG2 encoding failed");
         ok = false;
+    }
 
     if (ok)
     {
-        ok = writePdfDeterministic(tmpPdfPath, pages, jbig2Globals, outline, metadata);
-        if (!ok)
+        // Validate all pages have valid dimensions before writing
+        for (int i = 0; i < pageCount; ++i)
         {
-            NSLog(@"DjvuConverter ERROR: writePdfDeterministic failed for %@", djvuPath);
+            DjvuPdfPageInfo const& p = pagesPtr[i];
+            if (p.pdfWidth <= 0.0 || p.pdfHeight <= 0.0)
+            {
+                NSLog(@"DjvuConverter ERROR: page %d has invalid dimensions (%.2f x %.2f) for %@", i, p.pdfWidth, p.pdfHeight, djvuPath);
+                setFailedConversionError(djvuPath, @"Invalid page dimensions");
+                ok = false;
+                break;
+            }
+        }
+        
+        // Write all pages now that all processing is complete
+        if (ok)
+        {
+            NSLog(@"DjvuConverter: Writing %d pages to PDF for %@", pageCount, djvuPath);
+            for (int i = 0; i < pageCount; ++i)
+            {
+                DjvuPdfPageInfo const& p = pagesPtr[i];
+                if (!pdfWriterPtr->writePage(i, p))
+                {
+                    NSLog(@"DjvuConverter ERROR: failed to write page %d for %@", i, djvuPath);
+                    setFailedConversionError(djvuPath, @"Failed to write PDF page");
+                    ok = false;
+                    break;
+                }
+            }
+        }
+        
+        // Finalize PDF after all pages are written
+        if (ok && !pdfWriterPtr->isFinalized())
+        {
+            NSLog(@"DjvuConverter: Finalizing PDF for %@", djvuPath);
+            ok = pdfWriterPtr->finalize(jbig2Globals);
+            if (!ok)
+            {
+                NSLog(@"DjvuConverter ERROR: PDF finalization failed for %@", djvuPath);
+                setFailedConversionError(djvuPath, @"PDF finalization failed");
+            }
+            else
+            {
+                NSLog(@"DjvuConverter: Successfully finalized PDF for %@", djvuPath);
+            }
         }
     }
 
     ddjvu_format_release(rgb24);
     ddjvu_format_release(grey8);
     ddjvu_format_release(msb);
-    ddjvu_document_release(doc);
-    ddjvu_context_release(ctx);
+    // doc and ctx are handled by decodedPages deleter
+    
+    // Clean up dispatch resources
+    // Note: dispatch_group_t and dispatch_queue_t are automatically managed by ARC
+    // but we ensure they're fully released by clearing the jbig2Ctx shared_ptr
+    // This will release the queue and group when the last reference is dropped
+    // The shared_ptr goes out of scope here, triggering cleanup
 
     return ok ? YES : NO;
 }
@@ -2346,8 +2256,27 @@ static BOOL convertDjvuFileDeterministic(NSString* djvuPath, NSString* tmpPdfPat
     {
         sConversionQueue = [NSMutableDictionary dictionary];
         sLastScanTime = [NSMutableDictionary dictionary];
-        dispatch_queue_attr_t attrs = dispatch_queue_attr_make_with_qos_class(DISPATCH_QUEUE_SERIAL, QOS_CLASS_UTILITY, 0);
+        // Use concurrent queue to allow multiple file conversions in parallel
+        // Limit concurrency: each file conversion has internal parallelism for pages,
+        // so we limit file conversions to avoid overwhelming the GCD thread pool
+        NSInteger cpu = NSProcessInfo.processInfo.activeProcessorCount;
+        // With per-file serial queues for JBIG2, we can run more files in parallel safely
+        // Each file uses internal parallelism for pages, but JBIG2 batches are serialized per-file
+        NSInteger maxConcurrent = MAX(2, MIN(8, cpu));
+        dispatch_queue_attr_t attrs = dispatch_queue_attr_make_with_qos_class(DISPATCH_QUEUE_CONCURRENT, QOS_CLASS_UTILITY, 0);
         sConversionDispatchQueue = dispatch_queue_create("com.transmissionbt.djvuconverter", attrs);
+        sConversionSemaphore = dispatch_semaphore_create(maxConcurrent);
+        
+        // Limit concurrent JBIG2 batches to CPU count
+        // Each file has its own serial queue for batches, but we limit total concurrency
+        // JBIG2 encoding is CPU-intensive, so limit to available cores
+        NSInteger maxJbig2Concurrent = MAX(2, cpu);
+        sJbig2Semaphore = dispatch_semaphore_create(maxJbig2Concurrent);
+        
+        // Serial queue for thread-safe tracking set operations
+        sTrackingQueue = dispatch_queue_create("com.transmissionbt.djvuconverter.tracking", DISPATCH_QUEUE_SERIAL);
+        // Set queue-specific key to detect if we're already on this queue
+        dispatch_queue_set_specific(sTrackingQueue, sTrackingQueueKey, (void*)sTrackingQueueKey, nullptr);
     }
 }
 
@@ -2379,9 +2308,12 @@ static BOOL convertDjvuFileDeterministic(NSString* djvuPath, NSString* tmpPdfPat
     NSMutableSet<NSString*>* pdfBaseNames = [NSMutableSet set];
     for (FileListNode* node in fileList)
     {
-        if ([node.name.pathExtension.lowercaseString isEqualToString:@"pdf"])
+        NSString* name = node.name;
+        if (!name)
+            continue;
+        if ([name.pathExtension.lowercaseString isEqualToString:@"pdf"])
         {
-            [pdfBaseNames addObject:node.name.stringByDeletingPathExtension.lowercaseString];
+            [pdfBaseNames addObject:name.stringByDeletingPathExtension.lowercaseString];
         }
     }
 
@@ -2390,6 +2322,8 @@ static BOOL convertDjvuFileDeterministic(NSString* djvuPath, NSString* tmpPdfPat
     for (FileListNode* node in fileList)
     {
         NSString* name = node.name;
+        if (!name)
+            continue;
         NSString* ext = name.pathExtension.lowercaseString;
 
         // Only process DJVU files
@@ -2443,7 +2377,12 @@ static BOOL convertDjvuFileDeterministic(NSString* djvuPath, NSString* tmpPdfPat
     NSString* hash = torrent.hashString;
     [sLastScanTime removeObjectForKey:hash];
     [sConversionQueue removeObjectForKey:hash];
-    [sFailedConversions removeObjectForKey:hash];
+    if (sTrackingQueue)
+    {
+        safeDispatchSync(^{
+            [sFailedConversions removeObjectForKey:hash];
+        });
+    }
 }
 
 + (NSString*)convertingFileNameForTorrent:(Torrent*)torrent
@@ -2461,32 +2400,29 @@ static BOOL convertDjvuFileDeterministic(NSString* djvuPath, NSString* tmpPdfPat
     if (!queuedFiles || queuedFiles.count == 0)
         return nil;
 
-    // Find the first file that is actively converting and PDF doesn't exist yet
-    for (NSString* djvuPath in queuedFiles)
+    // Find the first file that is actively converting and PDF doesn't exist yet (thread-safe)
+    __block NSString* result = nil;
+    if (sTrackingQueue)
     {
-        if (![sActiveConversions containsObject:djvuPath])
-            continue;
+        safeDispatchSync(^{
+            for (NSString* djvuPath in queuedFiles)
+            {
+                if (![sActiveConversions containsObject:djvuPath])
+                    continue;
 
-        NSString* pdfPath = [djvuPath.stringByDeletingPathExtension stringByAppendingPathExtension:@"pdf"];
-        if (![NSFileManager.defaultManager fileExistsAtPath:pdfPath])
-        {
-            // Return the filename (last path component)
-            return djvuPath.lastPathComponent;
-        }
+                NSString* pdfPath = [djvuPath.stringByDeletingPathExtension stringByAppendingPathExtension:@"pdf"];
+                if (![NSFileManager.defaultManager fileExistsAtPath:pdfPath])
+                {
+                    // Return the filename (last path component)
+                    result = djvuPath.lastPathComponent;
+                    break;
+                }
+            }
+        });
     }
 
-    return nil;
+    return result;
 }
-
-// Track files currently being converted (to avoid duplicate dispatches)
-static NSMutableSet<NSString*>* sActiveConversions = nil;
-// Track files pending dispatch (queued but not yet running)
-static NSMutableSet<NSString*>* sPendingConversions = nil;
-// Track files that failed to convert (by torrent hash -> set of file paths)
-static NSMutableDictionary<NSString*, NSMutableSet<NSString*>*>* sFailedConversions = nil;
-// Track per-file page progress (djvu path -> counts)
-static NSMutableDictionary<NSString*, NSNumber*>* sConversionTotalPages = nil;
-static NSMutableDictionary<NSString*, NSNumber*>* sConversionDonePages = nil;
 
 static void setTotalPagesForPath(NSString* djvuPath, int total)
 {
@@ -2538,16 +2474,23 @@ static void clearPageTrackingForPath(NSString* djvuPath)
     if (!sConversionQueue || !sConversionDispatchQueue)
         return;
 
-    if (!sActiveConversions)
-        sActiveConversions = [NSMutableSet set];
-    if (!sFailedConversions)
-        sFailedConversions = [NSMutableDictionary dictionary];
-    if (!sPendingConversions)
-        sPendingConversions = [NSMutableSet set];
-    if (!sConversionTotalPages)
-        sConversionTotalPages = [NSMutableDictionary dictionary];
-    if (!sConversionDonePages)
-        sConversionDonePages = [NSMutableDictionary dictionary];
+    if (sTrackingQueue)
+    {
+        safeDispatchSync(^{
+            if (!sActiveConversions)
+                sActiveConversions = [NSMutableSet set];
+            if (!sFailedConversions)
+                sFailedConversions = [NSMutableDictionary dictionary];
+            if (!sFailedConversionErrors)
+                sFailedConversionErrors = [NSMutableDictionary dictionary];
+            if (!sPendingConversions)
+                sPendingConversions = [NSMutableSet set];
+            if (!sConversionTotalPages)
+                sConversionTotalPages = [NSMutableDictionary dictionary];
+            if (!sConversionDonePages)
+                sConversionDonePages = [NSMutableDictionary dictionary];
+        });
+    }
 
     NSString* torrentHash = torrent.hashString;
     NSMutableSet<NSString*>* queuedFiles = sConversionQueue[torrentHash];
@@ -2555,33 +2498,40 @@ static void clearPageTrackingForPath(NSString* djvuPath)
     if (!queuedFiles || queuedFiles.count == 0)
         return;
 
-    NSMutableSet<NSString*>* failedForTorrent = sFailedConversions[torrentHash];
-    if (!failedForTorrent)
-    {
-        failedForTorrent = [NSMutableSet set];
-        sFailedConversions[torrentHash] = failedForTorrent;
-    }
+    // Thread-safe access to tracking sets
+    __block NSMutableSet<NSString*>* failedForTorrent = nil;
+    __block NSMutableArray<NSDictionary*>* filesToDispatch = [NSMutableArray array];
+    
+    if (!sTrackingQueue)
+        return;
+    
+    safeDispatchSync(^{
+        failedForTorrent = sFailedConversions[torrentHash];
+        if (!failedForTorrent)
+        {
+            failedForTorrent = [NSMutableSet set];
+            sFailedConversions[torrentHash] = failedForTorrent;
+        }
 
-    // Find files that are queued but not actively being converted
-    NSMutableArray<NSDictionary*>* filesToDispatch = [NSMutableArray array];
+        // Find files that are queued but not actively being converted
+        for (NSString* djvuPath in queuedFiles)
+        {
+            NSString* pdfPath = [djvuPath.stringByDeletingPathExtension stringByAppendingPathExtension:@"pdf"];
 
-    for (NSString* djvuPath in queuedFiles)
-    {
-        NSString* pdfPath = [djvuPath.stringByDeletingPathExtension stringByAppendingPathExtension:@"pdf"];
+            // Skip if PDF already exists or conversion is already active/pending
+            if ([NSFileManager.defaultManager fileExistsAtPath:pdfPath])
+                continue;
+            if ([sActiveConversions containsObject:djvuPath])
+                continue;
+            if ([sPendingConversions containsObject:djvuPath])
+                continue;
+            if ([failedForTorrent containsObject:djvuPath])
+                continue;
 
-        // Skip if PDF already exists or conversion is already active/pending
-        if ([NSFileManager.defaultManager fileExistsAtPath:pdfPath])
-            continue;
-        if ([sActiveConversions containsObject:djvuPath])
-            continue;
-        if ([sPendingConversions containsObject:djvuPath])
-            continue;
-        if ([failedForTorrent containsObject:djvuPath])
-            continue;
-
-        [sPendingConversions addObject:djvuPath];
-        [filesToDispatch addObject:@{ @"djvu" : djvuPath, @"pdf" : pdfPath }];
-    }
+            [sPendingConversions addObject:djvuPath];
+            [filesToDispatch addObject:@{ @"djvu" : djvuPath, @"pdf" : pdfPath }];
+        }
+    });
 
     if (filesToDispatch.count == 0)
         return;
@@ -2591,91 +2541,103 @@ static void clearPageTrackingForPath(NSString* djvuPath)
     dispatch_group_t group = dispatch_group_create();
     for (NSDictionary* file in filesToDispatch)
     {
+        NSString* djvuPath = file[@"djvu"];
+        NSString* pdfPath = file[@"pdf"];
+        
         dispatch_group_async(group, sConversionDispatchQueue, ^{
             @autoreleasepool
             {
-                NSString* djvuPath = file[@"djvu"];
-                NSString* pdfPath = file[@"pdf"];
+                // Wait for semaphore inside the block to control actual execution concurrency
+                // This allows all files to be queued immediately, but only maxConcurrent run at once
+                if (sConversionSemaphore)
+                    dispatch_semaphore_wait(sConversionSemaphore, DISPATCH_TIME_FOREVER);
+                
                 BOOL success = YES;
 
-                // Mark active when the worker actually begins (use async to avoid deadlock)
-                dispatch_async(dispatch_get_main_queue(), ^{
-                    [sActiveConversions addObject:djvuPath];
-                });
+                // Mark active when the worker actually begins (thread-safe)
+                if (sTrackingQueue)
+                {
+                    safeDispatchSync(^{
+                        [sPendingConversions removeObject:djvuPath];
+                        [sActiveConversions addObject:djvuPath];
+                    });
+                }
 
                 if (![NSFileManager.defaultManager fileExistsAtPath:pdfPath])
                 {
                     success = [self convertDjvuFile:djvuPath toPdf:pdfPath];
                 }
 
-                // Remove from active set when done
+                // Remove from active set when done (thread-safe)
+                if (sTrackingQueue)
+                {
+                    safeDispatchSync(^{
+                        [sActiveConversions removeObject:djvuPath];
+                        [sPendingConversions removeObject:djvuPath];
+                        if (success)
+                        {
+                            [failedForTorrent removeObject:djvuPath];
+                            clearPageTrackingForPath(djvuPath);
+                            if (sFailedConversionErrors)
+                                [sFailedConversionErrors removeObjectForKey:djvuPath];
+                        }
+                        else
+                        {
+                            [failedForTorrent addObject:djvuPath];
+                            clearPageTrackingForPath(djvuPath);
+                            // Store error message for UI display
+                            if (!sFailedConversionErrors)
+                                sFailedConversionErrors = [NSMutableDictionary dictionary];
+                            if (sFailedConversionErrors[djvuPath] == nil)
+                                sFailedConversionErrors[djvuPath] = @"Conversion failed";
+                        }
+                    });
+                }
+
+                // Signal semaphore after work is done
+                if (sConversionSemaphore)
+                    dispatch_semaphore_signal(sConversionSemaphore);
+
+                // Notify completion for this specific file
                 dispatch_async(dispatch_get_main_queue(), ^{
-                    [sActiveConversions removeObject:djvuPath];
-                    [sPendingConversions removeObject:djvuPath];
-                    if (success)
-                    {
-                        [failedForTorrent removeObject:djvuPath];
-                        clearPageTrackingForPath(djvuPath);
-                    }
-                    else
-                    {
-                        [failedForTorrent addObject:djvuPath];
-                        clearPageTrackingForPath(djvuPath);
-                    }
+                    [NSNotificationCenter.defaultCenter postNotificationName:@"DjvuConversionComplete" object:notificationObject];
                 });
             }
         });
     }
-
-    dispatch_group_notify(group, dispatch_get_main_queue(), ^{
-        [NSNotificationCenter.defaultCenter postNotificationName:@"DjvuConversionComplete" object:notificationObject];
-    });
 }
 
 + (NSString*)failedConversionFileNameForTorrent:(Torrent*)torrent
 {
-    if (!torrent || torrent.magnet)
+    NSString* failedPath = [self failedConversionPathForTorrent:torrent];
+    return failedPath != nil ? failedPath.lastPathComponent : nil;
+}
+
++ (NSString*)failedConversionPathForTorrent:(Torrent*)torrent
+{
+    return firstFailedPathForTorrent(torrent);
+}
+
++ (NSString*)failedConversionErrorForPath:(NSString*)djvuPath
+{
+    if (djvuPath == nil || !sFailedConversionErrors || !sTrackingQueue)
         return nil;
 
-    if (!sFailedConversions)
-        return nil;
-
-    NSString* torrentHash = torrent.hashString;
-    NSMutableSet<NSString*>* failedFiles = sFailedConversions[torrentHash];
-    if (!failedFiles || failedFiles.count == 0)
-        return nil;
-
-    // Collect files to remove (can't modify set while iterating)
-    NSMutableArray<NSString*>* toRemove = [NSMutableArray array];
-    NSString* firstFailed = nil;
-
-    for (NSString* djvuPath in failedFiles)
-    {
-        // If a PDF exists now, clear the failure entry
-        NSString* pdfPath = [djvuPath.stringByDeletingPathExtension stringByAppendingPathExtension:@"pdf"];
-        if ([NSFileManager.defaultManager fileExistsAtPath:pdfPath])
-        {
-            [toRemove addObject:djvuPath];
-            continue;
-        }
-
-        if (firstFailed == nil)
-            firstFailed = djvuPath.lastPathComponent;
-    }
-
-    // Remove files that now have PDFs
-    for (NSString* path in toRemove)
-        [failedFiles removeObject:path];
-
-    return firstFailed;
+    __block NSString* error = nil;
+    safeDispatchSync(^{
+        error = sFailedConversionErrors[djvuPath];
+    });
+    return error;
 }
 
 + (void)clearFailedConversionsForTorrent:(Torrent*)torrent
 {
-    if (!torrent || !sFailedConversions)
+    if (!torrent || !sFailedConversions || !sTrackingQueue)
         return;
 
-    [sFailedConversions removeObjectForKey:torrent.hashString];
+    safeDispatchSync(^{
+        [sFailedConversions removeObjectForKey:torrent.hashString];
+    });
 }
 
 + (NSString*)convertingProgressForTorrent:(Torrent*)torrent
@@ -2692,35 +2654,43 @@ static void clearPageTrackingForPath(NSString* djvuPath)
     if (!queuedFiles || queuedFiles.count == 0)
         return nil;
 
-    for (NSString* djvuPath in queuedFiles)
+    // Thread-safe access to active conversions
+    __block NSString* result = nil;
+    if (sTrackingQueue)
     {
-        if (![sActiveConversions containsObject:djvuPath])
-            continue;
+        safeDispatchSync(^{
+            for (NSString* djvuPath in queuedFiles)
+            {
+                if (![sActiveConversions containsObject:djvuPath])
+                    continue;
 
-        NSNumber* total = nil;
-        NSNumber* done = nil;
-        @synchronized(sConversionTotalPages)
-        {
-            total = sConversionTotalPages[djvuPath];
-        }
-        @synchronized(sConversionDonePages)
-        {
-            done = sConversionDonePages[djvuPath];
-        }
+                NSNumber* total = nil;
+                NSNumber* done = nil;
+                @synchronized(sConversionTotalPages)
+                {
+                    total = sConversionTotalPages[djvuPath];
+                }
+                @synchronized(sConversionDonePages)
+                {
+                    done = sConversionDonePages[djvuPath];
+                }
 
-        if (total != nil && total.intValue > 0 && done != nil)
-        {
-            int totalPages = total.intValue;
-            int donePages = done.intValue;
-            if (donePages < 0)
-                donePages = 0;
-            if (donePages > totalPages)
-                donePages = totalPages;
-            return [NSString stringWithFormat:@"%d of %d pages", donePages, totalPages];
-        }
+                if (total != nil && total.intValue > 0 && done != nil)
+                {
+                    int totalPages = total.intValue;
+                    int donePages = done.intValue;
+                    if (donePages < 0)
+                        donePages = 0;
+                    if (donePages > totalPages)
+                        donePages = totalPages;
+                    result = [NSString stringWithFormat:@"%d of %d pages", donePages, totalPages];
+                    break; // Exit the loop
+                }
+            }
+        });
     }
 
-    return nil;
+    return result;
 }
 
 + (BOOL)convertDjvuFile:(NSString*)djvuPath toPdf:(NSString*)pdfPath
@@ -2730,14 +2700,19 @@ static void clearPageTrackingForPath(NSString* djvuPath)
     BOOL success = convertDjvuFileDeterministic(djvuPath, tmpPdfPath);
     if (!success)
     {
+        NSLog(@"DjvuConverter ERROR: conversion failed for %@", djvuPath);
+        setFailedConversionError(djvuPath, @"Conversion failed");
         [NSFileManager.defaultManager removeItemAtPath:tmpPdfPath error:nil];
         return NO;
     }
 
     // Replace destination atomically to avoid ever exposing a partial PDF.
     [NSFileManager.defaultManager removeItemAtPath:pdfPath error:nil];
-    if (![NSFileManager.defaultManager moveItemAtPath:tmpPdfPath toPath:pdfPath error:nil])
+    NSError* moveError = nil;
+    if (![NSFileManager.defaultManager moveItemAtPath:tmpPdfPath toPath:pdfPath error:&moveError])
     {
+        NSLog(@"DjvuConverter ERROR: failed to move temp PDF to final location for %@: %@", djvuPath, moveError);
+        setFailedConversionError(djvuPath, @"Failed to move PDF to final location");
         [NSFileManager.defaultManager removeItemAtPath:tmpPdfPath error:nil];
         return NO;
     }

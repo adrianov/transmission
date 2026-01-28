@@ -29,6 +29,12 @@
 /// Get the filename of a DJVU that failed to convert, if any.
 + (NSString*)failedConversionFileNameForTorrent:(Torrent*)torrent;
 
+/// Get the full path of a DJVU that failed to convert, if any.
++ (NSString*)failedConversionPathForTorrent:(Torrent*)torrent;
+
+/// Get the conversion error message for a DJVU path, if any.
++ (NSString*)failedConversionErrorForPath:(NSString*)djvuPath;
+
 /// Get the page progress string ("X of Y pages") for current conversion.
 + (NSString*)convertingProgressForTorrent:(Torrent*)torrent;
 
