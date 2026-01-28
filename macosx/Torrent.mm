@@ -42,12 +42,25 @@ static void initMediaExtensionSets(void)
 {
     dispatch_once(&sMediaExtensionsOnce, ^{
         sVideoExtensions = [NSSet setWithArray:@[
-            @"mkv", @"avi", @"mp4", @"mov", @"wmv", @"flv", @"webm", @"m4v", @"mpg", @"mpeg",
-            @"ts", @"m2ts", @"vob", @"3gp", @"ogv"
+            @"mkv",
+            @"avi",
+            @"mp4",
+            @"mov",
+            @"wmv",
+            @"flv",
+            @"webm",
+            @"m4v",
+            @"mpg",
+            @"mpeg",
+            @"ts",
+            @"m2ts",
+            @"vob",
+            @"3gp",
+            @"ogv"
         ]];
-        sAudioExtensions = [NSSet setWithArray:@[
-            @"mp3", @"flac", @"wav", @"aac", @"ogg", @"wma", @"m4a", @"ape", @"alac", @"aiff", @"opus", @"wv"
-        ]];
+        sAudioExtensions = [NSSet
+            setWithArray:
+                @[ @"mp3", @"flac", @"wav", @"aac", @"ogg", @"wma", @"m4a", @"ape", @"alac", @"aiff", @"opus", @"wv" ]];
         sBookExtensions = [NSSet setWithArray:@[ @"pdf", @"epub", @"djv", @"djvu", @"fb2", @"mobi" ]];
     });
 }
@@ -1574,7 +1587,8 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
             {
                 NSUInteger j = 0;
                 while (j < commonSuffix.length && j < fileName.length &&
-                       [commonSuffix characterAtIndex:commonSuffix.length - 1 - j] == [fileName characterAtIndex:fileName.length - 1 - j])
+                       [commonSuffix
+                           characterAtIndex:commonSuffix.length - 1 - j] == [fileName characterAtIndex:fileName.length - 1 - j])
                 {
                     j++;
                 }
@@ -1806,12 +1820,12 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
             CGFloat progress = cueProgress[cueBaseName] ? cueProgress[cueBaseName].doubleValue : 0.0;
             if (progress < 0)
                 progress = 0;
-            
+
             // Construct path from torrent metadata (not real disk file names)
             NSString* path = [self.currentDirectory stringByAppendingPathComponent:cueFileName];
-            
+
             NSString* displayName = cueBaseName.humanReadableFileName;
-            
+
             [playable addObject:@{
                 @"type" : @"file",
                 @"category" : @"audio",
@@ -1838,7 +1852,7 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
         return [aKey localizedStandardCompare:bKey];
     }];
 
-        // Build final entries with titles
+    // Build final entries with titles
     NSMutableArray<NSDictionary*>* result = [NSMutableArray arrayWithCapacity:playable.count];
     for (NSDictionary* fileInfo in playable)
     {
@@ -2628,20 +2642,20 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
     dispatch_once(&onceToken, ^{
         cueCompanionExtensions = [NSSet setWithArray:@[ @"flac", @"ape", @"wav", @"wma", @"alac", @"aiff", @"wv", @"cue" ]];
     });
-    
+
     NSString* ext = audioPath.pathExtension.lowercaseString;
     if (![cueCompanionExtensions containsObject:ext])
     {
         return nil;
     }
-    
+
     // If this is already a .cue file, return it as-is (constructing from metadata if needed)
     if ([ext isEqualToString:@"cue"])
     {
         // Extract relative path from absolute path, relying on torrent metadata
         NSString* torrentDir = self.currentDirectory;
         NSString* relativePath = nil;
-        
+
         // Try to extract relative path from absolute path
         if ([audioPath hasPrefix:torrentDir])
         {
@@ -2655,7 +2669,7 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
         {
             relativePath = audioPath;
         }
-        
+
         // If we have a relative path, verify it exists in torrent metadata and return full path
         if (relativePath && relativePath.length > 0)
         {
@@ -2665,7 +2679,7 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
                 auto const file = tr_torrentFile(self.fHandle, (tr_file_index_t)i);
                 NSString* fileName = @(file.name);
                 // Match by full path or last component
-                if ([fileName isEqualToString:relativePath] || 
+                if ([fileName isEqualToString:relativePath] ||
                     [fileName.lastPathComponent.lowercaseString isEqualToString:relativePath.lastPathComponent.lowercaseString])
                 {
                     // Found matching .cue file in metadata, construct path from metadata
@@ -2673,20 +2687,20 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
                 }
             }
         }
-        
+
         // Fallback: if already absolute and looks valid, return as-is
         if ([audioPath isAbsolutePath])
         {
             return audioPath;
         }
-        
+
         return nil;
     }
-    
+
     // Extract relative path from absolute path, relying on torrent metadata
     NSString* torrentDir = self.currentDirectory;
     NSString* relativePath = nil;
-    
+
     // Try to extract relative path from absolute path
     if ([audioPath hasPrefix:torrentDir])
     {
@@ -2696,7 +2710,7 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
             relativePath = [relativePath substringFromIndex:1];
         }
     }
-    
+
     // If we couldn't extract relative path, or if it's incomplete, find the file in torrent metadata
     // This ensures we use the full filename from metadata, not just what's on disk
     if (!relativePath || relativePath.length == 0)
@@ -2714,13 +2728,13 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
             }
         }
     }
-    
+
     // If still not found, use the last component as fallback
     if (!relativePath || relativePath.length == 0)
     {
         relativePath = audioPath.lastPathComponent;
     }
-    
+
     NSString* baseName = relativePath.lastPathComponent.stringByDeletingPathExtension;
     NSString* directory = relativePath.stringByDeletingLastPathComponent;
     // Normalize directory: empty string for root, remove leading/trailing slashes
@@ -2728,7 +2742,7 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
     {
         directory = @"";
     }
-    
+
     // Search for a matching .cue file in the torrent metadata
     NSUInteger const count = self.fileCount;
     for (NSUInteger i = 0; i < count; i++)
@@ -2736,7 +2750,7 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
         auto const file = tr_torrentFile(self.fHandle, (tr_file_index_t)i);
         NSString* fileName = @(file.name);
         NSString* fileExt = fileName.pathExtension.lowercaseString;
-        
+
         if ([fileExt isEqualToString:@"cue"])
         {
             NSString* cueBaseName = fileName.lastPathComponent.stringByDeletingPathExtension;
@@ -2746,10 +2760,9 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
             {
                 cueDirectory = @"";
             }
-            
+
             // Check if base names match (case-insensitive) and directories match
-            if ([cueBaseName.lowercaseString isEqualToString:baseName.lowercaseString] &&
-                [cueDirectory isEqualToString:directory])
+            if ([cueBaseName.lowercaseString isEqualToString:baseName.lowercaseString] && [cueDirectory isEqualToString:directory])
             {
                 // Found matching .cue file, construct path from metadata (not disk existence)
                 // This ensures correct paths for newly added torrents before files are fully downloaded
@@ -2757,7 +2770,7 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
             }
         }
     }
-    
+
     return nil;
 }
 
@@ -2767,13 +2780,13 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
     {
         return nil;
     }
-    
+
     NSIndexSet* fileIndexes = [self fileIndexesForFolder:folder];
     if (fileIndexes.count == 0)
     {
         return nil;
     }
-    
+
     __block NSString* cuePath = nil;
     [fileIndexes enumerateIndexesUsingBlock:^(NSUInteger idx, BOOL* stop) {
         auto const file = tr_torrentFile(self.fHandle, (tr_file_index_t)idx);
@@ -2785,14 +2798,14 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
             *stop = YES;
         }
     }];
-    
+
     return cuePath;
 }
 
 - (NSString*)tooltipPathForItemPath:(NSString*)path type:(NSString*)type folder:(NSString*)folder
 {
     NSString* resultPath = path;
-    
+
     // For album folders, check if there's a .cue file in the folder
     if ([type isEqualToString:@"album"] && folder.length > 0)
     {
@@ -2802,7 +2815,7 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
             resultPath = cuePath;
         }
     }
-    
+
     // For audio files or .cue files, check if there's a matching .cue file
     // This handles both audio files that should show their .cue companion,
     // and .cue files that should show their own path
@@ -2811,7 +2824,7 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
         // Extract relative path from absolute path to match against torrent metadata
         NSString* torrentDir = self.currentDirectory;
         NSString* relativePath = nil;
-        
+
         if ([resultPath hasPrefix:torrentDir])
         {
             relativePath = [resultPath substringFromIndex:torrentDir.length];
@@ -2824,7 +2837,7 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
         {
             relativePath = resultPath;
         }
-        
+
         // If we have a relative path, try to find matching .cue file in torrent metadata
         if (relativePath && relativePath.length > 0)
         {
@@ -2832,9 +2845,10 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
             static NSSet<NSString*>* cueCompanionExtensions;
             static dispatch_once_t onceToken;
             dispatch_once(&onceToken, ^{
-                cueCompanionExtensions = [NSSet setWithArray:@[ @"flac", @"ape", @"wav", @"wma", @"alac", @"aiff", @"wv", @"cue" ]];
+                cueCompanionExtensions = [NSSet
+                    setWithArray:@[ @"flac", @"ape", @"wav", @"wma", @"alac", @"aiff", @"wv", @"cue" ]];
             });
-            
+
             // Check if this is an audio file or .cue file that might have a companion
             if ([cueCompanionExtensions containsObject:ext])
             {
@@ -2855,7 +2869,7 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
             }
         }
     }
-    
+
     // Ensure we always return an absolute path based on torrent metadata
     if (resultPath && resultPath.length > 0)
     {
@@ -2863,7 +2877,7 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
         {
             resultPath = [self.currentDirectory stringByAppendingPathComponent:resultPath];
         }
-        
+
         // For newly added torrents, files may not exist on disk yet
         // Only resolve symlinks if the file actually exists, otherwise rely on torrent metadata
         if ([NSFileManager.defaultManager fileExistsAtPath:resultPath])
@@ -2875,7 +2889,7 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
             }
         }
     }
-    
+
     return resultPath ?: path;
 }
 
