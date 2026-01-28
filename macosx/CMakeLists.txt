@@ -442,7 +442,8 @@ target_link_libraries(${TR_NAME}-mac
     PRIVATE
         grok::grokj2k
         leptonica::leptonica
-        jbig2enc::jbig2enc)
+        jbig2enc::jbig2enc
+        libjpeg-turbo::turbojpeg)
 
 if(GROK_UPSTREAM_TARGET)
     add_dependencies(${TR_NAME}-mac ${GROK_UPSTREAM_TARGET})
@@ -452,6 +453,9 @@ if(LEPTONICA_UPSTREAM_TARGET)
 endif()
 if(JBIG2ENC_UPSTREAM_TARGET)
     add_dependencies(${TR_NAME}-mac ${JBIG2ENC_UPSTREAM_TARGET})
+endif()
+if(TURBOJPEG_UPSTREAM_TARGET)
+    add_dependencies(${TR_NAME}-mac ${TURBOJPEG_UPSTREAM_TARGET})
 endif()
 
 if(NOT CMAKE_GENERATOR STREQUAL Xcode)
