@@ -125,8 +125,8 @@ The following technical tags are filtered out:
 - `Paris .Bonus` → `Paris Bonus` (orphan dot removed)
 - Underscores (`_`) are replaced with spaces
 - Existing ` - ` separators are preserved
-- Hyphens (`-`) between letters (hyphenated words like `Full-Moon`) are preserved
-- Other hyphens are replaced with spaces
+- Hyphens (`-`) between letters (hyphenated words like `Butt-Head`, `Full-Moon`) are preserved; do not add spaces around them
+- Other hyphens (with space on at least one side) are normalized to ` - `
 - Multiple spaces are collapsed to single space
 
 ### 9. Final Assembly
@@ -160,6 +160,7 @@ Parts are assembled with specific formatting:
 | `Artist - Album Name (2020) [FLAC]` | `Artist - Album Name (2020) #flac` |
 | `Artist.Album.2019.MP3` | `Artist Album (2019) #mp3` |
 | `The.White.Lotus.S03E05.Full-Moon.Party.1080p.AMZN.WEB-DL.H.264-EniaHD.mkv` | Episode button: `▶ E5 - Full-Moon Party` |
+| `Beavis.and.Butt-Head.Do` | `Beavis and Butt-Head Do` |
 
 ## Play Buttons (macOS)
 
