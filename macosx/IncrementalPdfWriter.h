@@ -202,7 +202,13 @@ struct IncrementalPdfWriter
     bool initialized = false;
     std::atomic<bool> finalized{ false }; // Track if PDF has been finalized
 
-    bool init(NSString* tmpPdfPath, int pageCount, std::vector<std::vector<uint8_t>> const& jbig2Globals, std::vector<OutlineNode> const& outlineNodes, std::unordered_map<std::string, std::string> const& meta, int estimatedMaxJbig2Globals = 0)
+    bool init(
+        NSString* tmpPdfPath,
+        int pageCount,
+        std::vector<std::vector<uint8_t>> const& jbig2Globals,
+        std::vector<OutlineNode> const& outlineNodes,
+        std::unordered_map<std::string, std::string> const& meta,
+        int estimatedMaxJbig2Globals = 0)
     {
         if (tmpPdfPath == nil || pageCount <= 0)
             return false;
@@ -296,8 +302,9 @@ struct IncrementalPdfWriter
             return true;
 
         PageObjs& o = pageObjs[(size_t)pageIndex];
-        bool const isCompound = (p.bgImage.kind != DjvuPdfImageKind::None && !p.bgImage.bytes.empty() &&
-                                 p.fgMask.kind != DjvuPdfImageKind::None && !p.fgMask.bytes.empty());
+        bool const isCompound =
+            (p.bgImage.kind != DjvuPdfImageKind::None && !p.bgImage.bytes.empty() && p.fgMask.kind != DjvuPdfImageKind::None &&
+             !p.fgMask.bytes.empty());
 
         // Adjust object numbers if not compound (reuse unused slots)
         if (!isCompound)
@@ -443,7 +450,7 @@ struct IncrementalPdfWriter
     {
         if (!initialized || pagesWritten.empty())
             return false;
-        
+
         std::lock_guard<std::mutex> lock(writeMutex);
         for (bool written : pagesWritten)
         {
