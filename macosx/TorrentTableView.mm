@@ -1557,8 +1557,10 @@ static NSString* folderForPlayButton(NSButton* sender, Torrent* torrent)
             entry[@"progress"] = @(progress);
             int progressPct = (int)floor(progress * 100);
             entry[@"progressPercent"] = @(progressPct);
-            // Documents only visible when complete; media files visible when consecutive progress > 0
-            BOOL visible = [type hasPrefix:@"document"] ? (progress >= 1.0) : (progress > 0.000001);
+            // Documents only visible when complete; media visible when progress > 0 and (wanted or complete)
+            NSNumber* indexNum = entry[@"index"];
+            BOOL wanted = indexNum ? ([torrent checkForFiles:[NSIndexSet indexSetWithIndex:indexNum.unsignedIntegerValue]] == NSControlStateValueOn) : YES;
+            BOOL visible = [type hasPrefix:@"document"] ? (progress >= 1.0) : (progress > 0.000001 && (wanted || progress >= 1.0));
             entry[@"visible"] = @(visible);
             if (visible && ![type hasPrefix:@"document"] && progress < 1.0 && progressPct < 100)
             {
@@ -1598,8 +1600,10 @@ static NSString* folderForPlayButton(NSButton* sender, Torrent* torrent)
             entry[@"progress"] = @(progress);
             int progressPct = (int)floor(progress * 100);
             entry[@"progressPercent"] = @(progressPct);
-            // Documents only visible when complete; media files visible when consecutive progress > 0
-            BOOL visible = [type hasPrefix:@"document"] ? (progress >= 1.0) : (progress > 0.000001);
+            // Documents only visible when complete; media visible when progress > 0 and (wanted or complete)
+            NSNumber* indexNum = entry[@"index"];
+            BOOL wanted = indexNum ? ([torrent checkForFiles:[NSIndexSet indexSetWithIndex:indexNum.unsignedIntegerValue]] == NSControlStateValueOn) : YES;
+            BOOL visible = [type hasPrefix:@"document"] ? (progress >= 1.0) : (progress > 0.000001 && (wanted || progress >= 1.0));
             entry[@"visible"] = @(visible);
             if (visible != wasVisible)
             {
