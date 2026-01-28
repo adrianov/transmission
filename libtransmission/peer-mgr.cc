@@ -563,6 +563,8 @@ public:
         return peer_info;
     }
 
+    void ensure_wishlist();
+
     static void peer_callback_bt(tr_peerMsgs* const msgs, tr_peer_event const& event, void* const vs)
     {
         TR_ASSERT(msgs != nullptr);
@@ -704,6 +706,9 @@ public:
     {
         return tor->session->advertisedPeerPort();
     };
+
+
+
 
 private:
     void rebuild_webseeds()
@@ -1708,6 +1713,36 @@ void tr_swarm::on_torrent_started()
 void tr_swarm::on_torrent_stopped()
 {
     stop();
+}
+
+void tr_swarm::ensure_wishlist()
+{
+    auto const lock = unique_lock();
+
+    if (!is_running || tor->is_done())
+    {
+        return;
+    }
+
+    if (!wishlist)
+    {
+        wishlist = std::make_unique<Wishlist>(wishlist_mediator);
+    }
+
+    if (std::empty(webseeds))
+    {
+        rebuild_webseeds();
+    }
+}
+
+void tr_peerMgrEnsureWishlist(tr_torrent* tor)
+{
+    TR_ASSERT(tr_isTorrent(tor));
+
+    if (tor->swarm != nullptr)
+    {
+        tor->swarm->ensure_wishlist();
+    }
 }
 
 void tr_peerMgrAddTorrent(tr_peerMgr* manager, tr_torrent* tor)

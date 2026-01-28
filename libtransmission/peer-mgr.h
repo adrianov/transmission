@@ -735,4 +735,6 @@ void tr_peerMgrTorrentAvailability(tr_torrent const* tor, int8_t* tab, unsigned 
 
 [[nodiscard]] tr_webseed_view tr_peerMgrWebseed(tr_torrent const* tor, size_t i);
 
+void tr_peerMgrEnsureWishlist(tr_torrent* tor);
+
 /* @} */
