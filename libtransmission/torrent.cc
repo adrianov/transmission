@@ -1109,6 +1109,7 @@ void tr_torrent::set_metainfo(tr_torrent_metainfo tm)
     TR_ASSERT(!has_metainfo());
     metainfo_ = std::move(tm);
     on_metainfo_updated();
+    recalculate_file_order();
 
     got_metainfo_.emit(this);
     session->onMetadataCompleted(this);
