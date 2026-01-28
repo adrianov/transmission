@@ -44,7 +44,8 @@
                                                             torrent.allDownloaded];
 
             // Check if we need to regenerate the progress bar image
-            if (!self.fCachedProgressBarImage || ![self.fProgressBarCacheKey isEqualToString:cacheKey] || !NSEqualSizes(self.fCachedProgressBarImage.size, barRect.size))
+            if (!self.fCachedProgressBarImage || ![self.fProgressBarCacheKey isEqualToString:cacheKey] ||
+                !NSEqualSizes(self.fCachedProgressBarImage.size, barRect.size))
             {
                 self.fCachedProgressBarImage = [NSImage imageWithSize:barRect.size flipped:NO drawingHandler:^BOOL(NSRect dstRect) {
                     ProgressBarView* progressBar = [[ProgressBarView alloc] init];
