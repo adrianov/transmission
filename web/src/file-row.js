@@ -146,7 +146,10 @@ export class FileRow extends EventTarget {
     e.setAttribute('for', check_id);
     const playable = torrent.getPlayableFiles();
     const playableFile = playable.find((p) => p.index === subtree.file_index);
-    setTextContent(e, playableFile ? playableFile.name : Formatter.humanFileName(subtree.name));
+    setTextContent(
+      e,
+      playableFile ? playableFile.name : Formatter.humanFileName(subtree.name),
+    );
     root.append(e);
     root.name_container = e;
 

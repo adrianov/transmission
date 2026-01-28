@@ -707,9 +707,6 @@ public:
         return tor->session->advertisedPeerPort();
     };
 
-
-
-
 private:
     void rebuild_webseeds()
     {

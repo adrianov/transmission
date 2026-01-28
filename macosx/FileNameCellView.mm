@@ -189,7 +189,7 @@ static CGFloat const kPaddingBetweenNameAndFolderStatus = 4.0;
     {
         path = [node.path stringByAppendingPathComponent:node.name];
     }
-    
+
     // For folders, check if there's a .cue file in the folder
     if (node.isFolder)
     {
@@ -209,7 +209,7 @@ static CGFloat const kPaddingBetweenNameAndFolderStatus = 4.0;
             path = cuePath;
         }
     }
-    
+
     self.toolTip = path;
 }
 

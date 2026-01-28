@@ -190,7 +190,7 @@ export class Torrent extends EventTarget {
     return this.fields.name || 'Unknown';
   }
   getDisplayName() {
-    const name = this.fields.name;
+    const { name } = this.fields;
     const episode = Formatter.episodeTitle(name, name);
     if (episode) {
       return episode;
@@ -207,9 +207,8 @@ export class Torrent extends EventTarget {
     const playable = [];
     const torrentName = this.getName();
 
-    for (let i = 0; i < files.length; i++) {
-      const f = files[i];
-      const name = f.name;
+    for (const [i, f] of files.entries()) {
+      const { name } = f;
       const episode = Formatter.episodeTitle(name, torrentName);
       if (episode) {
         playable.push({
@@ -247,14 +246,15 @@ export class Torrent extends EventTarget {
           }
 
           if (commonPrefix === null) {
-            commonPrefix = words[0];
+            const [first] = words;
+            commonPrefix = first;
           } else if (commonPrefix !== words[0]) {
             prefixSame = false;
           }
 
           if (commonSuffix === null) {
-            commonSuffix = words[words.length - 1];
-          } else if (commonSuffix !== words[words.length - 1]) {
+            commonSuffix = words.at(-1);
+          } else if (commonSuffix !== words.at(-1)) {
             suffixSame = false;
           }
         }
@@ -265,7 +265,9 @@ export class Torrent extends EventTarget {
             const prefix = item.name.slice(0, dashIndex + 3);
             const titlePart = item.name.slice(dashIndex + 3);
             const newTitle = titlePart.slice(commonPrefix.length).trim();
-            item.name = newTitle ? prefix + newTitle : prefix.replace(' - ', '');
+            item.name = newTitle
+              ? prefix + newTitle
+              : prefix.replace(' - ', '');
           }
           changed = true;
         } else if (suffixSame && commonSuffix) {
@@ -274,7 +276,9 @@ export class Torrent extends EventTarget {
             const prefix = item.name.slice(0, dashIndex + 3);
             const titlePart = item.name.slice(dashIndex + 3);
             const newTitle = titlePart.slice(0, -commonSuffix.length).trim();
-            item.name = newTitle ? prefix + newTitle : prefix.replace(' - ', '');
+            item.name = newTitle
+              ? prefix + newTitle
+              : prefix.replace(' - ', '');
           }
           changed = true;
         }

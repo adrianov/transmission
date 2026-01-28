@@ -226,7 +226,7 @@
 
     // Always replace underscores with spaces and collapse multiple whitespaces
     title = [title stringByReplacingOccurrencesOfString:@"_" withString:@" "];
-    
+
     // Remove pipe characters and lowercase 'l' as separators
     title = [title stringByReplacingOccurrencesOfString:@"|" withString:@" "];
     NSRegularExpression* lSeparatorRegex = [NSRegularExpression regularExpressionWithPattern:@"\\s+l\\s+" options:0 error:nil];
@@ -234,16 +234,24 @@
 
     // Ensure space after ','
     title = [title stringByReplacingOccurrencesOfString:@"," withString:@", "];
-    
+
     NSRegularExpression* multiSpaceRegex = [NSRegularExpression regularExpressionWithPattern:@"\\s+" options:0 error:nil];
     title = [multiSpaceRegex stringByReplacingMatchesInString:title options:0 range:NSMakeRange(0, title.length) withTemplate:@" "];
     title = [title stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet];
-    
+
     // Ensure no space after '(' and no space before ')'
     NSRegularExpression* spaceAfterParenRegex = [NSRegularExpression regularExpressionWithPattern:@"\\(\\s+" options:0 error:nil];
-    title = [spaceAfterParenRegex stringByReplacingMatchesInString:title options:0 range:NSMakeRange(0, title.length) withTemplate:@"("];
+    title = [spaceAfterParenRegex stringByReplacingMatchesInString:title options:0 range:NSMakeRange(0, title.length)
+                                                      withTemplate:@"("];
     NSRegularExpression* spaceBeforeParenRegex = [NSRegularExpression regularExpressionWithPattern:@"\\s+\\)" options:0 error:nil];
-    title = [spaceBeforeParenRegex stringByReplacingMatchesInString:title options:0 range:NSMakeRange(0, title.length) withTemplate:@")"];
+    title = [spaceBeforeParenRegex stringByReplacingMatchesInString:title options:0 range:NSMakeRange(0, title.length)
+                                                       withTemplate:@")"];
+    // Ensure space before '(' when it follows a word character (e.g. NaughtyAmerica(NaughtyBookworms) -> NaughtyAmerica (NaughtyBookworms))
+    NSRegularExpression* spaceBeforeOpenParenRegex = [NSRegularExpression regularExpressionWithPattern:@"([\\p{L}\\p{N}])\\("
+                                                                                               options:0
+                                                                                                 error:nil];
+    title = [spaceBeforeOpenParenRegex stringByReplacingMatchesInString:title options:0 range:NSMakeRange(0, title.length)
+                                                           withTemplate:@"$1 ("];
 
     // Shortcut: if title already looks clean, return it (after initial cleanup)
     // Note: '.' is NOT in the clean regex, so any title with '.' will go through full processing.
@@ -252,22 +260,33 @@
                                                                                      options:0
                                                                                        error:nil];
     BOOL const looksClean = [cleanTitleRegex firstMatchInString:title options:0 range:NSMakeRange(0, title.length)] != nil;
-    
+
     if (looksClean)
     {
         // Check for technical patterns that need processing
-        NSRegularExpression* techPatternRegex = [NSRegularExpression regularExpressionWithPattern:@"\\b(?:2160p|1080p|720p|480p|8K|4K|UHD|S\\d{1,2}|(?:19|20)\\d{2}|DVD|BD|WEB|Rip|HEVC|H264|H265|x264|x265|AAC|AC3|DTS|FLAC|MP3|Jaskier|MVO|ExKinoRay|RuTracker)\\b"
-                                                                                          options:NSRegularExpressionCaseInsensitive
-                                                                                            error:nil];
+        NSRegularExpression* techPatternRegex = [NSRegularExpression
+            regularExpressionWithPattern:@"\\b(?:2160p|1080p|720p|480p|8K|4K|UHD|S\\d{1,2}|(?:19|20)\\d{2}|DVD|BD|WEB|Rip|HEVC|H264|H265|x264|x265|AAC|AC3|DTS|FLAC|MP3|Jaskier|MVO|ExKinoRay|RuTracker)\\b"
+                                 options:NSRegularExpressionCaseInsensitive
+                                   error:nil];
         BOOL const hasTechPatterns = [techPatternRegex firstMatchInString:title options:0 range:NSMakeRange(0, title.length)] != nil;
-        
+
         if (!hasTechPatterns)
         {
             // Final cleanup: ensure no space after '(' and no space before ')'
-            NSRegularExpression* finalSpaceAfterParen = [NSRegularExpression regularExpressionWithPattern:@"\\(\\s+" options:0 error:nil];
-            title = [finalSpaceAfterParen stringByReplacingMatchesInString:title options:0 range:NSMakeRange(0, title.length) withTemplate:@"("];
-            NSRegularExpression* finalSpaceBeforeParen = [NSRegularExpression regularExpressionWithPattern:@"\\s+\\)" options:0 error:nil];
-            title = [finalSpaceBeforeParen stringByReplacingMatchesInString:title options:0 range:NSMakeRange(0, title.length) withTemplate:@")"];
+            NSRegularExpression* finalSpaceAfterParen = [NSRegularExpression regularExpressionWithPattern:@"\\(\\s+" options:0
+                                                                                                    error:nil];
+            title = [finalSpaceAfterParen stringByReplacingMatchesInString:title options:0 range:NSMakeRange(0, title.length)
+                                                              withTemplate:@"("];
+            NSRegularExpression* finalSpaceBeforeParen = [NSRegularExpression regularExpressionWithPattern:@"\\s+\\)" options:0
+                                                                                                     error:nil];
+            title = [finalSpaceBeforeParen stringByReplacingMatchesInString:title options:0 range:NSMakeRange(0, title.length)
+                                                               withTemplate:@")"];
+            NSRegularExpression* finalSpaceBeforeOpenParen = [NSRegularExpression regularExpressionWithPattern:@"([\\p{L}\\p{N}])\\("
+                                                                                                       options:0
+                                                                                                         error:nil];
+            title = [finalSpaceBeforeOpenParen stringByReplacingMatchesInString:title options:0
+                                                                          range:NSMakeRange(0, title.length)
+                                                                   withTemplate:@"$1 ("];
             return title;
         }
     }
@@ -293,15 +312,16 @@
         parenMetadataRegex = [NSRegularExpression regularExpressionWithPattern:@"\\(([^)]+)\\)" options:0 error:nil];
         yearInMetadataRegex = [NSRegularExpression regularExpressionWithPattern:@"\\b(19\\d{2}|20\\d{2})\\b" options:0 error:nil];
         formatTagRegex = [NSRegularExpression regularExpressionWithPattern:@"\\b(LP|CD|EP|DVD|BD|DVD5|DVD9|BD25|BD50|BD66|BD100)\\b"
-                                                                     options:NSRegularExpressionCaseInsensitive
-                                                                       error:nil];
+                                                                   options:NSRegularExpressionCaseInsensitive
+                                                                     error:nil];
     });
-    
-    NSArray<NSTextCheckingResult*>* parenMatches = [parenMetadataRegex matchesInString:title options:0 range:NSMakeRange(0, title.length)];
+
+    NSArray<NSTextCheckingResult*>* parenMatches = [parenMetadataRegex matchesInString:title options:0
+                                                                                 range:NSMakeRange(0, title.length)];
     NSString* extractedFormat = nil;
     NSString* extractedYearFromMetadata = nil;
     NSMutableArray<NSValue*>* rangesToRemove = [NSMutableArray array];
-    
+
     for (NSTextCheckingResult* match in parenMatches)
     {
         if (match.numberOfRanges > 1)
@@ -318,7 +338,8 @@
                     // First, check if this part is a year (4-digit year 1900-2099)
                     if (!extractedYearFromMetadata)
                     {
-                        NSTextCheckingResult* yearMatch = [yearInMetadataRegex firstMatchInString:trimmed options:0 range:NSMakeRange(0, trimmed.length)];
+                        NSTextCheckingResult* yearMatch = [yearInMetadataRegex firstMatchInString:trimmed options:0
+                                                                                            range:NSMakeRange(0, trimmed.length)];
                         if (yearMatch)
                         {
                             extractedYearFromMetadata = [trimmed substringWithRange:yearMatch.range];
@@ -327,12 +348,14 @@
                     // Check for format tags: LP, CD, DVD, BD, etc.
                     if (!extractedFormat)
                     {
-                        NSTextCheckingResult* formatMatch = [formatTagRegex firstMatchInString:trimmed options:0 range:NSMakeRange(0, trimmed.length)];
+                        NSTextCheckingResult* formatMatch = [formatTagRegex firstMatchInString:trimmed options:0
+                                                                                         range:NSMakeRange(0, trimmed.length)];
                         if (formatMatch)
                         {
                             NSString* matched = [trimmed substringWithRange:formatMatch.range];
                             // Normalize to uppercase for disc formats, lowercase for audio formats
-                            if ([matched.uppercaseString isEqualToString:@"LP"] || [matched.uppercaseString isEqualToString:@"CD"] || [matched.uppercaseString isEqualToString:@"EP"])
+                            if ([matched.uppercaseString isEqualToString:@"LP"] ||
+                                [matched.uppercaseString isEqualToString:@"CD"] || [matched.uppercaseString isEqualToString:@"EP"])
                             {
                                 extractedFormat = matched.lowercaseString;
                             }
@@ -353,14 +376,14 @@
             }
         }
     }
-    
+
     // Remove parentheses metadata groups (in reverse order to preserve indices)
     for (NSValue* rangeValue in [rangesToRemove reverseObjectEnumerator])
     {
         NSRange range = [rangeValue rangeValue];
         title = [title stringByReplacingCharactersInRange:range withString:@" "];
     }
-    
+
     // Clean up any orphaned commas or parentheses artifacts left after metadata removal
     // Remove patterns like ", )" that might be left after removing parentheses metadata
     static NSRegularExpression* orphanCommaParenRegex = nil;
@@ -368,11 +391,15 @@
     static dispatch_once_t cleanupOnceToken;
     dispatch_once(&cleanupOnceToken, ^{
         orphanCommaParenRegex = [NSRegularExpression regularExpressionWithPattern:@"\\s*,\\s*\\)" options:0 error:nil];
-        orphanFormatParenRegex = [NSRegularExpression regularExpressionWithPattern:@"\\s*,\\s*(LP|CD|EP)\\s*\\)" options:NSRegularExpressionCaseInsensitive error:nil];
+        orphanFormatParenRegex = [NSRegularExpression regularExpressionWithPattern:@"\\s*,\\s*(LP|CD|EP)\\s*\\)"
+                                                                           options:NSRegularExpressionCaseInsensitive
+                                                                             error:nil];
     });
-    title = [orphanCommaParenRegex stringByReplacingMatchesInString:title options:0 range:NSMakeRange(0, title.length) withTemplate:@""];
-    title = [orphanFormatParenRegex stringByReplacingMatchesInString:title options:0 range:NSMakeRange(0, title.length) withTemplate:@""];
-    
+    title = [orphanCommaParenRegex stringByReplacingMatchesInString:title options:0 range:NSMakeRange(0, title.length)
+                                                       withTemplate:@""];
+    title = [orphanFormatParenRegex stringByReplacingMatchesInString:title options:0 range:NSMakeRange(0, title.length)
+                                                        withTemplate:@""];
+
     // Normalize bracketed metadata early to simplify parsing
     title = [title stringByReplacingOccurrencesOfString:@"[" withString:@" "];
     title = [title stringByReplacingOccurrencesOfString:@"]" withString:@" "];
@@ -471,7 +498,7 @@
             }
         }
     }
-    
+
     // Use format extracted from parentheses metadata if no resolution found yet
     if (!resolution && extractedFormat)
     {
@@ -701,7 +728,9 @@
 
     // Replace dots with spaces if more than 2 words are glued with dots (e.g., Word.Word.Word)
     // or if the title uses dots as separators (no spaces at all)
-    NSRegularExpression* gluedDotsRegex = [NSRegularExpression regularExpressionWithPattern:@"[\\p{L}\\p{N}]+\\.[\\p{L}\\p{N}]+\\.[\\p{L}\\p{N}]+" options:0 error:nil];
+    NSRegularExpression* gluedDotsRegex = [NSRegularExpression regularExpressionWithPattern:@"[\\p{L}\\p{N}]+\\.[\\p{L}\\p{N}]+\\.[\\p{L}\\p{N}]+"
+                                                                                    options:0
+                                                                                      error:nil];
     BOOL const hasGluedDots = [gluedDotsRegex firstMatchInString:title options:0 range:NSMakeRange(0, title.length)] != nil;
     BOOL const hasNoSpaces = ![title containsString:@" "];
     if (hasGluedDots || (hasNoSpaces && [title containsString:@"."]))
@@ -712,9 +741,8 @@
     // Normalize separators: only add spaces around hyphens that already have space on at least one side.
     // Preserve hyphenated words (e.g., "Butt-Head", "Blu-Ray") - no spaces around the hyphen.
     NSString* dashPlaceholder = @"\u0000";
-    NSRegularExpression* dashGroupRegex = [NSRegularExpression regularExpressionWithPattern:@"(?:\\s+-\\s*|\\s*-\\s+)+"
-                                                                                     options:0
-                                                                                       error:nil];
+    NSRegularExpression* dashGroupRegex = [NSRegularExpression regularExpressionWithPattern:@"(?:\\s+-\\s*|\\s*-\\s+)+" options:0
+                                                                                      error:nil];
     title = [dashGroupRegex stringByReplacingMatchesInString:title options:0 range:NSMakeRange(0, title.length)
                                                 withTemplate:dashPlaceholder];
     NSRegularExpression* spacedDashRegex = [NSRegularExpression regularExpressionWithPattern:@"(?:^|\\s)-(?:\\s|$)" options:0
@@ -783,9 +811,19 @@
     // Final cleanup: ensure no space after '(' and no space before ')'
     NSString* finalResult = result;
     NSRegularExpression* finalSpaceAfterParen = [NSRegularExpression regularExpressionWithPattern:@"\\(\\s+" options:0 error:nil];
-    finalResult = [finalSpaceAfterParen stringByReplacingMatchesInString:finalResult options:0 range:NSMakeRange(0, finalResult.length) withTemplate:@"("];
+    finalResult = [finalSpaceAfterParen stringByReplacingMatchesInString:finalResult options:0
+                                                                   range:NSMakeRange(0, finalResult.length)
+                                                            withTemplate:@"("];
     NSRegularExpression* finalSpaceBeforeParen = [NSRegularExpression regularExpressionWithPattern:@"\\s+\\)" options:0 error:nil];
-    finalResult = [finalSpaceBeforeParen stringByReplacingMatchesInString:finalResult options:0 range:NSMakeRange(0, finalResult.length) withTemplate:@")"];
+    finalResult = [finalSpaceBeforeParen stringByReplacingMatchesInString:finalResult options:0
+                                                                    range:NSMakeRange(0, finalResult.length)
+                                                             withTemplate:@")"];
+    NSRegularExpression* finalSpaceBeforeOpenParen = [NSRegularExpression regularExpressionWithPattern:@"([\\p{L}\\p{N}])\\("
+                                                                                               options:0
+                                                                                                 error:nil];
+    finalResult = [finalSpaceBeforeOpenParen stringByReplacingMatchesInString:finalResult options:0
+                                                                        range:NSMakeRange(0, finalResult.length)
+                                                                 withTemplate:@"$1 ("];
 
     return finalResult.length > 0 ? finalResult : self;
 }
@@ -805,7 +843,7 @@
 
     // Always replace underscores with spaces and collapse multiple whitespaces
     name = [name stringByReplacingOccurrencesOfString:@"_" withString:@" "];
-    
+
     // Remove pipe characters and lowercase 'l' as separators
     name = [name stringByReplacingOccurrencesOfString:@"|" withString:@" "];
     NSRegularExpression* lSeparatorRegex = [NSRegularExpression regularExpressionWithPattern:@"\\s+l\\s+" options:0 error:nil];
@@ -813,16 +851,17 @@
 
     // Ensure space after ','
     name = [name stringByReplacingOccurrencesOfString:@"," withString:@", "];
-    
+
     NSRegularExpression* multiSpaceRegex = [NSRegularExpression regularExpressionWithPattern:@"\\s+" options:0 error:nil];
     name = [multiSpaceRegex stringByReplacingMatchesInString:name options:0 range:NSMakeRange(0, name.length) withTemplate:@" "];
     name = [name stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet];
-    
+
     // Ensure no space after '(' and no space before ')'
     NSRegularExpression* spaceAfterParenRegex = [NSRegularExpression regularExpressionWithPattern:@"\\(\\s+" options:0 error:nil];
     name = [spaceAfterParenRegex stringByReplacingMatchesInString:name options:0 range:NSMakeRange(0, name.length) withTemplate:@"("];
     NSRegularExpression* spaceBeforeParenRegex = [NSRegularExpression regularExpressionWithPattern:@"\\s+\\)" options:0 error:nil];
-    name = [spaceBeforeParenRegex stringByReplacingMatchesInString:name options:0 range:NSMakeRange(0, name.length) withTemplate:@")"];
+    name = [spaceBeforeParenRegex stringByReplacingMatchesInString:name options:0 range:NSMakeRange(0, name.length)
+                                                      withTemplate:@")"];
 
     NSUInteger whitespaceCount = 0;
     NSUInteger dotCount = 0;
@@ -882,9 +921,8 @@
         else if (c == '-')
         {
             BOOL const spacedDash = prev == ' ' && next == ' ';
-            BOOL const isHyphenatedWord = i > 0 && i + 1 < name.length &&
-                                          [[NSCharacterSet letterCharacterSet] characterIsMember:prev] &&
-                                          [[NSCharacterSet letterCharacterSet] characterIsMember:next];
+            BOOL const isHyphenatedWord = i > 0 && i + 1 < name.length && [[NSCharacterSet letterCharacterSet] characterIsMember:prev] &&
+                [[NSCharacterSet letterCharacterSet] characterIsMember:next];
             if (betweenDigits || spacedDash || isHyphenatedWord)
             {
                 [out appendFormat:@"%C", c];
@@ -924,7 +962,8 @@
     NSRegularExpression* standaloneEpisodeRegex = [NSRegularExpression regularExpressionWithPattern:@"\\bE(\\d{1,3})\\b"
                                                                                             options:NSRegularExpressionCaseInsensitive
                                                                                               error:nil];
-    NSTextCheckingResult* standaloneMatch = [standaloneEpisodeRegex firstMatchInString:filename options:0 range:NSMakeRange(0, filename.length)];
+    NSTextCheckingResult* standaloneMatch = [standaloneEpisodeRegex firstMatchInString:filename options:0
+                                                                                 range:NSMakeRange(0, filename.length)];
     if (standaloneMatch && standaloneMatch.numberOfRanges >= 2)
     {
         NSInteger episode = [[filename substringWithRange:[standaloneMatch rangeAtIndex:1]] integerValue];
@@ -980,7 +1019,8 @@
     NSRegularExpression* separatorRegex = [NSRegularExpression regularExpressionWithPattern:@"^[.\\s]+" options:0 error:nil];
     if (separatorRegex != nil)
     {
-        remaining = [separatorRegex stringByReplacingMatchesInString:remaining options:0 range:NSMakeRange(0, remaining.length) withTemplate:@""];
+        remaining = [separatorRegex stringByReplacingMatchesInString:remaining options:0 range:NSMakeRange(0, remaining.length)
+                                                        withTemplate:@""];
     }
 
     if (remaining.length == 0)
@@ -990,21 +1030,20 @@
 
     // Strip technical tags from the original string BEFORE processing (so patterns with dots like H.264 work correctly)
     NSArray* tagsToStrip = @[
-        @"1080p", @"720p", @"2160p", @"480p", @"8K", @"4K", @"UHD",
-        @"WEB-DL", @"WEBDL", @"WEBRip", @"BDRip", @"BluRay", @"HDRip", @"DVDRip", @"HDTV",
-        @"WEB-DLRip", @"DLRip",
-        @"H264", @"H.264", @"H265", @"H.265", @"x264", @"x265", @"HEVC", @"AVC",
-        @"AMZN", @"NF", @"DSNP", @"HMAX", @"PCOK", @"ATVP", @"APTV",
-        @"2xRu", @"Ru", @"En", @"qqss44", @"WEB", @"DL"
+        @"1080p", @"720p",   @"2160p", @"480p",   @"8K",   @"4K",        @"UHD",   @"WEB-DL", @"WEBDL", @"WEBRip",
+        @"BDRip", @"BluRay", @"HDRip", @"DVDRip", @"HDTV", @"WEB-DLRip", @"DLRip", @"H264",   @"H.264", @"H265",
+        @"H.265", @"x264",   @"x265",  @"HEVC",   @"AVC",  @"AMZN",      @"NF",    @"DSNP",   @"HMAX",  @"PCOK",
+        @"ATVP",  @"APTV",   @"2xRu",  @"Ru",     @"En",   @"qqss44",    @"WEB",   @"DL"
     ];
-    
+
     // Remove any [Source]-?Rip variants from episode title (before dot replacement)
     NSRegularExpression* ripRegexEpisode = [NSRegularExpression regularExpressionWithPattern:@"\\b[a-z0-9]+-?rip\\b"
                                                                                      options:NSRegularExpressionCaseInsensitive
                                                                                        error:nil];
     if (ripRegexEpisode != nil)
     {
-        remaining = [ripRegexEpisode stringByReplacingMatchesInString:remaining options:0 range:NSMakeRange(0, remaining.length) withTemplate:@" "];
+        remaining = [ripRegexEpisode stringByReplacingMatchesInString:remaining options:0 range:NSMakeRange(0, remaining.length)
+                                                         withTemplate:@" "];
     }
 
     // Remove any [Source]HD variants from episode title (before dot replacement)
@@ -1013,7 +1052,8 @@
                                                                                       error:nil];
     if (hdRegexEpisode != nil)
     {
-        remaining = [hdRegexEpisode stringByReplacingMatchesInString:remaining options:0 range:NSMakeRange(0, remaining.length) withTemplate:@" "];
+        remaining = [hdRegexEpisode stringByReplacingMatchesInString:remaining options:0 range:NSMakeRange(0, remaining.length)
+                                                        withTemplate:@" "];
     }
 
     // Remove any [Source]-?SbR variants from episode title (before dot replacement)
@@ -1022,7 +1062,8 @@
                                                                                        error:nil];
     if (sbrRegexEpisode != nil)
     {
-        remaining = [sbrRegexEpisode stringByReplacingMatchesInString:remaining options:0 range:NSMakeRange(0, remaining.length) withTemplate:@" "];
+        remaining = [sbrRegexEpisode stringByReplacingMatchesInString:remaining options:0 range:NSMakeRange(0, remaining.length)
+                                                         withTemplate:@" "];
     }
 
     for (NSString* tag in tagsToStrip)
@@ -1034,7 +1075,8 @@
                                                                                     error:nil];
         if (tagRegex != nil)
         {
-            remaining = [tagRegex stringByReplacingMatchesInString:remaining options:0 range:NSMakeRange(0, remaining.length) withTemplate:@" "];
+            remaining = [tagRegex stringByReplacingMatchesInString:remaining options:0 range:NSMakeRange(0, remaining.length)
+                                                      withTemplate:@" "];
         }
     }
 
@@ -1044,17 +1086,19 @@
                                                                                 error:nil];
     if (extRegex != nil)
     {
-        remaining = [extRegex stringByReplacingMatchesInString:remaining options:0 range:NSMakeRange(0, remaining.length) withTemplate:@""];
+        remaining = [extRegex stringByReplacingMatchesInString:remaining options:0 range:NSMakeRange(0, remaining.length)
+                                                  withTemplate:@""];
     }
-    
+
     // Clean up multiple spaces left by tag removal
     NSRegularExpression* multiSpaceRegex = [NSRegularExpression regularExpressionWithPattern:@"\\s+" options:0 error:nil];
     if (multiSpaceRegex != nil)
     {
-        remaining = [multiSpaceRegex stringByReplacingMatchesInString:remaining options:0 range:NSMakeRange(0, remaining.length) withTemplate:@" "];
+        remaining = [multiSpaceRegex stringByReplacingMatchesInString:remaining options:0 range:NSMakeRange(0, remaining.length)
+                                                         withTemplate:@" "];
     }
     remaining = [remaining stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet];
-    
+
     // Replace dots with spaces (they are word separators in episode titles)
     // But preserve dots between digits (e.g., "2.0" in titles)
     NSMutableString* dotCleaned = [NSMutableString stringWithCapacity:remaining.length];
@@ -1075,31 +1119,36 @@
         }
     }
     remaining = dotCleaned;
-    
+
     // Clean up spaces again after dot replacement
     if (multiSpaceRegex != nil)
     {
-        remaining = [multiSpaceRegex stringByReplacingMatchesInString:remaining options:0 range:NSMakeRange(0, remaining.length) withTemplate:@" "];
+        remaining = [multiSpaceRegex stringByReplacingMatchesInString:remaining options:0 range:NSMakeRange(0, remaining.length)
+                                                         withTemplate:@" "];
     }
     remaining = [remaining stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet];
-    
+
     // Cleanup the remaining part using humanReadableFileName logic (handles hyphens correctly)
     NSString* title = remaining.humanReadableFileName;
 
     // Final cleanup of spaces and separators
     // Also remove empty brackets/parentheses like [] or ()
-    NSRegularExpression* emptyBracketsRegex = [NSRegularExpression regularExpressionWithPattern:@"[\\[\\(]\\s*[\\]\\)]" options:0 error:nil];
+    NSRegularExpression* emptyBracketsRegex = [NSRegularExpression regularExpressionWithPattern:@"[\\[\\(]\\s*[\\]\\)]" options:0
+                                                                                          error:nil];
     if (emptyBracketsRegex != nil)
     {
-        title = [emptyBracketsRegex stringByReplacingMatchesInString:title options:0 range:NSMakeRange(0, title.length) withTemplate:@""];
+        title = [emptyBracketsRegex stringByReplacingMatchesInString:title options:0 range:NSMakeRange(0, title.length)
+                                                        withTemplate:@""];
     }
 
     // Remove stray closing brackets or parentheses that might be left over
     title = [title stringByReplacingOccurrencesOfString:@"]" withString:@""];
     title = [title stringByReplacingOccurrencesOfString:@")" withString:@""];
     title = [title stringByReplacingOccurrencesOfString:@"|" withString:@""];
-    NSRegularExpression* lSeparatorRegexEpisode = [NSRegularExpression regularExpressionWithPattern:@"\\s+l\\s+" options:0 error:nil];
-    title = [lSeparatorRegexEpisode stringByReplacingMatchesInString:title options:0 range:NSMakeRange(0, title.length) withTemplate:@" "];
+    NSRegularExpression* lSeparatorRegexEpisode = [NSRegularExpression regularExpressionWithPattern:@"\\s+l\\s+" options:0
+                                                                                              error:nil];
+    title = [lSeparatorRegexEpisode stringByReplacingMatchesInString:title options:0 range:NSMakeRange(0, title.length)
+                                                        withTemplate:@" "];
 
     // Ensure space after ','
     title = [title stringByReplacingOccurrencesOfString:@"," withString:@", "];
@@ -1129,20 +1178,28 @@
         {
             NSString* humanTorrentName = torrentName.humanReadableTitle;
             // Strip season/year/resolution from torrent name for comparison
-            NSRegularExpression* cleanupRegex = [NSRegularExpression regularExpressionWithPattern:@"\\s*(- Season \\d+|\\(\\d{4}\\)|#\\d+p|#\\w+)" options:0 error:nil];
+            NSRegularExpression* cleanupRegex = [NSRegularExpression regularExpressionWithPattern:@"\\s*(- Season \\d+|\\(\\d{4}\\)|#\\d+p|#\\w+)"
+                                                                                          options:0
+                                                                                            error:nil];
             if (cleanupRegex != nil)
             {
-                NSString* baseTorrentName = [cleanupRegex stringByReplacingMatchesInString:humanTorrentName options:0 range:NSMakeRange(0, humanTorrentName.length) withTemplate:@""];
-                
+                NSString* baseTorrentName = [cleanupRegex stringByReplacingMatchesInString:humanTorrentName options:0
+                                                                                     range:NSMakeRange(0, humanTorrentName.length)
+                                                                              withTemplate:@""];
+
                 // If title is just the series name, or the series name + year, it's redundant
                 if ([title.lowercaseString isEqualToString:baseTorrentName.lowercaseString])
                 {
                     return episodePrefix;
                 }
-                
+
                 // Check if title is "Series Name (Year)" or "Series Name Year"
-                NSRegularExpression* yearSuffixRegex = [NSRegularExpression regularExpressionWithPattern:@"\\s*\\(?\\b(19|20)\\d{2}\\b\\)?" options:0 error:nil];
-                NSString* titleWithoutYear = [yearSuffixRegex stringByReplacingMatchesInString:title options:0 range:NSMakeRange(0, title.length) withTemplate:@""];
+                NSRegularExpression* yearSuffixRegex = [NSRegularExpression regularExpressionWithPattern:@"\\s*\\(?\\b(19|20)\\d{2}\\b\\)?"
+                                                                                                 options:0
+                                                                                                   error:nil];
+                NSString* titleWithoutYear = [yearSuffixRegex stringByReplacingMatchesInString:title options:0
+                                                                                         range:NSMakeRange(0, title.length)
+                                                                                  withTemplate:@""];
                 if ([titleWithoutYear.lowercaseString isEqualToString:baseTorrentName.lowercaseString])
                 {
                     return episodePrefix;

@@ -133,7 +133,7 @@ static char const kPlayButtonFolderKey = '\0';
     [nc addObserver:self selector:@selector(refreshTorrentTable) name:@"RefreshTorrentTable" object:nil];
     [nc addObserver:self selector:@selector(updateVisiblePlayButtons) name:@"UpdateUI" object:nil];
     [nc addObserver:self selector:@selector(updateDefaultsCache) name:NSUserDefaultsDidChangeNotification object:nil];
-    
+
     // Pre-warm button pool asynchronously to avoid startup lag
     dispatch_async(dispatch_get_main_queue(), ^{
         [self prewarmButtonPool];
@@ -152,7 +152,7 @@ static char const kPlayButtonFolderKey = '\0';
         button.action = @selector(playMediaFile:);
         [self.fPlayButtonPool addObject:button];
     }
-    
+
     // Pre-warm header pool too
     for (NSUInteger i = 0; i < 20; i++)
     {
@@ -421,12 +421,14 @@ static CGFloat const kPlayButtonVerticalPadding = 4.0;
                     {
                         torrentCell.fIconView.image = [NSImage imageWithSize:frame.size flipped:NO drawingHandler:^BOOL(NSRect dstRect) {
                             // draw fileImage
-                            [fileImage drawInRect:dstRect fromRect:NSZeroRect operation:NSCompositingOperationSourceOver fraction:1.0];
+                            [fileImage drawInRect:dstRect fromRect:NSZeroRect operation:NSCompositingOperationSourceOver
+                                         fraction:1.0];
 
                             // overlay error badge
                             NSImage* errorImage = [NSImage imageNamed:NSImageNameCaution];
                             NSRect const errorRect = NSMakeRect(0, 0, kErrorImageSize, kErrorImageSize);
-                            [errorImage drawInRect:errorRect fromRect:NSZeroRect operation:NSCompositingOperationSourceOver fraction:1.0
+                            [errorImage drawInRect:errorRect fromRect:NSZeroRect operation:NSCompositingOperationSourceOver
+                                          fraction:1.0
                                     respectFlipped:YES
                                              hints:nil];
                             return YES;
@@ -759,10 +761,10 @@ static CGFloat const kPlayButtonVerticalPadding = 4.0;
         NSString* type = fileItem[@"type"] ?: @"file";
         NSString* category = fileItem[@"category"];
         NSString* path = fileItem[@"path"] ?: @"";
-        
+
         // Check if path is a .cue file - always treat as album
         BOOL const isCueFile = [path.pathExtension.lowercaseString isEqualToString:@"cue"];
-        
+
         // Cache key based on type, category, and cue file status
         NSString* cacheKey = [NSString stringWithFormat:@"%@:%@:%@", type, category ?: @"", isCueFile ? @"cue" : @""];
         NSImage* cached = [self.fIconCache objectForKey:cacheKey];
@@ -793,11 +795,12 @@ static CGFloat const kPlayButtonVerticalPadding = 4.0;
         {
             icon = [NSImage imageWithSystemSymbolName:@"play" accessibilityDescription:nil];
         }
-        
+
         if (icon)
         {
             // Use configuration to ensure small, medium weight, gray icon
-            NSImageSymbolConfiguration* config = [NSImageSymbolConfiguration configurationWithPointSize:11 weight:NSFontWeightMedium scale:NSImageSymbolScaleSmall];
+            NSImageSymbolConfiguration* config = [NSImageSymbolConfiguration configurationWithPointSize:11 weight:NSFontWeightMedium
+                                                                                                  scale:NSImageSymbolScaleSmall];
             icon = [icon imageWithSymbolConfiguration:config];
             [icon setTemplate:YES]; // Ensure it follows button's text color (gray)
             [self.fIconCache setObject:icon forKey:cacheKey];
@@ -812,68 +815,66 @@ static CGFloat const kPlayButtonVerticalPadding = 4.0;
     NSString* folder = albumItem[@"folder"];
     if (!folder || folder.length == 0)
         return nil;
-    
+
     NSIndexSet* fileIndexes = [torrent fileIndexesForFolder:folder];
     if (!fileIndexes || fileIndexes.count == 0)
         return nil;
-    
+
     static NSSet<NSString*>* audioExtensions;
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
-        audioExtensions = [NSSet setWithArray:@[
-            @"mp3", @"flac", @"wav", @"aac", @"ogg", @"wma", @"m4a", @"ape", @"alac", @"aiff", @"opus"
-        ]];
+        audioExtensions = [NSSet
+            setWithArray:@[ @"mp3", @"flac", @"wav", @"aac", @"ogg", @"wma", @"m4a", @"ape", @"alac", @"aiff", @"opus" ]];
     });
-    
+
     NSMutableArray<NSDictionary*>* tracks = [NSMutableArray array];
     [fileIndexes enumerateIndexesUsingBlock:^(NSUInteger idx, BOOL* _Nonnull stop) {
         (void)stop;
         auto const file = tr_torrentFile(torrent.torrentStruct, (tr_file_index_t)idx);
         NSString* fileName = @(file.name);
         NSString* ext = fileName.pathExtension.lowercaseString;
-        
+
         // Only include audio files, skip .cue files
         if (![audioExtensions containsObject:ext])
             return;
-        
+
         CGFloat progress = (CGFloat)tr_torrentFileConsecutiveProgress(torrent.torrentStruct, (tr_file_index_t)idx);
         if (progress < 0)
             progress = 0;
-        
+
         // Visibility logic: only show tracks that have started downloading.
         // If the file is not wanted, only show it if it's 100% complete.
         if (progress <= 0 && file.wanted)
             return;
         if (!file.wanted && progress < 1.0)
             return;
-        
+
         NSString* displayName = fileName.lastPathComponent.stringByDeletingPathExtension.humanReadableFileName;
         if (!displayName || displayName.length == 0)
             displayName = fileName.lastPathComponent;
-        
+
         // Cache humanized name back to torrent? No, tracks are recreated.
-        // We can use an associated object on the torrent's file indexes if needed, 
+        // We can use an associated object on the torrent's file indexes if needed,
         // but let's just make it faster for now.
-        
+
         auto const location = tr_torrentFindFile(torrent.torrentStruct, (tr_file_index_t)idx);
-        NSString* path = !std::empty(location) ? @(location.c_str()) : 
-                        [torrent.currentDirectory stringByAppendingPathComponent:fileName];
-        
+        NSString* path = !std::empty(location) ? @(location.c_str()) : [torrent.currentDirectory stringByAppendingPathComponent:fileName];
+
         [tracks addObject:@{
-            @"type": @"track",
-            @"category": @"audio",
-            @"index": @(idx),
-            @"name": displayName,
-            @"path": path,
-            @"progress": @(progress)
+            @"type" : @"track",
+            @"category" : @"audio",
+            @"index" : @(idx),
+            @"name" : displayName,
+            @"path" : path,
+            @"progress" : @(progress)
         }];
     }];
-    
+
     // Sort tracks alphabetically (they should already be in order, but just to be sure)
     [tracks sortUsingComparator:^NSComparisonResult(NSDictionary* a, NSDictionary* b) {
         return [a[@"name"] localizedStandardCompare:b[@"name"]];
     }];
-    
+
     return tracks.count > 0 ? tracks : nil;
 }
 
@@ -933,7 +934,7 @@ static CGFloat const kPlayButtonVerticalPadding = 4.0;
             NSString* type = fileItem[@"type"] ?: @"file";
             NSString* name = fileItem[@"name"] ?: @"";
             CGFloat progress = [fileItem[@"progress"] doubleValue];
-            
+
             NSString* menuTitle = name;
             if (progress > 0 && progress < 1.0)
             {
@@ -968,18 +969,19 @@ static CGFloat const kPlayButtonVerticalPadding = 4.0;
                                 trackTitle = [NSString stringWithFormat:@"%@ (%d%%)", trackName, trackPct];
                         }
 
-                        NSMenuItem* trackItem = [[NSMenuItem alloc] initWithTitle:trackTitle action:@selector(playContextItem:) keyEquivalent:@""];
+                        NSMenuItem* trackItem = [[NSMenuItem alloc] initWithTitle:trackTitle action:@selector(playContextItem:)
+                                                                    keyEquivalent:@""];
                         trackItem.target = self;
-                        trackItem.representedObject = @{ @"torrent": torrent, @"item": track };
+                        trackItem.representedObject = @{ @"torrent" : torrent, @"item" : track };
                         trackItem.image = [self iconForPlayableFileItem:track];
                         [albumMenu addItem:trackItem];
                     }
-                    
+
                     [currentMenu addItem:albumItem];
                     continue;
                 }
             }
-            
+
             // Regular item (file, single-track album, DVD, Blu-ray, book, etc.)
             NSMenuItem* menuItem = [[NSMenuItem alloc] initWithTitle:menuTitle action:@selector(playContextItem:) keyEquivalent:@""];
             menuItem.target = self;
@@ -1045,7 +1047,8 @@ static CGFloat const kPlayButtonVerticalPadding = 4.0;
             }
         }
 
-        icon = [NSImage imageWithSystemSymbolName:(isBooks ? @"book" : ((isAudio || leadsToCue) ? @"music.note.list" : @"play")) accessibilityDescription:nil];
+        icon = [NSImage imageWithSystemSymbolName:(isBooks ? @"book" : ((isAudio || leadsToCue) ? @"music.note.list" : @"play"))
+                         accessibilityDescription:nil];
     }
 
     if (playMenu.numberOfItems == 1 && !playMenu.itemArray[0].hasSubmenu)
@@ -1559,7 +1562,9 @@ static NSString* folderForPlayButton(NSButton* sender, Torrent* torrent)
             entry[@"progressPercent"] = @(progressPct);
             // Documents only visible when complete; media visible when progress > 0 and (wanted or complete)
             NSNumber* indexNum = entry[@"index"];
-            BOOL wanted = indexNum ? ([torrent checkForFiles:[NSIndexSet indexSetWithIndex:indexNum.unsignedIntegerValue]] == NSControlStateValueOn) : YES;
+            BOOL wanted = indexNum ?
+                ([torrent checkForFiles:[NSIndexSet indexSetWithIndex:indexNum.unsignedIntegerValue]] == NSControlStateValueOn) :
+                YES;
             BOOL visible = [type hasPrefix:@"document"] ? (progress >= 1.0) : (progress > 0.000001 && (wanted || progress >= 1.0));
             entry[@"visible"] = @(visible);
             if (visible && ![type hasPrefix:@"document"] && progress < 1.0 && progressPct < 100)
@@ -1602,7 +1607,9 @@ static NSString* folderForPlayButton(NSButton* sender, Torrent* torrent)
             entry[@"progressPercent"] = @(progressPct);
             // Documents only visible when complete; media visible when progress > 0 and (wanted or complete)
             NSNumber* indexNum = entry[@"index"];
-            BOOL wanted = indexNum ? ([torrent checkForFiles:[NSIndexSet indexSetWithIndex:indexNum.unsignedIntegerValue]] == NSControlStateValueOn) : YES;
+            BOOL wanted = indexNum ?
+                ([torrent checkForFiles:[NSIndexSet indexSetWithIndex:indexNum.unsignedIntegerValue]] == NSControlStateValueOn) :
+                YES;
             BOOL visible = [type hasPrefix:@"document"] ? (progress >= 1.0) : (progress > 0.000001 && (wanted || progress >= 1.0));
             entry[@"visible"] = @(visible);
             if (visible != wasVisible)
@@ -1782,7 +1789,7 @@ static NSString* folderForPlayButton(NSButton* sender, Torrent* torrent)
 - (PlayButton*)setupPlayButtonWithItem:(NSDictionary*)item torrent:(Torrent*)torrent
 {
     PlayButton* playButton = [self dequeuePlayButton];
-    
+
     NSString* type = item[@"type"] ?: @"file";
     NSString* path = item[@"path"];
     NSString* baseTitle = item[@"baseTitle"];
@@ -1807,7 +1814,7 @@ static NSString* folderForPlayButton(NSButton* sender, Torrent* torrent)
     NSString* tooltipPath = [torrent tooltipPathForItemPath:path type:type folder:folder ?: @""];
     playButton.toolTip = tooltipPath;
     playButton.tag = [item[@"index"] integerValue];
-    
+
     // Store type and folder via associated objects (lighter than accessibility properties)
     objc_setAssociatedObject(playButton, &kPlayButtonTypeKey, type, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     objc_setAssociatedObject(playButton, &kPlayButtonFolderKey, folder.length > 0 ? folder : nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
@@ -1826,23 +1833,23 @@ static NSString* folderForPlayButton(NSButton* sender, Torrent* torrent)
     {
         playButton.hidden = (progress <= 0);
     }
-    
+
     // Image - set based on type/category (cached)
     // Check if this audio file has a .cue companion (always an album)
-    BOOL const leadsToCue = [path.pathExtension.lowercaseString isEqualToString:@"cue"] || 
-                            ([torrent cueFilePathForAudioPath:path] != nil);
+    BOOL const leadsToCue = [path.pathExtension.lowercaseString isEqualToString:@"cue"] || ([torrent cueFilePathForAudioPath:path] != nil);
     NSImage* icon = nil;
     if (leadsToCue)
     {
         if (@available(macOS 11.0, *))
         {
             icon = [NSImage imageWithSystemSymbolName:@"music.note.list" accessibilityDescription:nil];
-            NSImageSymbolConfiguration* config = [NSImageSymbolConfiguration configurationWithPointSize:11 weight:NSFontWeightMedium scale:NSImageSymbolScaleSmall];
+            NSImageSymbolConfiguration* config = [NSImageSymbolConfiguration configurationWithPointSize:11 weight:NSFontWeightMedium
+                                                                                                  scale:NSImageSymbolScaleSmall];
             icon = [icon imageWithSymbolConfiguration:config];
             [icon setTemplate:YES];
         }
     }
-    
+
     if (!icon)
     {
         icon = [self iconForPlayableFileItem:item];
@@ -1917,7 +1924,7 @@ static NSString* folderForPlayButton(NSButton* sender, Torrent* torrent)
     // Reuse existing buttons if same file source AND layout exists (O(1) if cached in Torrent)
     BOOL const sameSource = (cell.fPlayButtonsSourceFiles == playableFiles);
     BOOL const hasLayout = (playButtonLayout.count > 0);
-    
+
     // Check if we have existing buttons that match the layout
     FlowLayoutView* existingFlowView = (FlowLayoutView*)cell.fPlayButtonsView;
     BOOL const hasExistingButtons = existingFlowView && [existingFlowView arrangedSubviews].count > 0;
@@ -1925,10 +1932,10 @@ static NSString* folderForPlayButton(NSButton* sender, Torrent* torrent)
     if (cell.fPlayButtonsView && sameSource && (!hasLayout || hasExistingButtons))
     {
         cell.fPlayButtonsView.hidden = NO;
-        
+
         CGFloat const availableWidth = [self playButtonsAvailableWidthForCell:cell];
         BOOL const widthChanged = std::fabs(availableWidth - torrent.cachedPlayButtonsWidth) > 5.0;
-        
+
         [self updatePlayButtonProgressForCell:cell torrent:torrent forceLayout:widthChanged];
         return;
     }
@@ -1943,7 +1950,7 @@ static NSString* folderForPlayButton(NSButton* sender, Torrent* torrent)
     else
     {
         flowView = [[FlowLayoutView alloc] init];
-        flowView.translatesAutoresizingMaskIntoConstraints = NO;  // CRITICAL for Auto Layout
+        flowView.translatesAutoresizingMaskIntoConstraints = NO; // CRITICAL for Auto Layout
         flowView.horizontalSpacing = 6;
         flowView.verticalSpacing = 4;
         flowView.minimumButtonWidth = 50;
@@ -2040,15 +2047,15 @@ static NSString* folderForPlayButton(NSButton* sender, Torrent* torrent)
     }
 
     BOOL layoutNeeded = forceLayout;
-    
+
     // Track section visibility to hide empty headers/breaks
     NSView* currentLineBreak = nil;
     NSTextField* currentHeader = nil;
     BOOL anyButtonVisibleInSection = NO;
-    
+
     Class const playButtonClass = [PlayButton class];
     Class const textFieldClass = [NSTextField class];
-    
+
     for (NSView* view in [flowView arrangedSubviews])
     {
         if ([view isKindOfClass:textFieldClass])
@@ -2057,9 +2064,11 @@ static NSString* folderForPlayButton(NSButton* sender, Torrent* torrent)
             if (currentHeader)
             {
                 BOOL const headerHidden = !anyButtonVisibleInSection;
-                if (currentHeader.hidden != headerHidden) {
+                if (currentHeader.hidden != headerHidden)
+                {
                     currentHeader.hidden = headerHidden;
-                    if (currentLineBreak) currentLineBreak.hidden = headerHidden;
+                    if (currentLineBreak)
+                        currentLineBreak.hidden = headerHidden;
                     layoutNeeded = YES;
                 }
             }
@@ -2067,12 +2076,12 @@ static NSString* folderForPlayButton(NSButton* sender, Torrent* torrent)
             anyButtonVisibleInSection = NO;
             continue;
         }
-        
+
         if ([view isKindOfClass:playButtonClass])
         {
             PlayButton* button = (PlayButton*)view;
-            NSDictionary* entry = (button.tag != NSNotFound) ? stateMap[@(button.tag)] : 
-                                 (stateMap[folderForPlayButton(button, torrent)] ?: nil);
+            NSDictionary* entry = (button.tag != NSNotFound) ? stateMap[@(button.tag)] :
+                                                               (stateMap[folderForPlayButton(button, torrent)] ?: nil);
 
             if (entry)
             {
@@ -2103,18 +2112,20 @@ static NSString* folderForPlayButton(NSButton* sender, Torrent* torrent)
             }
             continue;
         }
-        
+
         // Likely FlowLineBreak
         currentLineBreak = view;
     }
-    
+
     // Handle last section
     if (currentHeader)
     {
         BOOL const headerHidden = !anyButtonVisibleInSection;
-        if (currentHeader.hidden != headerHidden) {
+        if (currentHeader.hidden != headerHidden)
+        {
             currentHeader.hidden = headerHidden;
-            if (currentLineBreak) currentLineBreak.hidden = headerHidden;
+            if (currentLineBreak)
+                currentLineBreak.hidden = headerHidden;
             layoutNeeded = YES;
         }
     }
@@ -2122,10 +2133,10 @@ static NSString* folderForPlayButton(NSButton* sender, Torrent* torrent)
     if (layoutNeeded)
     {
         [flowView invalidateLayoutCache];
-        
+
         CGFloat const availableWidth = [self playButtonsAvailableWidthForCell:cell];
         CGFloat buttonHeight = [flowView heightForWidth:availableWidth];
-        
+
         if (buttonHeight > 0 && buttonHeight < kPlayButtonRowHeight)
             buttonHeight = kPlayButtonRowHeight;
 
@@ -2417,7 +2428,6 @@ static NSString* folderForPlayButton(NSButton* sender, Torrent* torrent)
     [self setHighPriorityForItem:item forTorrent:torrent];
 }
 
-
 - (IBAction)playMediaFile:(NSButton*)sender
 {
     Torrent* torrent = [self itemAtRow:[self rowForView:[sender superview]]];
@@ -2427,20 +2437,15 @@ static NSString* folderForPlayButton(NSButton* sender, Torrent* torrent)
     NSString* type = objc_getAssociatedObject(sender, &kPlayButtonTypeKey) ?: @"";
     NSString* folder = objc_getAssociatedObject(sender, &kPlayButtonFolderKey) ?: @"";
     NSString* path = sender.identifier ?: @"";
-    
+
     // Check if this is a cue-companion audio file and find matching .cue file
     NSString* cuePath = [torrent cueFilePathForAudioPath:path];
     if (cuePath)
     {
         path = cuePath;
     }
-    
-    NSDictionary* item = @{
-        @"path" : path,
-        @"type" : type,
-        @"index" : @(sender.tag),
-        @"folder" : folder
-    };
+
+    NSDictionary* item = @{ @"path" : path, @"type" : type, @"index" : @(sender.tag), @"folder" : folder };
 
     [self playMediaItem:item forTorrent:torrent];
 }

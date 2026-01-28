@@ -67,7 +67,7 @@ NSInteger const kGroupFilterAllTag = -2;
     //localize search menu
     NSMenuItem* nameItem = [self.fSearchField.searchMenuTemplate itemWithTag:0];
     NSMenuItem* trackerItem = [self.fSearchField.searchMenuTemplate itemWithTag:1];
-    
+
     nameItem.title = NSLocalizedString(@"Name", "Filter Bar -> search filter");
     trackerItem.title = NSLocalizedString(@"Tracker", "Filter Bar -> search filter");
 

@@ -127,6 +127,7 @@ The following technical tags are filtered out:
 - Existing ` - ` separators are preserved
 - Hyphens (`-`) between letters (hyphenated words like `Butt-Head`, `Full-Moon`) are preserved; do not add spaces around them
 - Other hyphens (with space on at least one side) are normalized to ` - `
+- Opening parenthesis immediately after a word character gets a space before it (e.g. `NaughtyAmerica(NaughtyBookworms)` → `NaughtyAmerica (NaughtyBookworms)`)
 - Multiple spaces are collapsed to single space
 
 ### 9. Final Assembly
@@ -161,6 +162,7 @@ Parts are assembled with specific formatting:
 | `Artist.Album.2019.MP3` | `Artist Album (2019) #mp3` |
 | `The.White.Lotus.S03E05.Full-Moon.Party.1080p.AMZN.WEB-DL.H.264-EniaHD.mkv` | Episode button: `▶ E5 - Full-Moon Party` |
 | `Beavis.and.Butt-Head.Do` | `Beavis and Butt-Head Do` |
+| `NaughtyAmerica(NaughtyBookworms)` | `NaughtyAmerica (NaughtyBookworms)` |
 
 ## Play Buttons (macOS)
 

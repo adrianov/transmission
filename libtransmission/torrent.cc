@@ -3013,7 +3013,7 @@ bool tr_torrent::is_piece_in_file_tail(tr_piece_index_t piece) const noexcept
         auto const file_size = metainfo_.file_size(file);
         // Calculate proportional tail size: 2% of file, capped at 20 MB, minimum 1 MB
         auto const tail_size = std::min(MaxTailSize, std::max(MinTailSize, static_cast<uint64_t>(file_size * TailPercentage)));
-        
+
         if (file_size <= tail_size)
         {
             // Small file - all pieces are in "tail"

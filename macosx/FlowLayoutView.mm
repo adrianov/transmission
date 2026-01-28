@@ -27,7 +27,7 @@
 {
     if (self = [super initWithFrame:frameRect])
     {
-        self.translatesAutoresizingMaskIntoConstraints = NO;  // Required for Auto Layout
+        self.translatesAutoresizingMaskIntoConstraints = NO; // Required for Auto Layout
         self.wantsLayer = YES;
         self.layerContentsRedrawPolicy = NSViewLayerContentsRedrawOnSetNeedsDisplay;
 

@@ -57,25 +57,20 @@ const fmt_GBps = new Intl.NumberFormat(current_locale, {
   unit: 'gigabyte-per-second',
 });
 
-    // Technical tags to filter from torrent names (split into groups to reduce regex complexity)
-    const techTagsVideo = [
-      'WEBDL',
-      'WEB-DL',
-      'WEBRip',
-      'BDRip',
-      'BluRay',
-      'HDRip',
-      'DVDRip',
-      'HDTV',
-      'WEB-DLRip',
-      'DLRip',
-    ];
+// Technical tags to filter from torrent names (split into groups to reduce regex complexity)
+const techTagsVideo = [
+  'WEBDL',
+  'WEB-DL',
+  'WEBRip',
+  'BDRip',
+  'BluRay',
+  'HDRip',
+  'DVDRip',
+  'HDTV',
+  'WEB-DLRip',
+  'DLRip',
+];
 
-    // Remove any [Source]-?Rip variants (e.g., WEB-Rip, WEBRip, BD-Rip, BDRip)
-    title = title.replaceAll(/\b[a-z0-9]+-?rip\b/gi, ' ');
-
-    // Remove any [Source]HD variants (e.g., EniaHD, playHD)
-    title = title.replaceAll(/\b[a-z0-9]+HD\b/gi, ' ');
 const techTagsCodec = [
   'HEVC',
   'H264',
@@ -136,6 +131,7 @@ const escapeRegex = (value) =>
  *   2ChicksSameTime.25.04.14.Bonnie.Rotten.2160p.mp4 -> 2ChickSameTime - 25.04.14 - Bonnie Rotten - 2160p
  */
 function formatHumanTitle(name) {
+  /* eslint-disable sonarjs/slow-regex, sonarjs/regex-complexity -- simple patterns on short title strings */
   if (!name) {
     return 'Unknown';
   }
@@ -148,17 +144,21 @@ function formatHumanTitle(name) {
     .replaceAll(',', ', ')
     .replaceAll(/\s+/g, ' ')
     .trim();
-  
+
   // Ensure no space after '(' and no space before ')'
   title = title.replaceAll(/\(\s+/g, '(').replaceAll(/\s+\)/g, ')');
+  // Ensure space before '(' when it follows a word character (e.g. NaughtyAmerica(NaughtyBookworms) -> NaughtyAmerica (NaughtyBookworms))
+  title = title.replaceAll(/([\p{L}\p{N}])\(/gu, '$1 (');
 
   // Shortcut: if title already looks clean, return it (after initial cleanup)
   // Note: '.' is NOT in the clean regex, so any title with '.' will go through full processing.
   // Also check for technical patterns (resolution, season, year, tech tags) - if found, process the title
   const looksClean = /^[\p{L}\p{N}\s,()[\]{}\-:;]+$/u.test(title);
   if (looksClean) {
-    // Check for technical patterns that need processing
-    const hasTechPatterns = /\b(?:2160p|1080p|720p|480p|8K|4K|UHD|S\d{1,2}|(?:19|20)\d{2}|DVD|BD|WEB|Rip|HEVC|H264|H265|x264|x265|AAC|AC3|DTS|FLAC|MP3|Jaskier|MVO|ExKinoRay|RuTracker)\b/i.test(title);
+    const hasTechPatterns =
+      /\b(?:2160p|1080p|720p|480p|8K|4K|UHD|S\d{1,2}|(?:19|20)\d{2}|DVD|BD|WEB|Rip|HEVC|H264|H265|x264|x265|AAC|AC3|DTS|FLAC|MP3|Jaskier|MVO|ExKinoRay|RuTracker)\b/i.test(
+        title,
+      );
     if (!hasTechPatterns) {
       return title;
     }
@@ -353,9 +353,12 @@ function formatHumanTitle(name) {
   }
 
   // Final cleanup: ensure no space after '(' and no space before ')'
+  /* eslint-disable-next-line sonarjs/slow-regex -- simple pattern on short string */
   result = result.replaceAll(/\(\s+/g, '(').replaceAll(/\s+\)/g, ')');
+  result = result.replaceAll(/([\p{L}\p{N}])\(/gu, '$1 (');
 
   return result || name;
+  /* eslint-enable sonarjs/regex-complexity */
 }
 
 /**
@@ -364,6 +367,7 @@ function formatHumanTitle(name) {
  * This intentionally does not extract years/dates or strip technical tags.
  * It only replaces separator-heavy names ('.', '-', '_') with spaces.
  */
+/* eslint-disable sonarjs/slow-regex -- simple patterns on short strings */
 function formatHumanFileName(name) {
   if (!name) {
     return 'Unknown';
@@ -377,9 +381,10 @@ function formatHumanFileName(name) {
     .replaceAll(',', ', ')
     .replaceAll(/\s+/g, ' ')
     .trim();
-  
+
   // Ensure no space after '(' and no space before ')'
   name = name.replaceAll(/\(\s+/g, '(').replaceAll(/\s+\)/g, ')');
+  name = name.replaceAll(/([\p{L}\p{N}])\(/gu, '$1 (');
 
   // Keep the file extension intact if it looks like one.
   const lastDot = name.lastIndexOf('.');
@@ -453,7 +458,9 @@ function formatHumanFileName(name) {
       }
       case '-': {
         const spacedDash = prev === ' ' && next === ' ';
-        out += betweenDigits || spacedDash ? '-' : ' ';
+        const isLetter = /\p{L}/u;
+        const isHyphenatedWord = isLetter.test(prev) && isLetter.test(next);
+        out += betweenDigits || spacedDash || isHyphenatedWord ? '-' : ' ';
 
         break;
       }
@@ -470,6 +477,7 @@ function formatHumanFileName(name) {
 
   return `${out}${ext}`;
 }
+/* eslint-enable sonarjs/slow-regex */
 
 export const Formatter = {
   /** Round a string of a number to a specified number of decimal places */
@@ -480,16 +488,6 @@ export const Formatter = {
 
   countString(msgid, msgid_plural, n) {
     return `${this.number(n)} ${this.ngettext(msgid, msgid_plural, n)}`;
-  },
-
-  /** Converts a filename/folder name to a lightweight human-friendly label */
-  humanFileName(name) {
-    return formatHumanFileName(name);
-  },
-
-  /** Converts technical torrent name to human-friendly title */
-  humanTitle(name) {
-    return formatHumanTitle(name);
   },
 
   /**
@@ -529,19 +527,51 @@ export const Formatter = {
 
     // Aggressively strip technical tags from the episode title
     const tagsToStrip = [
-      '1080p', '720p', '2160p', '480p', '8K', '4K', 'UHD',
-      'WEB-DL', 'WEBDL', 'WEBRip', 'BDRip', 'BluRay', 'HDRip', 'DVDRip', 'HDTV',
-      'WEB-DLRip', 'DLRip',
-      'H264', 'H.264', 'H265', 'H.265', 'x264', 'x265', 'HEVC', 'AVC',
-      'AMZN', 'NF', 'DSNP', 'HMAX', 'PCOK', 'ATVP', 'APTV',
-      '2xRu', 'Ru', 'En', 'qqss44', 'WEB', 'DL'
+      '1080p',
+      '720p',
+      '2160p',
+      '480p',
+      '8K',
+      '4K',
+      'UHD',
+      'WEB-DL',
+      'WEBDL',
+      'WEBRip',
+      'BDRip',
+      'BluRay',
+      'HDRip',
+      'DVDRip',
+      'HDTV',
+      'WEB-DLRip',
+      'DLRip',
+      'H264',
+      'H.264',
+      'H265',
+      'H.265',
+      'x264',
+      'x265',
+      'HEVC',
+      'AVC',
+      'AMZN',
+      'NF',
+      'DSNP',
+      'HMAX',
+      'PCOK',
+      'ATVP',
+      'APTV',
+      '2xRu',
+      'Ru',
+      'En',
+      'qqss44',
+      'WEB',
+      'DL',
     ];
 
     // Remove any [Source]-?Rip variants from episode title
-    title = title.replace(/\b[a-z0-9]+-?rip\b/gi, '');
+    title = title.replaceAll(/\b[a-z0-9]+-?rip\b/gi, '');
 
     // Remove any [Source]HD variants from episode title
-    title = title.replace(/\b[a-z0-9]+HD\b/gi, '');
+    title = title.replaceAll(/\b[a-z0-9]+HD\b/gi, '');
 
     for (const tag of tagsToStrip) {
       const regex = new RegExp(`\\b${tag}\\b`, 'gi');
@@ -553,36 +583,57 @@ export const Formatter = {
 
     // Final cleanup
     // Also remove empty brackets/parentheses like [] or ()
-    title = title.replace(/[\[\(]\s*[\]\)]/g, '');
+    title = title.replaceAll(/[([]\s*[)\]]/g, '');
 
     // Remove stray closing brackets or parentheses
-    title = title.replace(/[\]\)]/g, '');
-    title = title.replace(/\|/g, '');
-    title = title.replace(/\s+l\s+/g, ' ');
+    title = title.replaceAll(/[\])]/g, '');
+    title = title.replaceAll('|', '');
+    /* eslint-disable-next-line sonarjs/slow-regex -- simple pattern on short string */
+    title = title.replaceAll(/\s+l\s+/g, ' ');
 
-    title = title.replace(/\s+/g, ' ').trim();
-    while (title.startsWith('-') || title.startsWith(' ') || title.startsWith('.')) title = title.slice(1);
-    while (title.endsWith('-') || title.endsWith(' ') || title.endsWith('.')) title = title.slice(0, -1);
+    title = title.replaceAll(/\s+/g, ' ').trim();
+    while (
+      title.startsWith('-') ||
+      title.startsWith(' ') ||
+      title.startsWith('.')
+    ) {
+      title = title.slice(1);
+    }
+    while (title.endsWith('-') || title.endsWith(' ') || title.endsWith('.')) {
+      title = title.slice(0, -1);
+    }
 
     // Final check for file extension
     if (title.toLowerCase().endsWith('mkv')) {
       title = title.slice(0, -3).trim();
-      while (title.endsWith('-') || title.endsWith(' ') || title.endsWith('.')) title = title.slice(0, -1);
+      while (
+        title.endsWith('-') ||
+        title.endsWith(' ') ||
+        title.endsWith('.')
+      ) {
+        title = title.slice(0, -1);
+      }
     }
 
     if (title && title !== 'Unknown' && title.length > 1) {
       // If the title is just a repeat of the torrent name, it's garbage
       if (torrentName) {
+        /* eslint-disable sonarjs/slow-regex -- simple pattern on short string */
         const cleanTorrentName = formatHumanTitle(torrentName)
-          .replace(/\s*(- Season \d+|\(\d{4}\)|#\d+p|#\\w+)/gi, '')
+          .replaceAll(/\s*(- Season \d+|\(\d{4}\)|#\d+p|#\w+)/gi, '')
           .trim();
-        
+        /* eslint-enable sonarjs/slow-regex */
+
         // Check if title is just the series name, or the series name + year
         if (title.toLowerCase() === cleanTorrentName.toLowerCase()) {
           return episodePrefix;
         }
 
-        const titleWithoutYear = title.replace(/\s*\(?\b(19|20)\d{2}\b\)?/g, '').trim();
+        /* eslint-disable sonarjs/slow-regex -- simple pattern on short string */
+        const titleWithoutYear = title
+          .replaceAll(/\s*\(?\b(19|20)\d{2}\b\)?/g, '')
+          .trim();
+        /* eslint-enable sonarjs/slow-regex */
         if (titleWithoutYear.toLowerCase() === cleanTorrentName.toLowerCase()) {
           return episodePrefix;
         }
@@ -592,6 +643,16 @@ export const Formatter = {
     }
 
     return episodePrefix;
+  },
+
+  /** Converts a filename/folder name to a lightweight human-friendly label */
+  humanFileName(name) {
+    return formatHumanFileName(name);
+  },
+
+  /** Converts technical torrent name to human-friendly title */
+  humanTitle(name) {
+    return formatHumanTitle(name);
   },
 
   // Formats a memory size into a human-readable string

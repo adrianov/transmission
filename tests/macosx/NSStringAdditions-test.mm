@@ -204,7 +204,7 @@ TEST_F(NSStringAdditionsTest, HumanReadableTitle_HyphenatedWordNoSpaces)
 
 class PlayButtonIconTest : public ::testing::Test
 {
-protected:
+  protected:
     void SetUp() override
     {
         tester = [[PlayButtonIconTester alloc] init];
