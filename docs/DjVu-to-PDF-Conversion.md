@@ -6,7 +6,7 @@ Transmission’s macOS client can create a companion `.pdf` for completed `.djvu
 
 - **Correctness**: PDF page size matches the DjVu’s page size (uses DjVu pixel size + DPI).
 - **Responsiveness**: conversions run off the UI thread and are throttled.
-- **Deterministic encoding**: PDF uses explicit image filters (JBIG2Decode + JPXDecode), not “draw pixels and let CoreGraphics choose”.
+- **Deterministic encoding**: PDF uses explicit image filters (/JBIG2Decode + /JPXDecode), not “draw pixels and let CoreGraphics choose”.
 
 ### Backend (always-on, deterministic)
 
@@ -24,7 +24,9 @@ Each page is encoded as a **single image XObject**, chosen by content:
 - **Grayscale pages** → **JP2 grayscale** (Grok).
 - **Color pages** → **JP2 RGB** (Grok).
 
-Bitonal detection is based on the rendered grayscale content, not `ddjvu_page_get_type()`.
+Bitonal detection uses `ddjvu_page_get_type()` when available: PHOTO pages are never treated as bitonal; BITONAL pages are treated as bitonal; otherwise it is based on the rendered grayscale content.
+
+**Compound pages** (photo/background + text): the converter merges into a **single JBIG2** only when **separately** just the background layer or just the full-page composite (photo) is considered bitonal. In that case it binarizes the background at render size, ORs with the text mask, crops, and encodes as one JBIG2. Otherwise the page is encoded as background JP2 + foreground JBIG2 (two layers). The background layer is rendered at up to 150 DPI (`MaxBgDpi`).
 
 ### Pipeline overview
 
@@ -40,14 +42,11 @@ Bitonal detection is based on the rendered grayscale content, not `ddjvu_page_ge
 2. **Convert one DjVu to PDF** (entry point: `+[DjvuConverter convertDjvuFile:toPdf:]`)
    - Creates a DjVuLibre context and document (`ddjvu_context_t`, `ddjvu_document_t`), waits for decode to finish, and bails on errors.
    - Renders pages at bounded DPI:
-     - **Max DPI**: no higher than `pageDpi`
+     - **Max DPI**: no higher than 300 or page DPI, whichever is lower (`MaxRenderDpi`).
      - Clamp so neither render dimension exceeds **4000 px**.
-   - Detects content and crops to the minimal bounding rectangle (threshold **245**):
-     - **Grayscale** pages: threshold on the grayscale buffer.
-     - **Color** pages: threshold on RGB content.
-     - **Bitonal** pages: uses DjVu’s mask rendering and clips to foreground.
+   - Detects content and crops to the minimal bounding rectangle using **Otsu adaptive threshold** (Leptonica) on grayscale; bitonal pages use DjVu’s mask rendering and clip to foreground.
    - Encodes deterministically:
-     - **JBIG2** via jbig2enc for bitonal pages (multipage globals + per-page segments, refinement enabled).
+     - **JBIG2** via jbig2enc for bitonal pages (shared globals + per-page segments).
      - **JP2** via Grok for grayscale/color pages.
    - Writes to a temp file, then atomically renames to the final path on success.
 
