@@ -36,7 +36,6 @@
 
 #include <leptonica/allheaders.h>
 #include <jbig2enc.h>
-#include <grok.h>
 #include <turbojpeg.h>
 
 // Track files that have been queued for conversion (by torrent hash -> set of file paths)
@@ -66,19 +65,10 @@ static void computeRenderDimensions(int pageWidth, int pageHeight, int pageDpi, 
     *outHeight = renderHeight;
 }
 
-static void ensureGrokInitialized()
-{
-    static dispatch_once_t onceToken;
-    dispatch_once(&onceToken, ^{
-        // Must be called before using Grok APIs. Use Grok's default thread count (0 = all).
-        grk_initialize(nullptr, 0, nullptr);
-    });
-}
 
 enum class DjvuPdfImageKind
 {
     None,
-    Jp2,
     Jpeg,
     Jbig2
 };
@@ -97,7 +87,7 @@ struct DjvuPdfImageInfo
     double pdfW = 0.0;
     double pdfH = 0.0;
 
-    // Encoded bytes. For JP2: JPXDecode stream. For JBIG2: JBIG2Decode page stream.
+    // Encoded bytes. For JPEG: DCTDecode stream. For JBIG2: JBIG2Decode page stream.
     std::vector<uint8_t> bytes;
 };
 
@@ -107,7 +97,7 @@ struct DjvuPdfPageInfo
     double pdfHeight = 0.0;
     DjvuPdfImageInfo image;
     // For compound pages: background picture layer + foreground text mask overlay
-    DjvuPdfImageInfo bgImage; // Background: JP2 grayscale/RGB
+    DjvuPdfImageInfo bgImage; // Background: JPEG grayscale/RGB
     DjvuPdfImageInfo fgMask; // JBIG2 ImageMask (transparent bg)
 };
 
@@ -874,143 +864,20 @@ static NSData* renderDjvuMaskPbmData(ddjvu_page_t* page, ddjvu_format_t* grey8, 
     return pbm;
 }
 
-// Quality levels for JP2 encoding (PSNR in dB)
-enum class Jp2Quality
-{
-    Background, // 40 dB - compound page backgrounds (behind text, can be lower)
-    Photo, // 42 dB - smooth photographs
-    Document, // 46 dB - document scans, mixed content
-    Sharp // 50 dB - near-bitonal, sharp edges
-};
-
-static double jp2QualityToPsnr(Jp2Quality q)
-{
-    switch (q)
-    {
-    case Jp2Quality::Background:
-        return 40.0;
-    case Jp2Quality::Photo:
-        return 42.0;
-    case Jp2Quality::Document:
-        return 46.0;
-    case Jp2Quality::Sharp:
-        return 50.0;
-    }
-    return 44.0;
-}
-
-// Map DjVu page type to JP2 quality
-static Jp2Quality pageTypeToQuality(ddjvu_page_type_t pageType)
+// Map DjVu page type to JPEG quality
+static int pageTypeToJpegQuality(ddjvu_page_type_t pageType)
 {
     switch (pageType)
     {
     case DDJVU_PAGETYPE_BITONAL:
-        return Jp2Quality::Sharp; // Near-bitonal that didn't go to JBIG2
+        return 95; // Near-bitonal that didn't go to JBIG2
     case DDJVU_PAGETYPE_PHOTO:
-        return Jp2Quality::Photo;
+        return 85; // Smooth photographs
     case DDJVU_PAGETYPE_COMPOUND:
-        return Jp2Quality::Document; // Mixed content
+        return 90; // Mixed content
     default:
-        return Jp2Quality::Document;
+        return 90;
     }
-}
-
-static bool encodeJp2Grok(std::vector<uint8_t>* out, unsigned char const* pixels, int w, int h, size_t stride, bool gray, Jp2Quality quality = Jp2Quality::Document)
-{
-    if (out == nullptr || pixels == nullptr || w <= 0 || h <= 0 || stride == 0)
-        return false;
-
-    ensureGrokInitialized();
-
-    uint16_t const numComps = gray ? 1U : 3U;
-    GRK_COLOR_SPACE const colorSpace = gray ? GRK_CLRSPC_GRAY : GRK_CLRSPC_SRGB;
-
-    auto comps = std::make_unique<grk_image_comp[]>(numComps);
-    for (uint16_t i = 0; i < numComps; ++i)
-    {
-        comps[i] = {};
-        comps[i].w = (uint32_t)w;
-        comps[i].h = (uint32_t)h;
-        comps[i].prec = 8;
-        comps[i].dx = 1;
-        comps[i].dy = 1;
-    }
-
-    grk_image* image = grk_image_new(numComps, comps.get(), colorSpace, true);
-    if (image == nullptr)
-        return false;
-
-    // Copy pixels into Grok's planar int32 component buffers
-    for (int y = 0; y < h; ++y)
-    {
-        auto const* srcRow = pixels + (size_t)y * stride;
-        if (gray)
-        {
-            auto* dstRow = (int32_t*)image->comps[0].data + (uint32_t)y * image->comps[0].stride;
-            for (int x = 0; x < w; ++x)
-                dstRow[x] = srcRow[x];
-        }
-        else
-        {
-            auto* dstR = (int32_t*)image->comps[0].data + (uint32_t)y * image->comps[0].stride;
-            auto* dstG = (int32_t*)image->comps[1].data + (uint32_t)y * image->comps[1].stride;
-            auto* dstB = (int32_t*)image->comps[2].data + (uint32_t)y * image->comps[2].stride;
-            for (int x = 0; x < w; ++x)
-            {
-                int const offset = x * 3;
-                dstR[x] = srcRow[offset];
-                dstG[x] = srcRow[offset + 1];
-                dstB[x] = srcRow[offset + 2];
-            }
-        }
-    }
-
-    bool ok = false;
-    grk_object* codec = nullptr;
-    grk_stream_params stream = {};
-
-    grk_cparameters params;
-    grk_compress_set_default_params(&params);
-    params.cod_format = GRK_FMT_JP2;
-    params.verbose = false;
-    params.irreversible = true;
-    params.numlayers = 1;
-    params.num_threads = 2;
-    params.allocation_by_quality = true;
-    params.layer_distortion[0] = jp2QualityToPsnr(quality);
-
-    size_t rawSize = stride * (size_t)h;
-    size_t cap = MAX(rawSize + 1024U * 1024U, (size_t)64 * 1024);
-
-    for (int attempt = 0; attempt < 3 && !ok; ++attempt)
-    {
-        std::vector<uint8_t> buf(cap);
-        stream.buf = buf.data();
-        stream.buf_len = buf.size();
-
-        codec = grk_compress_init(&stream, &params, image);
-        if (codec == nullptr)
-            break;
-
-        uint64_t const written = grk_compress(codec, nullptr);
-        grk_object_unref(codec);
-        codec = nullptr;
-
-        if (written != 0 && written <= buf.size())
-        {
-            out->assign(buf.data(), buf.data() + (size_t)written);
-            ok = !out->empty();
-            break;
-        }
-
-        cap *= 2;
-    }
-
-    if (codec != nullptr)
-        grk_object_unref(codec);
-    grk_object_unref(&image->obj);
-
-    return ok;
 }
 
 static bool encodeJpegTurbo(std::vector<uint8_t>* out, unsigned char const* pixels, int w, int h, size_t stride, bool gray, int quality)
@@ -1450,18 +1317,16 @@ static bool writePdfDeterministic(
 
         if (isCompound)
         {
-            // Write background image (JP2 or JPEG)
+            // Write background image (JPEG)
             DjvuPdfImageInfo const& bgImg = p.bgImage;
             writeObjBegin(o.bgImg);
             char const* bgCs = bgImg.gray ? "/DeviceGray" : "/DeviceRGB";
-            char const* filter = (bgImg.kind == DjvuPdfImageKind::Jpeg) ? "/DCTDecode" : "/JPXDecode";
             fprintf(
                 fp,
-                "<< /Type /XObject /Subtype /Image /Width %d /Height %d /ColorSpace %s /BitsPerComponent 8 /Filter %s /Length %zu >>\nstream\n",
+                "<< /Type /XObject /Subtype /Image /Width %d /Height %d /ColorSpace %s /BitsPerComponent 8 /Filter /DCTDecode /Length %zu >>\nstream\n",
                 bgImg.w,
                 bgImg.h,
                 bgCs,
-                filter,
                 bgImg.bytes.size());
             fwrite(bgImg.bytes.data(), 1, bgImg.bytes.size(), fp);
             fputs("\nendstream\n", fp);
@@ -1493,17 +1358,15 @@ static bool writePdfDeterministic(
         {
             DjvuPdfImageInfo const& img = p.image;
             writeObjBegin(o.img);
-            if (img.kind == DjvuPdfImageKind::Jp2 || img.kind == DjvuPdfImageKind::Jpeg)
+            if (img.kind == DjvuPdfImageKind::Jpeg)
             {
                 char const* cs = img.gray ? "/DeviceGray" : "/DeviceRGB";
-                char const* filter = (img.kind == DjvuPdfImageKind::Jpeg) ? "/DCTDecode" : "/JPXDecode";
                 fprintf(
                     fp,
-                    "<< /Type /XObject /Subtype /Image /Width %d /Height %d /ColorSpace %s /BitsPerComponent 8 /Filter %s /Length %zu >>\nstream\n",
+                    "<< /Type /XObject /Subtype /Image /Width %d /Height %d /ColorSpace %s /BitsPerComponent 8 /Filter /DCTDecode /Length %zu >>\nstream\n",
                     img.w,
                     img.h,
                     cs,
-                    filter,
                     img.bytes.size());
             }
             else if (img.kind == DjvuPdfImageKind::Jbig2)
@@ -1718,14 +1581,13 @@ static BOOL convertDjvuFileDeterministic(NSString* djvuPath, NSString* tmpPdfPat
     ddjvu_format_set_row_order(msb, TRUE);
     ddjvu_format_set_y_direction(msb, TRUE);
 
-    dispatch_queue_t encQ = dispatch_queue_create("transmission.djvu.jp2.encode", DISPATCH_QUEUE_CONCURRENT);
+    dispatch_queue_t encQ = dispatch_queue_create("transmission.djvu.jpeg.encode", DISPATCH_QUEUE_CONCURRENT);
     dispatch_group_t encGroup = dispatch_group_create();
 
-    // Allow concurrent JP2 encodes. Each encode uses 2 threads (see encodeJp2Grok),
-    // so limit concurrency to cpu/2 for optimal thread utilization.
+    // Allow concurrent JPEG encodes. Limit concurrency based on CPU count.
     NSInteger cpu = NSProcessInfo.processInfo.activeProcessorCount;
-    NSInteger maxJp2Concurrent = MAX(2, cpu / 2);
-    dispatch_semaphore_t sem = dispatch_semaphore_create(maxJp2Concurrent);
+    NSInteger maxJpegConcurrent = MAX(2, cpu);
+    dispatch_semaphore_t sem = dispatch_semaphore_create(maxJpegConcurrent);
 
     bool ok = true;
     // Smaller batches = more parallelism, larger = better symbol sharing
@@ -2035,7 +1897,7 @@ static BOOL convertDjvuFileDeterministic(NSString* djvuPath, NSString* tmpPdfPat
                                         pixDestroy(&scaledBg);
                                 }
                             }
-                            // If background is not bitonal, fall through to two-layer encoding (JP2 + JBIG2)
+                            // If background is not bitonal, fall through to two-layer encoding (JPEG + JBIG2)
 
                             // PDF placement for background (from its own crop bounds)
                             double bgPdfX = (double)bgCrop.x0 / (double)bgW * p.pdfWidth;
@@ -2050,7 +1912,7 @@ static BOOL convertDjvuFileDeterministic(NSString* djvuPath, NSString* tmpPdfPat
                             double fgPdfH = (double)fgCropH / (double)fgFullH * p.pdfHeight;
 
                             // Set up background image info
-                            p.bgImage.kind = DjvuPdfImageKind::Jp2;
+                            p.bgImage.kind = DjvuPdfImageKind::Jpeg;
                             p.bgImage.gray = bgGray;
                             p.bgImage.w = bgCropW;
                             p.bgImage.h = bgCropH;
@@ -2059,7 +1921,7 @@ static BOOL convertDjvuFileDeterministic(NSString* djvuPath, NSString* tmpPdfPat
                             p.bgImage.pdfW = bgPdfW;
                             p.bgImage.pdfH = bgPdfH;
 
-                            // Encode cropped background as JP2
+                            // Encode cropped background as JPEG
                             if (bgGray)
                             {
                                 std::vector<unsigned char> grayBuf = rgb24ToGrayscale(bgRgb.data(), bgW, bgH, bgRowBytes);
@@ -2068,10 +1930,10 @@ static BOOL convertDjvuFileDeterministic(NSString* djvuPath, NSString* tmpPdfPat
                                     @autoreleasepool
                                     {
                                         dispatch_semaphore_wait(sem, DISPATCH_TIME_FOREVER);
-                                        std::vector<uint8_t> jp2;
-                                        (void)encodeJp2Grok(&jp2, croppedGray.data(), bgCropW, bgCropH, (size_t)bgCropW, true, Jp2Quality::Background);
-                                        if (!jp2.empty())
-                                            pagesPtr[pageNum].bgImage.bytes = std::move(jp2);
+                                        std::vector<uint8_t> jpeg;
+                                        (void)encodeJpegTurbo(&jpeg, croppedGray.data(), bgCropW, bgCropH, (size_t)bgCropW, true, 60);
+                                        if (!jpeg.empty())
+                                            pagesPtr[pageNum].bgImage.bytes = std::move(jpeg);
                                         dispatch_semaphore_signal(sem);
                                     }
                                 });
@@ -2083,10 +1945,10 @@ static BOOL convertDjvuFileDeterministic(NSString* djvuPath, NSString* tmpPdfPat
                                     @autoreleasepool
                                     {
                                         dispatch_semaphore_wait(sem, DISPATCH_TIME_FOREVER);
-                                        std::vector<uint8_t> jp2;
-                                        (void)encodeJp2Grok(&jp2, croppedBg.data(), bgCropW, bgCropH, (size_t)bgCropW * 3U, false, Jp2Quality::Background);
-                                        if (!jp2.empty())
-                                            pagesPtr[pageNum].bgImage.bytes = std::move(jp2);
+                                        std::vector<uint8_t> jpeg;
+                                        (void)encodeJpegTurbo(&jpeg, croppedBg.data(), bgCropW, bgCropH, (size_t)bgCropW * 3U, false, 60);
+                                        if (!jpeg.empty())
+                                            pagesPtr[pageNum].bgImage.bytes = std::move(jpeg);
                                         dispatch_semaphore_signal(sem);
                                     }
                                 });
@@ -2209,7 +2071,7 @@ static BOOL convertDjvuFileDeterministic(NSString* djvuPath, NSString* tmpPdfPat
                 if (gray)
                 {
                     // Check bitonal: trust page type first, then check rendered content
-                    // Skip bitonal check for PHOTO pages - they should stay as JP2
+                    // Skip bitonal check for PHOTO pages - they should stay as JPEG
                     bool const bitonal = (pageType != DDJVU_PAGETYPE_PHOTO) &&
                         (pageType == DDJVU_PAGETYPE_BITONAL || isBitonalGrayscaleRgb(rgb.data(), renderW, renderH, rowBytes));
                     if (bitonal)
@@ -2343,41 +2205,22 @@ static BOOL convertDjvuFileDeterministic(NSString* djvuPath, NSString* tmpPdfPat
                         int cropH = cr.y1 - cr.y0;
                         std::vector<uint8_t> pixels = extractGrayCrop(grayBuf.data(), renderW, cr);
 
-                        p.image.kind = DjvuPdfImageKind::Jp2;
+                        p.image.kind = DjvuPdfImageKind::Jpeg;
                         p.image.gray = true;
                         p.image.w = cropW;
                         p.image.h = cropH;
                         setPdfPlacementForCrop(&p.image, renderW, renderH, cr, p.pdfWidth, p.pdfHeight);
 
                         // Use DjVu page type for quality selection
-                        Jp2Quality quality = pageTypeToQuality(pageType);
-                        bool const useJpeg = (pageType == DDJVU_PAGETYPE_PHOTO);
+                        int quality = pageTypeToJpegQuality(pageType);
 
                         dispatch_group_async(encGroup, encQ, ^{
                             @autoreleasepool
                             {
                                 dispatch_semaphore_wait(sem, DISPATCH_TIME_FOREVER);
                                 std::vector<uint8_t> encoded;
-                                bool ok = false;
-                                if (useJpeg)
-                                {
-                                    int q = 85;
-                                    if (quality == Jp2Quality::Background) q = 60;
-                                    else if (quality == Jp2Quality::Photo) q = 85;
-                                    else if (quality == Jp2Quality::Document) q = 90;
-                                    else if (quality == Jp2Quality::Sharp) q = 95;
-
-                                    ok = encodeJpegTurbo(&encoded, pixels.data(), cropW, cropH, (size_t)cropW, true, q);
-                                    if (ok)
-                                        pagesPtr[pageNum].image.kind = DjvuPdfImageKind::Jpeg;
-                                }
-
-                                if (!ok)
-                                {
-                                    ok = encodeJp2Grok(&encoded, pixels.data(), cropW, cropH, (size_t)cropW, true, quality);
-                                }
-
-                                if (ok)
+                                bool encodedOk = encodeJpegTurbo(&encoded, pixels.data(), cropW, cropH, (size_t)cropW, true, quality);
+                                if (encodedOk)
                                     pagesPtr[pageNum].image.bytes = std::move(encoded);
                                 dispatch_semaphore_signal(sem);
                             }
@@ -2403,41 +2246,22 @@ static BOOL convertDjvuFileDeterministic(NSString* djvuPath, NSString* tmpPdfPat
                     int cropH = cr.y1 - cr.y0;
                     std::vector<uint8_t> pixels = extractRgbCrop(rgb.data(), rowBytes, cr);
 
-                    p.image.kind = DjvuPdfImageKind::Jp2;
+                    p.image.kind = DjvuPdfImageKind::Jpeg;
                     p.image.gray = false;
                     p.image.w = cropW;
                     p.image.h = cropH;
                     setPdfPlacementForCrop(&p.image, renderW, renderH, cr, p.pdfWidth, p.pdfHeight);
 
                     // Use DjVu page type for quality selection
-                    Jp2Quality quality = pageTypeToQuality(pageType);
-                    bool const useJpeg = (pageType == DDJVU_PAGETYPE_PHOTO);
+                    int quality = pageTypeToJpegQuality(pageType);
 
                     dispatch_group_async(encGroup, encQ, ^{
                         @autoreleasepool
                         {
                             dispatch_semaphore_wait(sem, DISPATCH_TIME_FOREVER);
                             std::vector<uint8_t> encoded;
-                            bool ok = false;
-                            if (useJpeg)
-                            {
-                                int q = 85;
-                                if (quality == Jp2Quality::Background) q = 60;
-                                else if (quality == Jp2Quality::Photo) q = 85;
-                                else if (quality == Jp2Quality::Document) q = 90;
-                                else if (quality == Jp2Quality::Sharp) q = 95;
-
-                                ok = encodeJpegTurbo(&encoded, pixels.data(), cropW, cropH, (size_t)cropW * 3U, false, q);
-                                if (ok)
-                                    pagesPtr[pageNum].image.kind = DjvuPdfImageKind::Jpeg;
-                            }
-
-                            if (!ok)
-                            {
-                                ok = encodeJp2Grok(&encoded, pixels.data(), cropW, cropH, (size_t)cropW * 3U, false, quality);
-                            }
-
-                            if (ok)
+                            bool encodedOk = encodeJpegTurbo(&encoded, pixels.data(), cropW, cropH, (size_t)cropW * 3U, false, quality);
+                            if (encodedOk)
                                 pagesPtr[pageNum].image.bytes = std::move(encoded);
                             dispatch_semaphore_signal(sem);
                         }
@@ -2451,7 +2275,7 @@ static BOOL convertDjvuFileDeterministic(NSString* djvuPath, NSString* tmpPdfPat
         }
     }
 
-    // Wait for all JP2 encoding to complete
+    // Wait for all JPEG encoding to complete
     dispatch_group_wait(encGroup, DISPATCH_TIME_FOREVER);
 
     // Clean up PIXes if there was an error
@@ -2468,15 +2292,15 @@ static BOOL convertDjvuFileDeterministic(NSString* djvuPath, NSString* tmpPdfPat
         for (int i = 0; i < pageCount && ok; ++i)
         {
             // Check compound page background encoding
-            if (pagesPtr[i].bgImage.kind == DjvuPdfImageKind::Jp2 && pagesPtr[i].bgImage.bytes.empty())
+            if (pagesPtr[i].bgImage.kind == DjvuPdfImageKind::Jpeg && pagesPtr[i].bgImage.bytes.empty())
             {
-                NSLog(@"DjvuConverter ERROR: JP2 encoding failed for compound page %d background in %@", i, djvuPath);
+                NSLog(@"DjvuConverter ERROR: JPEG encoding failed for compound page %d background in %@", i, djvuPath);
                 ok = false;
             }
             // Check regular page encoding
-            else if ((pagesPtr[i].image.kind == DjvuPdfImageKind::Jp2 || pagesPtr[i].image.kind == DjvuPdfImageKind::Jpeg) && pagesPtr[i].image.bytes.empty())
+            else if (pagesPtr[i].image.kind == DjvuPdfImageKind::Jpeg && pagesPtr[i].image.bytes.empty())
             {
-                NSLog(@"DjvuConverter ERROR: Image encoding failed for page %d in %@", i, djvuPath);
+                NSLog(@"DjvuConverter ERROR: JPEG encoding failed for page %d in %@", i, djvuPath);
                 ok = false;
             }
         }
