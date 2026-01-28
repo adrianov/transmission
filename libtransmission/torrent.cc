@@ -1907,9 +1907,11 @@ void tr_torrent::recheck_completeness()
                 get_completion_string(completeness_),
                 get_completion_string(new_completeness)));
 
+        auto const was_done = is_done();
         completeness_ = new_completeness;
+        auto const is_now_done = is_done();
 
-        if (is_done())
+        if (is_now_done)
         {
             session->close_torrent_files(id());
 
@@ -1928,6 +1930,11 @@ void tr_torrent::recheck_completeness()
             }
 
             done_.emit(this, recent_change);
+        }
+        else if (was_done && !is_now_done && was_running)
+        {
+            // Transitioning from done to leech - recreate wishlist if torrent is running
+            tr_peerMgrEnsureWishlist(this);
         }
 
         session->onTorrentCompletenessChanged(this, completeness_, was_running);
