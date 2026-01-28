@@ -1754,7 +1754,31 @@ static BOOL convertDjvuFileDeterministic(NSString* djvuPath, NSString* tmpPdfPat
             // Handle compound pages (text over picture) specially
             if (pageType == DDJVU_PAGETYPE_COMPOUND)
             {
-                // Render foreground text mask FIRST to check if compound mode is worthwhile
+                // Check if full-page composite (photo) is bitonal when considered alone; used for merge decision.
+                bool fullPageBitonal = false;
+                int checkW = 0;
+                int checkH = 0;
+                int const checkDpi = MAX(1, MIN((int)(512.0 * pageDpi / (double)MAX(pageWidth, pageHeight)), pageDpi));
+                computeRenderDimensions(pageWidth, pageHeight, pageDpi, checkDpi, &checkW, &checkH);
+                if (checkW > 0 && checkH > 0)
+                {
+                    size_t checkRowBytes = (size_t)checkW * 3U;
+                    std::vector<uint8_t> checkRgb(checkRowBytes * (size_t)checkH, (uint8_t)0xFF);
+                    ddjvu_rect_t checkRect = { 0, 0, (unsigned int)checkW, (unsigned int)checkH };
+                    int checkRendered = ddjvu_page_render(
+                        page,
+                        DDJVU_RENDER_COLOR,
+                        &checkRect,
+                        &checkRect,
+                        rgb24,
+                        (unsigned long)checkRowBytes,
+                        (char*)checkRgb.data());
+                    fullPageBitonal = (checkRendered != 0) &&
+                        isGrayscaleRgb24(checkRgb.data(), checkW, checkH, checkRowBytes) &&
+                        isBitonalGrayscaleRgb(checkRgb.data(), checkW, checkH, checkRowBytes);
+                }
+
+                // Render foreground text mask to check if compound mode is worthwhile
                 double maskCoverage = 0.0;
                 bool const preferBitonal = (renderDpi == pageDpi) && (renderW == pageWidth) && (renderH == pageHeight);
                 NSData* fgPbm = renderDjvuMaskPbmData(page, grey8, msb, renderW, renderH, preferBitonal, &maskCoverage);
@@ -1871,6 +1895,103 @@ static BOOL convertDjvuFileDeterministic(NSString* djvuPath, NSString* tmpPdfPat
                         }
                         else
                         {
+                            // Merge only when separately just background or full-page photo is bitonal; otherwise two-layer
+                            bool const bgIsBitonal = isBitonalGrayscaleRgb(bgRgb.data(), bgW, bgH, bgRowBytes);
+                            if (bgIsBitonal || fullPageBitonal)
+                            {
+                                // Merge bitonal: binarize background at render size, OR with text mask → single JBIG2 per page
+                                PIX* bgGrayMerge = pixCreate(bgW, bgH, 8);
+                                if (bgGrayMerge != nullptr)
+                                {
+                                    if (bgGray)
+                                    {
+                                        for (int y = 0; y < bgH; ++y)
+                                        {
+                                            auto const* srcRow = bgRgb.data() + (size_t)y * bgRowBytes;
+                                            l_uint32* dstRow = pixGetData(bgGrayMerge) + y * pixGetWpl(bgGrayMerge);
+                                            for (int x = 0; x < bgW; ++x)
+                                                SET_DATA_BYTE(dstRow, x, srcRow[x * 3]);
+                                        }
+                                    }
+                                    else
+                                    {
+                                        std::vector<unsigned char> grayBuf = rgb24ToGrayscale(bgRgb.data(), bgW, bgH, bgRowBytes);
+                                        for (int y = 0; y < bgH; ++y)
+                                        {
+                                            auto const* srcRow = grayBuf.data() + (size_t)y * (size_t)bgW;
+                                            l_uint32* dstRow = pixGetData(bgGrayMerge) + y * pixGetWpl(bgGrayMerge);
+                                            for (int x = 0; x < bgW; ++x)
+                                                SET_DATA_BYTE(dstRow, x, srcRow[x]);
+                                        }
+                                    }
+                                    float const sx = (float)renderW / (float)bgW;
+                                    float const sy = (float)renderH / (float)bgH;
+                                    PIX* scaledBg = pixScale(bgGrayMerge, sx, sy);
+                                    pixDestroy(&bgGrayMerge);
+                                    if (scaledBg != nullptr && pixGetWidth(scaledBg) == renderW && pixGetHeight(scaledBg) == renderH)
+                                    {
+                                        int constexpr MergeThresh = 128;
+                                        PIX* bgBinMerge = pixThresholdToBinary(scaledBg, MergeThresh);
+                                        pixDestroy(&scaledBg);
+                                        if (bgBinMerge != nullptr)
+                                        {
+                                            PIX* merged = pixOr(nullptr, bgBinMerge, fgPix);
+                                            pixDestroy(&bgBinMerge);
+                                            if (merged != nullptr)
+                                            {
+                                                BOX* mergeBox = nullptr;
+                                                if (pixClipToForeground(merged, nullptr, &mergeBox) == 0 && mergeBox != nullptr)
+                                                {
+                                                    l_int32 bx, by, bw, bh;
+                                                    boxGetGeometry(mergeBox, &bx, &by, &bw, &bh);
+                                                    int const x0 = MAX(0, (int)bx - CropPad);
+                                                    int const y0 = MAX(0, (int)by - CropPad);
+                                                    int const x1 = MIN(renderW, (int)bx + (int)bw + CropPad);
+                                                    int const y1 = MIN(renderH, (int)by + (int)bh + CropPad);
+                                                    BOX* clipBox = boxCreate(x0, y0, x1 - x0, y1 - y0);
+                                                    PIX* mergedCropped = (clipBox != nullptr) ? pixClipRectangle(merged, clipBox, nullptr) : nullptr;
+                                                    boxDestroy(&clipBox);
+                                                    boxDestroy(&mergeBox);
+                                                    pixDestroy(&merged);
+                                                    if (mergedCropped != nullptr && pixGetWidth(mergedCropped) > 0 && pixGetHeight(mergedCropped) > 0)
+                                                    {
+                                                        CropRect const mergeCrop{ x0, y0, x1, y1 };
+                                                        p.image.kind = DjvuPdfImageKind::Jbig2;
+                                                        p.image.w = pixGetWidth(mergedCropped);
+                                                        p.image.h = pixGetHeight(mergedCropped);
+                                                        setPdfPlacementForCrop(&p.image, renderW, renderH, mergeCrop, p.pdfWidth, p.pdfHeight);
+                                                        jbig2Batch.pageNums.push_back(pageNum);
+                                                        jbig2Batch.pixes.push_back(mergedCropped);
+                                                        if ((int)jbig2Batch.pixes.size() >= Jbig2BatchSize)
+                                                        {
+                                                            flushJbig2BatchAsync(std::move(jbig2Batch), &jbig2Ctx);
+                                                            jbig2Batch = Jbig2Batch{};
+                                                        }
+                                                        pixDestroy(&fgPix);
+                                                        ddjvu_page_release(page);
+                                                        incrementDonePagesForPath(djvuPath);
+                                                        continue;
+                                                    }
+                                                    if (mergedCropped != nullptr)
+                                                        pixDestroy(&mergedCropped);
+                                                }
+                                                else
+                                                {
+                                                    if (mergeBox != nullptr)
+                                                        boxDestroy(&mergeBox);
+                                                    pixDestroy(&merged);
+                                                }
+                                            }
+                                        }
+                                        else
+                                            pixDestroy(&scaledBg);
+                                    }
+                                    else if (scaledBg != nullptr)
+                                        pixDestroy(&scaledBg);
+                                }
+                            }
+                            // If background is not bitonal, fall through to two-layer encoding (JP2 + JBIG2)
+
                             // PDF placement for background (from its own crop bounds)
                             double bgPdfX = (double)bgCrop.x0 / (double)bgW * p.pdfWidth;
                             double bgPdfY = (1.0 - (double)bgCrop.y1 / (double)bgH) * p.pdfHeight;
@@ -2042,9 +2163,10 @@ static BOOL convertDjvuFileDeterministic(NSString* djvuPath, NSString* tmpPdfPat
 
                 if (gray)
                 {
-                    // Check bitonal directly from RGB buffer (avoids gray buffer allocation for bitonal pages)
+                    // Check bitonal: trust page type first, then check rendered content
                     // Skip bitonal check for PHOTO pages - they should stay as JP2
-                    bool const bitonal = (pageType != DDJVU_PAGETYPE_PHOTO) && isBitonalGrayscaleRgb(rgb.data(), renderW, renderH, rowBytes);
+                    bool const bitonal = (pageType != DDJVU_PAGETYPE_PHOTO) &&
+                        (pageType == DDJVU_PAGETYPE_BITONAL || isBitonalGrayscaleRgb(rgb.data(), renderW, renderH, rowBytes));
                     if (bitonal)
                     {
                         bool const preferBitonal = (renderDpi == pageDpi) && (renderW == pageWidth) && (renderH == pageHeight);
@@ -2097,6 +2219,63 @@ static BOOL convertDjvuFileDeterministic(NSString* djvuPath, NSString* tmpPdfPat
                                 if (box != nullptr)
                                     boxDestroy(&box);
                                 pixDestroy(&pix);
+                            }
+                        }
+                        
+                        // If mask rendering failed for a bitonal page, binarize the grayscale content
+                        if (p.image.kind == DjvuPdfImageKind::None && bitonal)
+                        {
+                            std::vector<unsigned char> grayBuf = rgb24ToGrayscale(rgb.data(), renderW, renderH, rowBytes);
+                            
+                            // Binarize using Otsu threshold
+                            CropRect cr = { 0, 0, renderW, renderH };
+                            CropRect otsuCrop{};
+                            if (findContentRectOtsu(grayBuf.data(), renderW, renderH, (size_t)renderW, &otsuCrop))
+                            {
+                                padCropRect(&otsuCrop, CropPad, renderW, renderH);
+                                if (otsuCrop.x1 - otsuCrop.x0 > 0 && otsuCrop.y1 - otsuCrop.y0 > 0)
+                                    cr = otsuCrop;
+                            }
+                            
+                            int cropW = cr.x1 - cr.x0;
+                            int cropH = cr.y1 - cr.y0;
+                            std::vector<unsigned char> cropGray = extractGrayCrop(grayBuf.data(), renderW, cr);
+                            
+                            // Convert to 1-bit PIX
+                            PIX* pixGray = pixCreate(cropW, cropH, 8);
+                            if (pixGray != nullptr)
+                            {
+                                for (int y = 0; y < cropH; ++y)
+                                {
+                                    l_uint32* dstRow = pixGetData(pixGray) + (size_t)y * pixGetWpl(pixGray);
+                                    auto const* src = cropGray.data() + (size_t)y * (size_t)cropW;
+                                    for (int x = 0; x < cropW; ++x)
+                                        SET_DATA_BYTE(dstRow, x, src[x]);
+                                }
+                                
+                                // Binarize using Otsu adaptive threshold
+                                PIX* pix1 = nullptr;
+                                pixOtsuAdaptiveThreshold(pixGray, 0, 0, 0, 0, 0.0f, nullptr, &pix1);
+                                pixDestroy(&pixGray);
+                                
+                                if (pix1 != nullptr && pixGetWidth(pix1) > 0 && pixGetHeight(pix1) > 0)
+                                {
+                                    p.image.kind = DjvuPdfImageKind::Jbig2;
+                                    p.image.w = pixGetWidth(pix1);
+                                    p.image.h = pixGetHeight(pix1);
+                                    setPdfPlacementForCrop(&p.image, renderW, renderH, cr, p.pdfWidth, p.pdfHeight);
+                                    jbig2Batch.pageNums.push_back(pageNum);
+                                    jbig2Batch.pixes.push_back(pix1);
+                                    if ((int)jbig2Batch.pixes.size() >= Jbig2BatchSize)
+                                    {
+                                        flushJbig2BatchAsync(std::move(jbig2Batch), &jbig2Ctx);
+                                        jbig2Batch = Jbig2Batch{};
+                                    }
+                                }
+                                else if (pix1 != nullptr)
+                                {
+                                    pixDestroy(&pix1);
+                                }
                             }
                         }
                     }
