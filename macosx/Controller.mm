@@ -2585,8 +2585,7 @@ void onTorrentCompletenessChanged(tr_torrent* tor, tr_completeness status, bool 
     [self.fInfoController updateInfoStats];
     [self.fInfoController.window orderFront:nil];
 
-    if (self.fInfoController.canQuickLook && [QLPreviewPanel sharedPreviewPanelExists] &&
-        [QLPreviewPanel sharedPreviewPanel].visible)
+    if (self.fInfoController.canQuickLook && [QLPreviewPanel sharedPreviewPanelExists] && [QLPreviewPanel sharedPreviewPanel].visible)
     {
         [[QLPreviewPanel sharedPreviewPanel] reloadData];
     }
@@ -3256,7 +3255,8 @@ void onTorrentCompletenessChanged(tr_torrent* tor, tr_completeness status, bool 
     NSInteger const groupFilterValue = [self.fDefaults integerForKey:@"FilterGroup"];
     BOOL const filterGroup = groupFilterValue != kGroupFilterAllTag;
 
-    NSArray<NSString*>* searchStrings = [self.fToolbarSearchField.stringValue nonEmptyComponentsSeparatedByCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+    NSArray<NSString*>* searchStrings = [self.fToolbarSearchField.stringValue
+        nonEmptyComponentsSeparatedByCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
     if (searchStrings && searchStrings.count == 0)
     {
         searchStrings = nil;
@@ -3741,7 +3741,7 @@ void onTorrentCompletenessChanged(tr_torrent* tor, tr_completeness status, bool 
             dispatch_async(dispatch_get_main_queue(), ^{
                 // Ensure table view layout is complete before finding row
                 NSInteger row = [self.fTableView rowForItem:firstNew];
-                
+
                 // If row not found and grouping is enabled, check if torrent is in a collapsed group
                 if (row == -1 && [self.fDefaults boolForKey:@"SortByGroup"])
                 {
@@ -3760,7 +3760,7 @@ void onTorrentCompletenessChanged(tr_torrent* tor, tr_completeness status, bool 
                         row = [self.fTableView rowForItem:firstNew];
                     }
                 }
-                
+
                 if (row >= 0 && row < self.fTableView.numberOfRows)
                 {
                     [self.fTableView selectAndScrollToRow:row];
@@ -5168,7 +5168,8 @@ void onTorrentCompletenessChanged(tr_torrent* tor, tr_completeness status, bool 
         BOOL warning = NO;
 
         BOOL const isSearchFocused = [self.fWindow.firstResponder isKindOfClass:NSTextView.class] &&
-            [self.fWindow fieldEditor:NO forObject:nil] != nil && [self.fToolbarSearchField isEqual:((NSTextView*)self.fWindow.firstResponder).delegate];
+            [self.fWindow fieldEditor:NO forObject:nil] != nil &&
+            [self.fToolbarSearchField isEqual:((NSTextView*)self.fWindow.firstResponder).delegate];
 
         if (isSearchFocused)
         {
@@ -5857,7 +5858,7 @@ void onTorrentCompletenessChanged(tr_torrent* tor, tr_completeness status, bool 
     NSError* error = nil;
     NSRegularExpression* regex = [NSRegularExpression regularExpressionWithPattern:@"(https?://[^/]+/).*(viewtopic|details|browse)\\.php"
                                                                            options:NSRegularExpressionCaseInsensitive
-                                                                              error:&error];
+                                                                             error:&error];
 
     // Count torrents per tracker domain found in comments
     NSCountedSet<NSString*>* domainCounts = [[NSCountedSet alloc] init];
@@ -5902,13 +5903,15 @@ void onTorrentCompletenessChanged(tr_torrent* tor, tr_completeness status, bool 
     if (domainCounts.count > 0)
     {
         // Sort domains by count descending
-        NSArray<NSString*>* sortedDomains = [domainCounts.allObjects sortedArrayUsingComparator:^NSComparisonResult(NSString* a, NSString* b) {
-            return [@([domainCounts countForObject:b]) compare:@([domainCounts countForObject:a])];
-        }];
+        NSArray<NSString*>* sortedDomains = [domainCounts.allObjects
+            sortedArrayUsingComparator:^NSComparisonResult(NSString* a, NSString* b) {
+                return [@([domainCounts countForObject:b]) compare:@([domainCounts countForObject:a])];
+            }];
         topDomain = sortedDomains[0];
     }
 
-    NSString* placeholder = [NSString stringWithFormat:NSLocalizedString(@"Press Enter to Search on %@...", "Search toolbar item -> placeholder"), topDomain];
+    NSString* placeholder = [NSString
+        stringWithFormat:NSLocalizedString(@"Press Enter to Search on %@...", "Search toolbar item -> placeholder"), topDomain];
     if (![self.fToolbarSearchField.placeholderString isEqualToString:placeholder])
     {
         self.fToolbarSearchField.placeholderString = placeholder;

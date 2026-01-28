@@ -27,7 +27,7 @@
         [self setupTrackingArea];
         self.cell.lineBreakMode = NSLineBreakByTruncatingTail;
         self.cell.truncatesLastVisibleLine = YES;
-        
+
         [self updateBackground];
     }
     return self;
