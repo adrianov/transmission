@@ -3867,6 +3867,11 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
     tr_torrentSetFileDLs(self.fHandle, files, count, state != NSControlStateValueOff);
     free(files);
 
+    self.fPlayableFiles = nil;
+    self.cachedPlayButtonState = nil;
+    self.cachedPlayButtonSource = nil;
+    self.cachedPlayButtonLayout = nil;
+
     [self update];
     [NSNotificationCenter.defaultCenter postNotificationName:@"TorrentFileCheckChange" object:self];
 }
