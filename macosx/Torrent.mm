@@ -1739,7 +1739,7 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
         {
             companionPdfPath = [path.stringByDeletingPathExtension stringByAppendingPathExtension:@"pdf"];
             // Only use companion PDF if it exists.
-            // DjvuConverter writes PDFs atomically (temp file + rename), so partial PDFs won't be visible.
+            // DjvuConverter builds PDF in memory and writes once to the final path (no temp file).
             if ([NSFileManager.defaultManager fileExistsAtPath:companionPdfPath])
             {
                 useCompanionPdf = YES;
