@@ -48,10 +48,10 @@ Bitonal detection uses `ddjvu_page_get_type()` when available: PHOTO pages are n
    - Encodes deterministically:
      - **JBIG2** via jbig2enc for bitonal pages (shared globals + per-page segments).
      - **JP2** via Grok for grayscale/color pages.
-   - Writes to a temp file, then atomically renames to the final path on success.
+   - Builds the PDF in memory, then writes once to the final path with a single `fwrite` (no temp file; no leftover `.tmp` on shutdown).
 
-3. **Write the PDF** (`writePdfDeterministic`)
-   - Writes PDF objects and XRef manually to avoid non-deterministic encoders.
+3. **Write the PDF** (`IncrementalPdfWriter`)
+   - Writes PDF objects and XRef to a memory buffer, then flushes to disk in one atomic write.
    - Each page is a single image XObject + a tiny content stream to place it.
    - JBIG2 pages reference `/JBIG2Globals` objects for better compression.
 

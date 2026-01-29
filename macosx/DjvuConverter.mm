@@ -1120,7 +1120,7 @@ static void flushJbig2BatchAsync(Jbig2Batch batch, std::shared_ptr<Jbig2AsyncCon
     });
 }
 
-static BOOL convertDjvuFileDeterministic(NSString* djvuPath, NSString* tmpPdfPath)
+static BOOL convertDjvuFileDeterministic(NSString* djvuPath, NSString* pdfPath)
 {
     if (!djvuPath || djvuPath.length == 0)
     {
@@ -1253,7 +1253,7 @@ static BOOL convertDjvuFileDeterministic(NSString* djvuPath, NSString* tmpPdfPat
     jbig2Globals.reserve((size_t)estimatedMaxJbig2Globals);
 
     auto pdfWriterPtr = std::make_shared<IncrementalPdfWriter>();
-    if (!pdfWriterPtr->init(tmpPdfPath, pageCount, jbig2Globals, outline, metadata, estimatedMaxJbig2Globals))
+    if (!pdfWriterPtr->init(pageCount, jbig2Globals, outline, metadata, estimatedMaxJbig2Globals))
     {
         NSLog(@"DjvuConverter ERROR: failed to initialize PDF writer for %@", djvuPath);
         setFailedConversionError(djvuPath, @"Failed to initialize PDF writer");
@@ -2209,19 +2209,26 @@ static BOOL convertDjvuFileDeterministic(NSString* djvuPath, NSString* tmpPdfPat
             }
         }
 
-        // Finalize PDF after all pages are written
+        // Finalize PDF and write to disk in one atomic write (no temp file)
         if (ok && !pdfWriterPtr->isFinalized())
         {
             NSLog(@"DjvuConverter: Finalizing PDF for %@", djvuPath);
             ok = pdfWriterPtr->finalize(jbig2Globals);
-            if (!ok)
+            if (ok)
             {
-                NSLog(@"DjvuConverter ERROR: PDF finalization failed for %@", djvuPath);
-                setFailedConversionError(djvuPath, @"PDF finalization failed");
+                ok = pdfWriterPtr->writeToFile(pdfPath);
+                if (!ok)
+                {
+                    NSLog(@"DjvuConverter ERROR: failed to write PDF to %@", pdfPath);
+                    setFailedConversionError(djvuPath, @"Failed to write PDF to disk");
+                }
+                else
+                    NSLog(@"DjvuConverter: Successfully wrote PDF for %@", djvuPath);
             }
             else
             {
-                NSLog(@"DjvuConverter: Successfully finalized PDF for %@", djvuPath);
+                NSLog(@"DjvuConverter ERROR: PDF finalization failed for %@", djvuPath);
+                setFailedConversionError(djvuPath, @"PDF finalization failed");
             }
         }
     }
@@ -2687,29 +2694,7 @@ static void clearPageTrackingForPath(NSString* djvuPath)
 
 + (BOOL)convertDjvuFile:(NSString*)djvuPath toPdf:(NSString*)pdfPath
 {
-    NSString* tmpPdfPath = [pdfPath stringByAppendingFormat:@".tmp-%@", NSUUID.UUID.UUIDString];
-
-    BOOL success = convertDjvuFileDeterministic(djvuPath, tmpPdfPath);
-    if (!success)
-    {
-        NSLog(@"DjvuConverter ERROR: conversion failed for %@", djvuPath);
-        setFailedConversionError(djvuPath, @"Conversion failed");
-        [NSFileManager.defaultManager removeItemAtPath:tmpPdfPath error:nil];
-        return NO;
-    }
-
-    // Replace destination atomically to avoid ever exposing a partial PDF.
-    [NSFileManager.defaultManager removeItemAtPath:pdfPath error:nil];
-    NSError* moveError = nil;
-    if (![NSFileManager.defaultManager moveItemAtPath:tmpPdfPath toPath:pdfPath error:&moveError])
-    {
-        NSLog(@"DjvuConverter ERROR: failed to move temp PDF to final location for %@: %@", djvuPath, moveError);
-        setFailedConversionError(djvuPath, @"Failed to move PDF to final location");
-        [NSFileManager.defaultManager removeItemAtPath:tmpPdfPath error:nil];
-        return NO;
-    }
-
-    return YES;
+    return convertDjvuFileDeterministic(djvuPath, pdfPath);
 }
 
 + (NSArray<NSString*>*)convertedFilesForTorrent:(Torrent*)torrent

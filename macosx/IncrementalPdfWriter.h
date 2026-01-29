@@ -6,6 +6,7 @@
 
 #import <Foundation/Foundation.h>
 
+#include <cstdarg>
 #include <cstdio>
 #include <atomic>
 #include <mutex>
@@ -181,10 +182,10 @@ struct PageObjs
     int page = 0;
 };
 
-// Incremental PDF writer - writes pages as they become ready
+// Incremental PDF writer - builds PDF in memory, then writes once to disk (no temp file).
 struct IncrementalPdfWriter
 {
-    FILE* fp = nullptr;
+    std::vector<uint8_t> buffer_;
     int nextObj = 1;
     int catalogObj = 0;
     int pagesObj = 0;
@@ -202,27 +203,54 @@ struct IncrementalPdfWriter
     bool initialized = false;
     std::atomic<bool> finalized{ false }; // Track if PDF has been finalized
 
+    void appendStr(std::string_view s)
+    {
+        buffer_.insert(buffer_.end(), s.data(), s.data() + s.size());
+    }
+
+    void appendFmt(char const* fmt, ...)
+    {
+        char stack[2048];
+        va_list ap;
+        va_start(ap, fmt);
+        int n = vsnprintf(stack, sizeof(stack), fmt, ap);
+        va_end(ap);
+        if (n <= 0)
+            return;
+        if ((size_t)n < sizeof(stack))
+            buffer_.insert(buffer_.end(), stack, stack + n);
+        else
+        {
+            std::vector<char> heap((size_t)n + 1);
+            va_start(ap, fmt);
+            vsnprintf(heap.data(), heap.size(), fmt, ap);
+            va_end(ap);
+            buffer_.insert(buffer_.end(), heap.data(), heap.data() + n);
+        }
+    }
+
+    void appendBytes(uint8_t const* bytes, size_t len)
+    {
+        if (len > 0)
+            buffer_.insert(buffer_.end(), bytes, bytes + len);
+    }
+
     bool init(
-        NSString* tmpPdfPath,
         int pageCount,
         std::vector<std::vector<uint8_t>> const& jbig2Globals,
         std::vector<OutlineNode> const& outlineNodes,
         std::unordered_map<std::string, std::string> const& meta,
         int estimatedMaxJbig2Globals = 0)
     {
-        if (tmpPdfPath == nil || pageCount <= 0)
+        if (pageCount <= 0)
             return false;
 
-        fp = fopen(tmpPdfPath.UTF8String, "wb");
-        if (fp == nullptr)
-            return false;
-
+        buffer_.clear();
         metadata = meta;
         pageObjs.resize((size_t)pageCount);
         pagesWritten.resize((size_t)pageCount, false);
 
-        // PDF header + binary marker
-        fputs("%PDF-1.7\n%\xE2\xE3\xCF\xD3\n", fp);
+        appendStr("%PDF-1.7\n%\xE2\xE3\xCF\xD3\n");
 
         // Reserve object numbers
         catalogObj = nextObj++;
@@ -271,28 +299,27 @@ struct IncrementalPdfWriter
 
     void writeObjBegin(int objNum)
     {
-        offsets[(size_t)objNum] = (uint64_t)ftello(fp);
-        fprintf(fp, "%d 0 obj\n", objNum);
+        offsets[(size_t)objNum] = (uint64_t)buffer_.size();
+        appendFmt("%d 0 obj\n", objNum);
     }
 
     void writeObjEnd()
     {
-        fputs("endobj\n", fp);
+        appendStr("endobj\n");
     }
 
     void writeStreamObj(int objNum, char const* dictPrefix, uint8_t const* bytes, size_t len)
     {
         writeObjBegin(objNum);
-        fprintf(fp, "%s/Length %zu >>\nstream\n", dictPrefix, len);
-        if (len != 0)
-            fwrite(bytes, 1, len, fp);
-        fputs("\nendstream\n", fp);
+        appendFmt("%s/Length %zu >>\nstream\n", dictPrefix, len);
+        appendBytes(bytes, len);
+        appendStr("\nendstream\n");
         writeObjEnd();
     }
 
     bool writePage(int pageIndex, DjvuPdfPageInfo const& p)
     {
-        if (!initialized || fp == nullptr)
+        if (!initialized)
             return false;
 
         std::lock_guard<std::mutex> lock(writeMutex);
@@ -321,22 +348,19 @@ struct IncrementalPdfWriter
 
         if (isCompound)
         {
-            // Write background image (JPEG)
             DjvuPdfImageInfo const& bgImg = p.bgImage;
             writeObjBegin(o.bgImg);
             char const* bgCs = bgImg.gray ? "/DeviceGray" : "/DeviceRGB";
-            fprintf(
-                fp,
+            appendFmt(
                 "<< /Type /XObject /Subtype /Image /Width %d /Height %d /ColorSpace %s /BitsPerComponent 8 /Filter /DCTDecode /Length %zu >>\nstream\n",
                 bgImg.w,
                 bgImg.h,
                 bgCs,
-                bgImg.bytes.size());
-            fwrite(bgImg.bytes.data(), 1, bgImg.bytes.size(), fp);
-            fputs("\nendstream\n", fp);
+                (size_t)bgImg.bytes.size());
+            appendBytes(bgImg.bytes.data(), bgImg.bytes.size());
+            appendStr("\nendstream\n");
             writeObjEnd();
 
-            // Write foreground mask (JBIG2 ImageMask)
             DjvuPdfImageInfo const& fgMask = p.fgMask;
             if (fgMask.jbig2GlobalsIndex < 0 || (size_t)fgMask.jbig2GlobalsIndex >= jbig2GlobalsObjs.size())
                 return false;
@@ -344,15 +368,14 @@ struct IncrementalPdfWriter
             if (fgGlobalsObj == 0)
                 return false;
             writeObjBegin(o.fgMask);
-            fprintf(
-                fp,
+            appendFmt(
                 "<< /Type /XObject /Subtype /Image /Width %d /Height %d /ImageMask true /BitsPerComponent 1 /Filter /JBIG2Decode /DecodeParms << /JBIG2Globals %d 0 R >> /Length %zu >>\nstream\n",
                 fgMask.w,
                 fgMask.h,
                 fgGlobalsObj,
-                fgMask.bytes.size());
-            fwrite(fgMask.bytes.data(), 1, fgMask.bytes.size(), fp);
-            fputs("\nendstream\n", fp);
+                (size_t)fgMask.bytes.size());
+            appendBytes(fgMask.bytes.data(), fgMask.bytes.size());
+            appendStr("\nendstream\n");
             writeObjEnd();
         }
         else if (o.img != 0)
@@ -362,13 +385,12 @@ struct IncrementalPdfWriter
             if (img.kind == DjvuPdfImageKind::Jpeg)
             {
                 char const* cs = img.gray ? "/DeviceGray" : "/DeviceRGB";
-                fprintf(
-                    fp,
+                appendFmt(
                     "<< /Type /XObject /Subtype /Image /Width %d /Height %d /ColorSpace %s /BitsPerComponent 8 /Filter /DCTDecode /Length %zu >>\nstream\n",
                     img.w,
                     img.h,
                     cs,
-                    img.bytes.size());
+                    (size_t)img.bytes.size());
             }
             else if (img.kind == DjvuPdfImageKind::Jbig2)
             {
@@ -383,16 +405,15 @@ struct IncrementalPdfWriter
                     writeObjEnd();
                     return false;
                 }
-                fprintf(
-                    fp,
+                appendFmt(
                     "<< /Type /XObject /Subtype /Image /Width %d /Height %d /ColorSpace /DeviceGray /BitsPerComponent 1 /Filter /JBIG2Decode /DecodeParms << /JBIG2Globals %d 0 R >> /Length %zu >>\nstream\n",
                     img.w,
                     img.h,
                     globalsObj,
-                    img.bytes.size());
+                    (size_t)img.bytes.size());
             }
-            fwrite(img.bytes.data(), 1, img.bytes.size(), fp);
-            fputs("\nendstream\n", fp);
+            appendBytes(img.bytes.data(), img.bytes.size());
+            appendStr("\nendstream\n");
             writeObjEnd();
         }
 
@@ -419,23 +440,22 @@ struct IncrementalPdfWriter
 
         writeStreamObj(o.contents, "<< ", (uint8_t const*)contents.data(), contents.size());
 
-        // Page dictionary
         writeObjBegin(o.page);
-        fprintf(fp, "<< /Type /Page /Parent %d 0 R /MediaBox [0 0 %g %g] ", pagesObj, p.pdfWidth, p.pdfHeight);
-        fputs("/Resources << ", fp);
+        appendFmt("<< /Type /Page /Parent %d 0 R /MediaBox [0 0 %g %g] ", pagesObj, p.pdfWidth, p.pdfHeight);
+        appendStr("/Resources << ");
         if (isCompound)
         {
-            fputs("/XObject << ", fp);
-            fprintf(fp, "/BgIm %d 0 R /FgMask %d 0 R ", o.bgImg, o.fgMask);
-            fputs(">> ", fp);
+            appendStr("/XObject << ");
+            appendFmt("/BgIm %d 0 R /FgMask %d 0 R ", o.bgImg, o.fgMask);
+            appendStr(">> ");
         }
         else if (o.img != 0)
         {
-            fputs("/XObject << ", fp);
-            fprintf(fp, "/Im %d 0 R ", o.img);
-            fputs(">> ", fp);
+            appendStr("/XObject << ");
+            appendFmt("/Im %d 0 R ", o.img);
+            appendStr(">> ");
         }
-        fprintf(fp, ">> /Contents %d 0 R >>\n", o.contents);
+        appendFmt(">> /Contents %d 0 R >>\n", o.contents);
         writeObjEnd();
 
         // Mark page as written
@@ -468,47 +488,39 @@ struct IncrementalPdfWriter
 
     bool finalize(std::vector<std::vector<uint8_t>> const& jbig2Globals)
     {
-        if (!initialized || fp == nullptr)
+        if (!initialized)
             return false;
 
         std::lock_guard<std::mutex> lock(writeMutex);
 
-        // 1) Catalog
         writeObjBegin(catalogObj);
         if (outlinesObj != 0)
-            fprintf(fp, "<< /Type /Catalog /Pages %d 0 R /Outlines %d 0 R /PageMode /UseOutlines >>\n", pagesObj, outlinesObj);
+            appendFmt("<< /Type /Catalog /Pages %d 0 R /Outlines %d 0 R /PageMode /UseOutlines >>\n", pagesObj, outlinesObj);
         else
-            fprintf(fp, "<< /Type /Catalog /Pages %d 0 R >>\n", pagesObj);
+            appendFmt("<< /Type /Catalog /Pages %d 0 R >>\n", pagesObj);
         writeObjEnd();
 
-        // 2) Pages tree
         writeObjBegin(pagesObj);
-        fputs("<< /Type /Pages /Kids [", fp);
+        appendStr("<< /Type /Pages /Kids [");
         for (size_t i = 0; i < pageObjs.size(); ++i)
         {
             if (pageObjs[i].page != 0)
-                fprintf(fp, " %d 0 R", pageObjs[i].page);
+                appendFmt(" %d 0 R", pageObjs[i].page);
         }
-        fprintf(fp, " ] /Count %zu >>\n", pageObjs.size());
+        appendFmt(" ] /Count %zu >>\n", pageObjs.size());
         writeObjEnd();
 
-        // 3) Outlines
         if (outlinesObj != 0)
         {
             writeObjBegin(outlinesObj);
             if (outlineResult.first != -1)
-            {
-                fprintf(
-                    fp,
+                appendFmt(
                     "<< /Type /Outlines /First %d 0 R /Last %d 0 R /Count %d >>\n",
                     outlineObjs[(size_t)outlineResult.first],
                     outlineObjs[(size_t)outlineResult.last],
                     outlineResult.descendants);
-            }
             else
-            {
-                fputs("<< /Type /Outlines >>\n", fp);
-            }
+                appendStr("<< /Type /Outlines >>\n");
             writeObjEnd();
 
             for (size_t i = 0; i < outlineItems.size(); ++i)
@@ -518,35 +530,28 @@ struct IncrementalPdfWriter
                 int pageIndex = item.pageIndex;
                 if (pageIndex < 0 || (size_t)pageIndex >= pageObjs.size())
                     pageIndex = 0;
-
                 std::string const titleToken = pdfOutlineTitle(item.title);
-
                 writeObjBegin(outlineObjs[i]);
-                fprintf(
-                    fp,
+                appendFmt(
                     "<< /Title %s /Parent %d 0 R /Dest [%d 0 R /Fit]",
                     titleToken.c_str(),
                     parentObj,
                     pageObjs[(size_t)pageIndex].page);
                 if (item.prev != -1)
-                    fprintf(fp, " /Prev %d 0 R", outlineObjs[(size_t)item.prev]);
+                    appendFmt(" /Prev %d 0 R", outlineObjs[(size_t)item.prev]);
                 if (item.next != -1)
-                    fprintf(fp, " /Next %d 0 R", outlineObjs[(size_t)item.next]);
+                    appendFmt(" /Next %d 0 R", outlineObjs[(size_t)item.next]);
                 if (item.firstChild != -1)
-                {
-                    fprintf(
-                        fp,
+                    appendFmt(
                         " /First %d 0 R /Last %d 0 R /Count %d",
                         outlineObjs[(size_t)item.firstChild],
                         outlineObjs[(size_t)item.lastChild],
                         item.count);
-                }
-                fputs(" >>\n", fp);
+                appendStr(" >>\n");
                 writeObjEnd();
             }
         }
 
-        // 4) JBIG2Globals
         for (size_t i = 0; i < jbig2Globals.size(); ++i)
         {
             int obj = jbig2GlobalsObjs[i];
@@ -554,79 +559,73 @@ struct IncrementalPdfWriter
                 writeStreamObj(obj, "<< ", jbig2Globals[i].data(), jbig2Globals[i].size());
         }
 
-        // 5) Info
         writeObjBegin(infoObj);
-        fputs("<< ", fp);
-
+        appendStr("<< ");
         auto const writeField = [&](char const* pdfKey, char const* djvuKey)
         {
             auto it = metadata.find(djvuKey);
             if (it != metadata.end())
             {
-                fprintf(fp, "%s %s ", pdfKey, pdfOutlineTitle(it->second).c_str());
+                appendFmt("%s %s ", pdfKey, pdfOutlineTitle(it->second).c_str());
                 return true;
             }
             return false;
         };
-
         writeField("/Title", "title");
         writeField("/Author", "author");
         if (!writeField("/Subject", "subject"))
-        {
             writeField("/Subject", "description");
-        }
         writeField("/Keywords", "keywords");
-
         if (!writeField("/Creator", "creator"))
-        {
             writeField("/Creator", "producer");
-        }
-
         if (!writeField("/CreationDate", "date"))
-        {
             writeField("/CreationDate", "year");
-        }
-
-        fputs("/Producer (Transmission) ", fp);
-
+        appendStr("/Producer (Transmission) ");
         static std::unordered_set<std::string> const knownKeys = { "title",   "author", "subject", "description", "keywords",
                                                                    "creator", "date",   "year",    "producer" };
-
         for (auto const& [key, value] : metadata)
         {
             if (knownKeys.find(key) == knownKeys.end())
             {
-                // Custom metadata
                 std::string const customKey = "/" + pdfEscapeString(key);
-                fprintf(fp, "%s %s ", customKey.c_str(), pdfOutlineTitle(value).c_str());
+                appendFmt("%s %s ", customKey.c_str(), pdfOutlineTitle(value).c_str());
             }
         }
-
-        fputs(">>\n", fp);
+        appendStr(">>\n");
         writeObjEnd();
 
-        // 6) XRef
-        uint64_t const xrefOffset = (uint64_t)ftello(fp);
+        uint64_t const xrefOffset = (uint64_t)buffer_.size();
         int const objCount = nextObj - 1;
-        fprintf(fp, "xref\n0 %d\n0000000000 65535 f \n", objCount + 1);
+        appendFmt("xref\n0 %d\n0000000000 65535 f \n", objCount + 1);
         for (int i = 1; i <= objCount; ++i)
         {
             if ((size_t)i < offsets.size() && offsets[(size_t)i] != 0)
-                fprintf(fp, "%010llu 00000 n \n", (unsigned long long)offsets[(size_t)i]);
+                appendFmt("%010llu 00000 n \n", (unsigned long long)offsets[(size_t)i]);
             else
-                fprintf(fp, "0000000000 00000 n \n");
+                appendStr("0000000000 00000 n \n");
         }
-
-        fprintf(fp, "trailer\n<< /Size %d /Root %d 0 R /Info %d 0 R >>\nstartxref\n%llu\n%%%%EOF\n", objCount + 1, catalogObj, infoObj, (unsigned long long)xrefOffset);
-        fclose(fp);
-        fp = nullptr;
+        appendFmt("trailer\n<< /Size %d /Root %d 0 R /Info %d 0 R >>\nstartxref\n%llu\n%%%%EOF\n", objCount + 1, catalogObj, infoObj, (unsigned long long)xrefOffset);
         finalized = true;
         return true;
     }
 
-    ~IncrementalPdfWriter()
+    // Write full PDF buffer to path in one shot (no temp file, no extra copy). Call only after finalize().
+    bool writeToFile(NSString* path) const
     {
-        if (fp != nullptr)
-            fclose(fp);
+        if (!finalized || buffer_.empty() || path == nil)
+            return false;
+        char const* utf8 = [path UTF8String];
+        if (!utf8)
+            return false;
+        FILE* f = fopen(utf8, "wb");
+        if (!f)
+            return false;
+        bool ok = fwrite(buffer_.data(), 1, buffer_.size(), f) == buffer_.size();
+        fclose(f);
+        if (!ok && utf8[0] != '\0')
+            remove(utf8);
+        return ok;
     }
+
+    ~IncrementalPdfWriter() = default;
 };
