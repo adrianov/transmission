@@ -10,6 +10,24 @@
 
 static CGFloat const kPiecesTotalPercent = 0.6;
 static NSInteger const kMaxPieces = 18 * 18;
+static float const kPieceCompleteEpsilon = 0.001f;
+
+// NSColor redComponent/greenComponent/blueComponent throw if color is not in RGB/gray space (e.g. controlColor).
+static void getRGBA(NSColor* color, CGFloat* r, CGFloat* g, CGFloat* b, CGFloat* a)
+{
+    NSColor* rgb = [color colorUsingColorSpace:NSColorSpace.genericRGBColorSpace];
+    if (!rgb)
+    {
+        rgb = [color colorUsingColorSpace:NSColorSpace.deviceRGBColorSpace];
+    }
+    if (rgb)
+    {
+        [rgb getRed:r green:g blue:b alpha:a];
+        return;
+    }
+    *r = *g = *b = 0.5;
+    *a = 1.0;
+}
 
 @interface ProgressBarView ()
 
@@ -159,8 +177,14 @@ static NSInteger const kMaxPieces = 18 * 18;
     }
 
     int const pieceCount = static_cast<int>(MIN(torrent.pieceCount, kMaxPieces));
-    float* piecesPercent = static_cast<float*>(malloc(pieceCount * sizeof(float)));
-    [torrent getAmountFinished:piecesPercent size:pieceCount];
+    NSColor* const pieceBgColor = NSApp.darkMode ? NSColor.controlColor : NSColor.whiteColor;
+    if (pieceCount <= 0)
+    {
+        torrent.previousFinishedPieces = nil;
+        [pieceBgColor set];
+        NSRectFillUsingOperation(barRect, NSCompositingOperationSourceOver);
+        return;
+    }
 
     NSBitmapImageRep* bitmap = [[NSBitmapImageRep alloc] initWithBitmapDataPlanes:nil pixelsWide:pieceCount pixelsHigh:1
                                                                     bitsPerSample:8
@@ -170,46 +194,108 @@ static NSInteger const kMaxPieces = 18 * 18;
                                                                    colorSpaceName:NSCalibratedRGBColorSpace
                                                                       bytesPerRow:0
                                                                      bitsPerPixel:0];
+    if (!bitmap || !bitmap.bitmapData)
+    {
+        torrent.previousFinishedPieces = nil;
+        [pieceBgColor set];
+        NSRectFillUsingOperation(barRect, NSCompositingOperationSourceOver);
+        return;
+    }
 
     NSIndexSet* previousFinishedIndexes = torrent.previousFinishedPieces;
     NSMutableIndexSet* finishedIndexes = [NSMutableIndexSet indexSet];
 
-    NSColor* const pieceBgColor = NSApp.darkMode ? NSColor.controlColor : NSColor.whiteColor;
+    // Cache blue as bytes to avoid per-pixel NSColor access (hot path).
+    NSColor* const blueColor = self.fBluePieceColor;
+    CGFloat blueR, blueG, blueB, blueA;
+    getRGBA(blueColor, &blueR, &blueG, &blueB, &blueA);
+    unsigned char blueBytes[4] = {
+        static_cast<unsigned char>(blueR * 255.0f + 0.5f),
+        static_cast<unsigned char>(blueG * 255.0f + 0.5f),
+        static_cast<unsigned char>(blueB * 255.0f + 0.5f),
+        static_cast<unsigned char>(blueA * 255.0f + 0.5f),
+    };
 
-    for (int i = 0; i < pieceCount; i++)
+    if (torrent.allDownloaded)
     {
-        NSColor* pieceColor;
-        if (piecesPercent[i] == 1.0f)
+        for (int i = 0; i < pieceCount; i++)
         {
-            if (previousFinishedIndexes && ![previousFinishedIndexes containsIndex:i])
-            {
-                pieceColor = NSColor.orangeColor;
-            }
-            else
-            {
-                pieceColor = self.fBluePieceColor;
-            }
             [finishedIndexes addIndex:i];
+            unsigned char* data = bitmap.bitmapData + (i << 2);
+            data[0] = blueBytes[0];
+            data[1] = blueBytes[1];
+            data[2] = blueBytes[2];
+            data[3] = blueBytes[3];
+        }
+        torrent.previousFinishedPieces = finishedIndexes;
+    }
+    else
+    {
+        CGFloat orangeR, orangeG, orangeB, orangeA;
+        getRGBA(NSColor.orangeColor, &orangeR, &orangeG, &orangeB, &orangeA);
+        unsigned char orangeBytes[4] = {
+            static_cast<unsigned char>(orangeR * 255.0f + 0.5f),
+            static_cast<unsigned char>(orangeG * 255.0f + 0.5f),
+            static_cast<unsigned char>(orangeB * 255.0f + 0.5f),
+            static_cast<unsigned char>(orangeA * 255.0f + 0.5f),
+        };
+        CGFloat bgR, bgG, bgB, bgA;
+        getRGBA(pieceBgColor, &bgR, &bgG, &bgB, &bgA);
+        float pieceBgF[4] = { static_cast<float>(bgR), static_cast<float>(bgG), static_cast<float>(bgB), static_cast<float>(bgA) };
+        float blueF[4] = { static_cast<float>(blueR), static_cast<float>(blueG), static_cast<float>(blueB), static_cast<float>(blueA) };
+
+        float* piecesPercent = static_cast<float*>(malloc(pieceCount * sizeof(float)));
+        if (!piecesPercent)
+        {
+            torrent.previousFinishedPieces = nil;
+            unsigned char bg[4] = {
+                static_cast<unsigned char>(bgR * 255.0f + 0.5f),
+                static_cast<unsigned char>(bgG * 255.0f + 0.5f),
+                static_cast<unsigned char>(bgB * 255.0f + 0.5f),
+                static_cast<unsigned char>(bgA * 255.0f + 0.5f),
+            };
+            for (int i = 0; i < pieceCount; i++)
+            {
+                unsigned char* data = bitmap.bitmapData + (i << 2);
+                data[0] = bg[0];
+                data[1] = bg[1];
+                data[2] = bg[2];
+                data[3] = bg[3];
+            }
         }
         else
         {
-            pieceColor = [pieceBgColor blendedColorWithFraction:piecesPercent[i] ofColor:self.fBluePieceColor];
-        }
+            [torrent getAmountFinished:piecesPercent size:pieceCount];
 
-        //it's faster to just set color instead of checking previous color
-        // faster and non-broken alternative to `[bitmap setColor:pieceColor atX:i y:0]`
-        unsigned char* data = bitmap.bitmapData + (i << 2);
-        data[0] = pieceColor.redComponent * 255;
-        data[1] = pieceColor.greenComponent * 255;
-        data[2] = pieceColor.blueComponent * 255;
-        data[3] = pieceColor.alphaComponent * 255;
+            for (int i = 0; i < pieceCount; i++)
+            {
+                BOOL const complete = piecesPercent[i] >= (1.0f - kPieceCompleteEpsilon);
+                unsigned char* data = bitmap.bitmapData + (i << 2);
+                if (complete)
+                {
+                    BOOL const isNew = previousFinishedIndexes && ![previousFinishedIndexes containsIndex:i];
+                    unsigned char const* src = isNew ? orangeBytes : blueBytes;
+                    data[0] = src[0];
+                    data[1] = src[1];
+                    data[2] = src[2];
+                    data[3] = src[3];
+                    [finishedIndexes addIndex:i];
+                }
+                else
+                {
+                    float const f = piecesPercent[i];
+                    for (int c = 0; c < 4; c++)
+                    {
+                        data[c] = static_cast<unsigned char>(((1.0f - f) * pieceBgF[c] + f * blueF[c]) * 255.0f + 0.5f);
+                    }
+                }
+            }
+
+            free(piecesPercent);
+            torrent.previousFinishedPieces = finishedIndexes.count > 0 ? finishedIndexes : nil;
+        }
     }
 
-    free(piecesPercent);
-
-    torrent.previousFinishedPieces = finishedIndexes.count > 0 ? finishedIndexes : nil; //don't bother saving if none are complete
-
-    //actually draw image
     [bitmap drawInRect:barRect fromRect:NSZeroRect operation:NSCompositingOperationSourceOver
               fraction:[self.fDefaults boolForKey:@"SmallView"] ? 0.25 : 1.0
         respectFlipped:YES
