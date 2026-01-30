@@ -57,6 +57,8 @@ cmake --build build -t transmission-gtk
 cmake --build build -t transmission-qt
 ```
 
+**macOS convenience script:** `bin/build-mac` configures with Ninja/Release, builds the transmission-mac target, and opens the app (or build folder) in Finder.
+
 ## Lint Commands
 
 **Check C++ formatting:**

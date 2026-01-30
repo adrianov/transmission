@@ -20,7 +20,12 @@ Transmission has an Xcode project file for building in Xcode.
 - Run the Transmission scheme
 
 ### Building the native app with CMake ###
-Build the app:
+Use the convenience script (configures with Ninja/Release, builds, then opens the app in Finder):
+```bash
+./bin/build-mac
+```
+
+Or build manually:
 ```bash
 cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo
 cmake --build build -t transmission-mac
