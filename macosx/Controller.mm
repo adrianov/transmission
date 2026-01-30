@@ -3330,40 +3330,53 @@ void onTorrentCompletenessChanged(tr_torrent* tor, tr_completeness status, bool 
                 if (filterTracker)
                 {
                     NSArray<NSString*>* trackers = torrent.allTrackersFlat;
-
-                    //to count, we need each string in at least 1 tracker
-                    [searchStrings
-                        enumerateObjectsWithOptions:NSEnumerationConcurrent usingBlock:^(NSString* searchString, NSUInteger /*idx*/, BOOL* stop) {
-                            __block BOOL found = NO;
-                            [trackers enumerateObjectsWithOptions:NSEnumerationConcurrent
-                                                       usingBlock:^(NSString* tracker, NSUInteger /*trackerIdx*/, BOOL* stopEnumerateTrackers) {
-                                                           if ([tracker rangeOfString:searchString
-                                                                              options:(NSCaseInsensitiveSearch | NSDiacriticInsensitiveSearch)]
-                                                                   .location != NSNotFound)
-                                                           {
-                                                               found = YES;
-                                                               *stopEnumerateTrackers = YES;
-                                                           }
-                                                       }];
-                            if (!found)
+                    NSStringCompareOptions const searchOpts = NSCaseInsensitiveSearch | NSDiacriticInsensitiveSearch;
+                    for (NSString* searchString in searchStrings)
+                    {
+                        BOOL found = NO;
+                        for (NSString* tracker in trackers)
+                        {
+                            if ([tracker rangeOfString:searchString options:searchOpts].location != NSNotFound)
                             {
-                                removeTextField = YES;
-                                *stop = YES;
+                                found = YES;
+                                break;
                             }
-                        }];
+                        }
+                        if (!found)
+                        {
+                            removeTextField = YES;
+                            break;
+                        }
+                    }
                 }
                 else
                 {
-                    [searchStrings enumerateObjectsWithOptions:NSEnumerationConcurrent
-                                                    usingBlock:^(NSString* searchString, NSUInteger /*idx*/, BOOL* stop) {
-                                                        if ([torrent.name rangeOfString:searchString
-                                                                                options:(NSCaseInsensitiveSearch | NSDiacriticInsensitiveSearch)]
-                                                                .location == NSNotFound)
-                                                        {
-                                                            removeTextField = YES;
-                                                            *stop = YES;
-                                                        }
-                                                    }];
+                    BOOL const showContentButtons = [self.fDefaults boolForKey:@"ShowContentButtons"];
+                    NSStringCompareOptions const searchOpts = NSCaseInsensitiveSearch | NSDiacriticInsensitiveSearch;
+                    NSArray<NSDictionary*>* playable = nil;
+                    for (NSString* searchString in searchStrings)
+                    {
+                        BOOL matched = [torrent.name rangeOfString:searchString options:searchOpts].location != NSNotFound;
+                        if (!matched && showContentButtons)
+                        {
+                            if (!playable)
+                                playable = torrent.playableFiles;
+                            for (NSDictionary* item in playable)
+                            {
+                                NSString* baseTitle = item[@"baseTitle"];
+                                if (baseTitle && [baseTitle rangeOfString:searchString options:searchOpts].location != NSNotFound)
+                                {
+                                    matched = YES;
+                                    break;
+                                }
+                            }
+                        }
+                        if (!matched)
+                        {
+                            removeTextField = YES;
+                            break;
+                        }
+                    }
                 }
 
                 if (removeTextField)
@@ -5845,7 +5858,8 @@ void onTorrentCompletenessChanged(tr_torrent* tor, tr_completeness status, bool 
             self.fToolbarSearchField.stringValue = searchField.stringValue;
         }
 
-        [self applyFilter];
+        [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(applyFilter) object:nil];
+        [self performSelector:@selector(applyFilter) withObject:nil afterDelay:0.12];
     }
 }
 
