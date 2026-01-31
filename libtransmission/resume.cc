@@ -1019,6 +1019,12 @@ void save(tr_torrent* const tor, tr_torrent::ResumeHelper const& helper)
     {
         tor->error().set_local_error(fmt::format("Unable to save resume file: {:s}", serde.error_.message()));
     }
+    else if (
+        tor->error().error_type() == TR_STAT_LOCAL_ERROR &&
+        tr_strv_starts_with(std::string_view(tor->error().errmsg()), "Unable to save resume file"sv))
+    {
+        tor->error().clear();
+    }
 }
 
 } // namespace tr_resume
