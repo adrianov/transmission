@@ -12,7 +12,7 @@ static CGFloat const kPiecesTotalPercent = 0.6;
 static NSInteger const kMaxPieces = 18 * 18;
 static float const kPieceCompleteEpsilon = 0.001f;
 
-// NSColor redComponent/greenComponent/blueComponent throw if color is not in RGB/gray space (e.g. controlColor).
+// NSColor getRed:green:blue:alpha: and redComponent throw if color is not in RGB/gray space (e.g. controlColor).
 static void getRGBA(NSColor* color, CGFloat* r, CGFloat* g, CGFloat* b, CGFloat* a)
 {
     NSColor* rgb = [color colorUsingColorSpace:NSColorSpace.genericRGBColorSpace];
@@ -22,8 +22,14 @@ static void getRGBA(NSColor* color, CGFloat* r, CGFloat* g, CGFloat* b, CGFloat*
     }
     if (rgb)
     {
-        [rgb getRed:r green:g blue:b alpha:a];
-        return;
+        @try
+        {
+            [rgb getRed:r green:g blue:b alpha:a];
+            return;
+        }
+        @catch (NSException*)
+        {
+        }
     }
     *r = *g = *b = 0.5;
     *a = 1.0;
