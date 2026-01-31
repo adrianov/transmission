@@ -35,6 +35,17 @@ static void getRGBA(NSColor* color, CGFloat* r, CGFloat* g, CGFloat* b, CGFloat*
     *a = 1.0;
 }
 
+// Returns a concrete RGB color safe for [color set] and drawing. Prevents crash when dynamic/catalog colors
+// (e.g. controlColor) are used and AppKit later calls redComponent.
+static NSColor* colorForDrawing(NSColor* color)
+{
+    if (!color)
+        return [NSColor colorWithCalibratedWhite:0.5 alpha:1.0];
+    CGFloat r, g, b, a;
+    getRGBA(color, &r, &g, &b, &a);
+    return [NSColor colorWithCalibratedRed:r green:g blue:b alpha:a];
+}
+
 @interface ProgressBarView ()
 
 @property(nonatomic, readonly) NSUserDefaults* fDefaults;
@@ -167,12 +178,14 @@ static void getRGBA(NSColor* color, CGFloat* r, CGFloat* g, CGFloat* b, CGFloat*
 
 - (void)drawPiecesBar:(NSRect)barRect forTorrent:(Torrent*)torrent
 {
+    if (!torrent)
+        return;
     // Fill a solid color bar for magnet links
     if (torrent.magnet)
     {
         if (NSApp.darkMode)
         {
-            [NSColor.controlColor set];
+            [colorForDrawing(NSColor.controlColor) set];
         }
         else
         {
@@ -187,7 +200,7 @@ static void getRGBA(NSColor* color, CGFloat* r, CGFloat* g, CGFloat* b, CGFloat*
     if (pieceCount <= 0)
     {
         torrent.previousFinishedPieces = nil;
-        [pieceBgColor set];
+        [colorForDrawing(pieceBgColor) set];
         NSRectFillUsingOperation(barRect, NSCompositingOperationSourceOver);
         return;
     }
@@ -203,7 +216,7 @@ static void getRGBA(NSColor* color, CGFloat* r, CGFloat* g, CGFloat* b, CGFloat*
     if (!bitmap || !bitmap.bitmapData)
     {
         torrent.previousFinishedPieces = nil;
-        [pieceBgColor set];
+        [colorForDrawing(pieceBgColor) set];
         NSRectFillUsingOperation(barRect, NSCompositingOperationSourceOver);
         return;
     }
@@ -237,8 +250,9 @@ static void getRGBA(NSColor* color, CGFloat* r, CGFloat* g, CGFloat* b, CGFloat*
     }
     else
     {
+        // Resolve dynamic/catalog colors before getRGBA to avoid -[NSColor redComponent] crash.
         CGFloat orangeR, orangeG, orangeB, orangeA;
-        getRGBA(NSColor.orangeColor, &orangeR, &orangeG, &orangeB, &orangeA);
+        getRGBA(colorForDrawing(NSColor.orangeColor), &orangeR, &orangeG, &orangeB, &orangeA);
         unsigned char orangeBytes[4] = {
             static_cast<unsigned char>(orangeR * 255.0f + 0.5f),
             static_cast<unsigned char>(orangeG * 255.0f + 0.5f),
@@ -246,7 +260,7 @@ static void getRGBA(NSColor* color, CGFloat* r, CGFloat* g, CGFloat* b, CGFloat*
             static_cast<unsigned char>(orangeA * 255.0f + 0.5f),
         };
         CGFloat bgR, bgG, bgB, bgA;
-        getRGBA(pieceBgColor, &bgR, &bgG, &bgB, &bgA);
+        getRGBA(colorForDrawing(pieceBgColor), &bgR, &bgG, &bgB, &bgA);
         float pieceBgF[4] = { static_cast<float>(bgR), static_cast<float>(bgG), static_cast<float>(bgB), static_cast<float>(bgA) };
         float blueF[4] = { static_cast<float>(blueR), static_cast<float>(blueG), static_cast<float>(blueB), static_cast<float>(blueA) };
 
