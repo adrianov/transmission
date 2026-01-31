@@ -141,6 +141,7 @@ npm run lint:fix          # Fix
 - Prefer dependency injection or other decoupling methods for testability
 - KISS principle: Try simpler approaches first in complex codebase
 - New features must be accessible via both C API (`transmission.h`) and RPC/JSON API
+- **File size**: Refactor files of 1000+ lines so they have fewer than 1000 lines (extract modules or classes, remove unused/duplicate code as needed).
 
 ### API Boundaries
 
