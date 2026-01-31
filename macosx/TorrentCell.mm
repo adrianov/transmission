@@ -25,55 +25,57 @@
 {
     if (self.fTorrentTableView)
     {
-        Torrent* torrent = (Torrent*)self.objectValue;
-
-        // draw progress bar - use cached image when possible
-        NSRect barRect = self.fTorrentProgressBarView.frame;
-        if (barRect.size.width > 0 && barRect.size.height > 0)
+        Torrent* torrent = [self.objectValue isKindOfClass:[Torrent class]] ? (Torrent*)self.objectValue : nil;
+        if (torrent)
         {
-            // Create cache key based on torrent state that affects progress bar appearance
-            NSString* cacheKey = [NSString stringWithFormat:@"%@_%f_%d_%d_%f_%f_%d_%f_%d",
-                                                            torrent.hashString,
-                                                            torrent.progress,
-                                                            torrent.active,
-                                                            torrent.checking,
-                                                            torrent.progressLeft,
-                                                            torrent.availableDesired,
-                                                            torrent.seeding,
-                                                            torrent.progressStopRatio,
-                                                            torrent.allDownloaded];
-
-            // Check if we need to regenerate the progress bar image
-            if (!self.fCachedProgressBarImage || ![self.fProgressBarCacheKey isEqualToString:cacheKey] ||
-                !NSEqualSizes(self.fCachedProgressBarImage.size, barRect.size))
+            // draw progress bar - use cached image when possible
+            NSRect barRect = self.fTorrentProgressBarView.frame;
+            if (barRect.size.width > 0 && barRect.size.height > 0)
             {
-                self.fCachedProgressBarImage = [NSImage imageWithSize:barRect.size flipped:NO drawingHandler:^BOOL(NSRect dstRect) {
-                    ProgressBarView* progressBar = [[ProgressBarView alloc] init];
-                    [progressBar drawBarInRect:dstRect forTableView:self.fTorrentTableView withTorrent:torrent];
-                    return YES;
-                }];
-                self.fProgressBarCacheKey = cacheKey;
+                // Create cache key based on torrent state that affects progress bar appearance
+                NSString* cacheKey = [NSString stringWithFormat:@"%@_%f_%d_%d_%f_%f_%d_%f_%d",
+                                                                torrent.hashString,
+                                                                torrent.progress,
+                                                                torrent.active,
+                                                                torrent.checking,
+                                                                torrent.progressLeft,
+                                                                torrent.availableDesired,
+                                                                torrent.seeding,
+                                                                torrent.progressStopRatio,
+                                                                torrent.allDownloaded];
+
+                // Check if we need to regenerate the progress bar image
+                if (!self.fCachedProgressBarImage || ![self.fProgressBarCacheKey isEqualToString:cacheKey] ||
+                    !NSEqualSizes(self.fCachedProgressBarImage.size, barRect.size))
+                {
+                    self.fCachedProgressBarImage = [NSImage imageWithSize:barRect.size flipped:NO drawingHandler:^BOOL(NSRect dstRect) {
+                        ProgressBarView* progressBar = [[ProgressBarView alloc] init];
+                        [progressBar drawBarInRect:dstRect forTableView:self.fTorrentTableView withTorrent:torrent];
+                        return YES;
+                    }];
+                    self.fProgressBarCacheKey = cacheKey;
+                }
+
+                // Draw cached progress bar image
+                [self.fCachedProgressBarImage drawInRect:barRect fromRect:NSZeroRect operation:NSCompositingOperationSourceOver
+                                                fraction:1.0];
             }
 
-            // Draw cached progress bar image
-            [self.fCachedProgressBarImage drawInRect:barRect fromRect:NSZeroRect operation:NSCompositingOperationSourceOver
-                                            fraction:1.0];
-        }
+            // set priority icon
+            if (torrent.priority != TR_PRI_NORMAL)
+            {
+                NSColor* priorityColor = self.backgroundStyle == NSBackgroundStyleEmphasized ? NSColor.whiteColor : NSColor.labelColor;
+                NSImage* priorityImage = [[NSImage imageNamed:(torrent.priority == TR_PRI_HIGH ? @"PriorityHighTemplate" : @"PriorityLowTemplate")]
+                    imageWithColor:priorityColor];
 
-        // set priority icon
-        if (torrent.priority != TR_PRI_NORMAL)
-        {
-            NSColor* priorityColor = self.backgroundStyle == NSBackgroundStyleEmphasized ? NSColor.whiteColor : NSColor.labelColor;
-            NSImage* priorityImage = [[NSImage imageNamed:(torrent.priority == TR_PRI_HIGH ? @"PriorityHighTemplate" : @"PriorityLowTemplate")]
-                imageWithColor:priorityColor];
+                self.fTorrentPriorityView.image = priorityImage;
 
-            self.fTorrentPriorityView.image = priorityImage;
-
-            [self.fStackView setVisibilityPriority:NSStackViewVisibilityPriorityMustHold forView:self.fTorrentPriorityView];
-        }
-        else
-        {
-            [self.fStackView setVisibilityPriority:NSStackViewVisibilityPriorityNotVisible forView:self.fTorrentPriorityView];
+                [self.fStackView setVisibilityPriority:NSStackViewVisibilityPriorityMustHold forView:self.fTorrentPriorityView];
+            }
+            else
+            {
+                [self.fStackView setVisibilityPriority:NSStackViewVisibilityPriorityNotVisible forView:self.fTorrentPriorityView];
+            }
         }
     }
 
