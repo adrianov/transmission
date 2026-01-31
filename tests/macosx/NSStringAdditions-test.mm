@@ -37,6 +37,10 @@
     {
         symbolName = @"play";
     }
+    else if ([category isEqualToString:@"software"])
+    {
+        symbolName = @"gearshape";
+    }
 
     return symbolName;
 }
@@ -270,6 +274,12 @@ TEST_F(PlayButtonIconTest, IconForBook)
 {
     NSString* symbolName = [tester symbolNameForType:@"document-books" category:@"books" path:@"Book.pdf"];
     EXPECT_TRUE([symbolName isEqualToString:@"book"]) << "Book should show book icon";
+}
+
+TEST_F(PlayButtonIconTest, IconForSoftware)
+{
+    NSString* symbolName = [tester symbolNameForType:@"file" category:@"software" path:@"App.dmg"];
+    EXPECT_TRUE([symbolName isEqualToString:@"gearshape"]) << "Software should show gear icon";
 }
 
 TEST_F(NSStringAdditionsTest, HumanReadableEpisodeTitle_FullMoonParty)

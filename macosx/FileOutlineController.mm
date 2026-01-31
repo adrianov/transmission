@@ -407,9 +407,11 @@ typedef NS_ENUM(NSUInteger, FilePriorityMenuTag) { //
     NSIndexSet* indexes = self.fOutline.selectedRowIndexes;
     for (NSUInteger i = indexes.firstIndex; i != NSNotFound; i = [indexes indexGreaterThanIndex:i])
     {
-        NSString* path = [self.torrent fileLocation:[self.fOutline itemAtRow:i]];
+        FileListNode* node = [self.fOutline itemAtRow:i];
+        NSString* path = [self.torrent fileLocation:node];
         if (path)
         {
+            [self.torrent recordOpenForFileNode:node];
             [NSWorkspace.sharedWorkspace openURL:[NSURL fileURLWithPath:path]];
         }
     }

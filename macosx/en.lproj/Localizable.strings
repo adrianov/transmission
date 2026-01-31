@@ -3,3 +3,8 @@
 "Need %@ to add this torrent; will delete these (%@ freed):\n%@" = "Need %@ to add this torrent; will delete these (%@ freed):\n%@";
 /* Auto-delete delete confirmation continue */
 "Delete & Continue" = "Delete & Continue";
+
+/* Files tab / Play button tooltip -> open count for video */
+"Played: %lu" = "Played: %lu";
+/* Files tab / Play button tooltip -> open count for other */
+"Opened: %lu" = "Opened: %lu";
