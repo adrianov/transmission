@@ -107,7 +107,7 @@ extern NSString* const kTorrentDidChangeGroupNotification;
 /// Returns YES if torrent has any playable media files on disk.
 @property(nonatomic, readonly) BOOL hasPlayableMedia;
 
-/// Returns detected media category: "video", "audio", "books", "adult" (video with adult heuristic), or nil if none detected.
+/// Returns detected media category: "video", "audio", "books", "software", "adult" (video with adult heuristic), or nil if none detected.
 /// Used for auto-assigning torrents to groups based on content type.
 @property(nonatomic, readonly) NSString* detectedMediaCategory;
 
@@ -175,6 +175,14 @@ extern NSString* const kTorrentDidChangeGroupNotification;
 
 // Returns the path to show in tooltip (prefers .cue file if available for audio files or album folders)
 - (NSString*)tooltipPathForItemPath:(NSString*)path type:(NSString*)type folder:(NSString*)folder;
+
+/// Open/play count (double-click, play menu, content buttons). Key: hash|f<index> or hash|d<folder>.
+- (void)recordOpenForFileNode:(FileListNode*)node;
+- (void)recordOpenForPlayableItem:(NSDictionary*)item;
+- (NSUInteger)openCountForFileNode:(FileListNode*)node;
+/// "Played: N" for video/audio, "Opened: N" for other, nil when count is 0.
+- (NSString*)openCountLabelForFileNode:(FileListNode*)node;
+- (NSString*)openCountLabelForPlayableItem:(NSDictionary*)item;
 
 - (void)renameTorrent:(NSString*)newName completionHandler:(void (^)(BOOL didRename))completionHandler;
 - (void)renameFileNode:(FileListNode*)node

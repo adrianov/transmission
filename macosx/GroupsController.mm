@@ -322,7 +322,7 @@ GroupsController* fGroupsInstance = nil;
 }
 
 /// Returns group index for a media category by matching group names.
-/// Matches: "video" -> Video/Movies/Films, "audio" -> Audio/Music, "books" -> Books/Ebooks, "adult" -> Adult
+/// Matches: "video" -> Video/Movies/Films, "audio" -> Audio/Music, "books" -> Books/Ebooks, "adult" -> Adult, "software" -> Software
 - (NSInteger)groupIndexForMediaCategory:(NSString*)category
 {
     static NSDictionary<NSString*, NSArray<NSString*>*>* categoryKeywords;
@@ -332,6 +332,7 @@ GroupsController* fGroupsInstance = nil;
             @"adult" : @[ @"adult" ],
             @"audio" : @[ @"audio", @"music", @"song", @"album" ],
             @"books" : @[ @"book", @"ebook", @"read", @"pdf", @"epub" ],
+            @"software" : @[ @"software", @"app", @"install" ],
             @"video" : @[ @"video", @"movie", @"film", @"tv", @"serie" ]
         };
     });
@@ -359,7 +360,7 @@ GroupsController* fGroupsInstance = nil;
 
 #pragma mark - Private
 
-/// Ensures Video, Audio, Books, Adult groups exist for media auto-assignment.
+/// Ensures Video, Audio, Books, Adult, Software groups exist for media auto-assignment.
 /// Creates missing groups without affecting existing user groups.
 - (void)ensureMediaGroupsExist
 {
@@ -383,6 +384,11 @@ GroupsController* fGroupsInstance = nil;
             @"name" : NSLocalizedString(@"Adult", "Groups -> Name"),
             @"category" : @"adult",
             @"color" : NSColor.systemPinkColor
+        },
+        @{
+            @"name" : NSLocalizedString(@"Software", "Groups -> Name"),
+            @"category" : @"software",
+            @"color" : NSColor.systemTealColor
         }
     ];
 

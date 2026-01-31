@@ -40,10 +40,11 @@ static NSTimeInterval const kDiskSpaceCheckThrottleSeconds = 5.0;
 
 static dispatch_queue_t timeMachineExcludeQueue;
 
-/// Shared extension sets for media category (video/audio/books). Used for group assignment on add and file list.
+/// Shared extension sets for media category (video/audio/books/software). Used for group assignment on add and file list.
 static NSSet<NSString*>* sVideoExtensions;
 static NSSet<NSString*>* sAudioExtensions;
 static NSSet<NSString*>* sBookExtensions;
+static NSSet<NSString*>* sSoftwareExtensions;
 static dispatch_once_t sMediaExtensionsOnce;
 static void initMediaExtensionSets(void)
 {
@@ -69,6 +70,7 @@ static void initMediaExtensionSets(void)
             setWithArray:
                 @[ @"mp3", @"flac", @"wav", @"aac", @"ogg", @"wma", @"m4a", @"ape", @"alac", @"aiff", @"opus", @"wv" ]];
         sBookExtensions = [NSSet setWithArray:@[ @"pdf", @"epub", @"djv", @"djvu", @"fb2", @"mobi" ]];
+        sSoftwareExtensions = [NSSet setWithArray:@[ @"exe", @"msi", @"dmg", @"iso", @"pkg", @"deb", @"rpm", @"appimage", @"apk", @"run" ]];
     });
 }
 
@@ -126,7 +128,8 @@ typedef NS_ENUM(NSInteger, TorrentMediaType) {
     TorrentMediaTypeNone = 0,
     TorrentMediaTypeVideo,
     TorrentMediaTypeAudio,
-    TorrentMediaTypeBooks
+    TorrentMediaTypeBooks,
+    TorrentMediaTypeSoftware
 };
 
 @interface Torrent ()
@@ -1310,6 +1313,8 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
             return [NSString stringWithFormat:@"%lu audios", (unsigned long)self.fMediaFileCount];
         if (self.fMediaType == TorrentMediaTypeBooks)
             return [NSString stringWithFormat:@"%lu books", (unsigned long)self.fMediaFileCount];
+        if (self.fMediaType == TorrentMediaTypeSoftware)
+            return [NSString stringWithFormat:@"%lu software", (unsigned long)self.fMediaFileCount];
     }
     return nil;
 }
@@ -2181,6 +2186,8 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
         base = @"audio";
     else if ([sBookExtensions containsObject:ext])
         base = @"books";
+    else if ([sSoftwareExtensions containsObject:ext])
+        base = @"software";
     if (!base)
         return nil;
     if ([base isEqualToString:@"video"] && ([self isAdultTorrent] || containsAdultKeywords(path)))
@@ -2188,7 +2195,7 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
     return base;
 }
 
-/// Base media category (video/audio/books) without adult override. Used by detectedMediaCategory and isAdultTorrent.
+/// Base media category (video/audio/books/software) without adult override. Used by detectedMediaCategory and isAdultTorrent.
 - (NSString*)baseMediaCategory
 {
     if (self.magnet)
@@ -2204,6 +2211,8 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
             return @"audio";
         case TorrentMediaTypeBooks:
             return @"books";
+        case TorrentMediaTypeSoftware:
+            return @"software";
         default:
             return nil;
         }
@@ -2216,6 +2225,8 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
         return @"audio";
     if ([sBookExtensions containsObject:ext])
         return @"books";
+    if ([sSoftwareExtensions containsObject:ext])
+        return @"software";
     return nil;
 }
 
@@ -2263,6 +2274,7 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
     NSMutableDictionary<NSString*, NSNumber*>* videoExtCounts = [NSMutableDictionary dictionary];
     NSMutableDictionary<NSString*, NSNumber*>* audioExtCounts = [NSMutableDictionary dictionary];
     NSMutableDictionary<NSString*, NSNumber*>* bookExtCounts = [NSMutableDictionary dictionary];
+    NSMutableDictionary<NSString*, NSNumber*>* softwareExtCounts = [NSMutableDictionary dictionary];
     NSMutableSet<NSString*>* dvdDiscFolders = [NSMutableSet set]; // Parent folders containing VIDEO_TS.IFO
     NSMutableSet<NSString*>* blurayDiscFolders = [NSMutableSet set]; // Parent folders containing index.bdmv
 
@@ -2335,6 +2347,10 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
         {
             bookExtCounts[ext] = @(bookExtCounts[ext].unsignedIntegerValue + 1);
         }
+        else if ([sSoftwareExtensions containsObject:ext])
+        {
+            softwareExtCounts[ext] = @(softwareExtCounts[ext].unsignedIntegerValue + 1);
+        }
     }
 
     // Detect album folders for audio collections
@@ -2380,11 +2396,11 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
         return;
     }
 
-    // Count video/audio files
-    NSUInteger videoCount = 0, audioCount = 0, bookCount = 0;
-    NSString *dominantVideoExt = nil, *dominantAudioExt = nil, *dominantBookExt = nil;
+    // Count video/audio/books/software files
+    NSUInteger videoCount = 0, audioCount = 0, bookCount = 0, softwareCount = 0;
+    NSString *dominantVideoExt = nil, *dominantAudioExt = nil, *dominantBookExt = nil, *dominantSoftwareExt = nil;
     NSString* dominantRegisteredBookExt = nil;
-    NSUInteger dominantVideoCount = 0, dominantAudioCount = 0, dominantBookCount = 0;
+    NSUInteger dominantVideoCount = 0, dominantAudioCount = 0, dominantBookCount = 0, dominantSoftwareCount = 0;
     NSUInteger dominantRegisteredBookCount = 0;
 
     for (NSString* ext in videoExtCounts)
@@ -2422,26 +2438,34 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
             dominantRegisteredBookExt = ext;
         }
     }
+    for (NSString* ext in softwareExtCounts)
+    {
+        NSUInteger c = softwareExtCounts[ext].unsignedIntegerValue;
+        softwareCount += c;
+        if (c > dominantSoftwareCount)
+        {
+            dominantSoftwareCount = c;
+            dominantSoftwareExt = ext;
+        }
+    }
     if (dominantRegisteredBookExt != nil)
     {
         dominantBookExt = dominantRegisteredBookExt;
     }
 
-    // Determine dominant type
-    if (videoCount >= audioCount && videoCount >= 1)
+    // Determine dominant type by max count; tie-break: video > audio > books > software
+    if (videoCount >= audioCount && videoCount >= bookCount && videoCount >= softwareCount && videoCount >= 1)
     {
         self.fMediaType = TorrentMediaTypeVideo;
         self.fMediaFileCount = videoCount;
         self.fMediaExtension = dominantVideoExt;
     }
-    else if (audioCount > videoCount && audioCount >= 1)
+    else if (audioCount >= bookCount && audioCount >= softwareCount && audioCount >= 1)
     {
         self.fMediaType = TorrentMediaTypeAudio;
         self.fMediaFileCount = audioCount;
         self.fMediaExtension = dominantAudioExt;
 
-        // Album collection: multiple album folders show as albums,
-        // single folder shows individual tracks via buildIndividualFilePlayables
         if (albumFolders.count > 1)
         {
             self.fIsAlbumCollection = YES;
@@ -2449,11 +2473,17 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
             [self buildFolderToFilesCache:albumFolders];
         }
     }
-    else if (bookCount >= 1)
+    else if (bookCount >= softwareCount && bookCount >= 1)
     {
         self.fMediaType = TorrentMediaTypeBooks;
         self.fMediaFileCount = bookCount;
         self.fMediaExtension = dominantBookExt;
+    }
+    else if (softwareCount >= 1)
+    {
+        self.fMediaType = TorrentMediaTypeSoftware;
+        self.fMediaFileCount = softwareCount;
+        self.fMediaExtension = dominantSoftwareExt;
     }
 }
 
@@ -2714,6 +2744,97 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
         auto const location = tr_torrentFindFile(self.fHandle, node.indexes.firstIndex);
         return std::empty(location) ? nil : @(location.c_str());
     }
+}
+
+static NSString* const kOpenCountsUserDefaultsKey = @"TransmissionOpenCounts";
+
+static NSMutableDictionary<NSString*, NSNumber*>* openCountsDictionary(void)
+{
+    NSDictionary* stored = [NSUserDefaults.standardUserDefaults dictionaryForKey:kOpenCountsUserDefaultsKey];
+    return stored ? [stored mutableCopy] : [NSMutableDictionary dictionary];
+}
+
+static void saveOpenCounts(NSDictionary<NSString*, NSNumber*>* counts)
+{
+    [NSUserDefaults.standardUserDefaults setObject:counts forKey:kOpenCountsUserDefaultsKey];
+}
+
+- (NSString*)openCountKeyForFileNode:(FileListNode*)node
+{
+    NSString* hash = self.hashString;
+    if (node.isFolder)
+    {
+        NSString* relPath = node.path.length > 0 ? [node.path stringByAppendingPathComponent:node.name] : node.name;
+        return [NSString stringWithFormat:@"%@|d%@", hash, relPath];
+    }
+    return [NSString stringWithFormat:@"%@|f%lu", hash, (unsigned long)node.indexes.firstIndex];
+}
+
+- (NSString*)openCountKeyForPlayableItem:(NSDictionary*)item
+{
+    NSString* folder = item[@"folder"];
+    NSNumber* indexNum = item[@"index"];
+    NSUInteger index = indexNum ? indexNum.unsignedIntegerValue : NSNotFound;
+    if (folder.length > 0)
+    {
+        return [NSString stringWithFormat:@"%@|d%@", self.hashString, folder];
+    }
+    return [NSString stringWithFormat:@"%@|f%lu", self.hashString, (unsigned long)index];
+}
+
+- (void)recordOpenForFileNode:(FileListNode*)node
+{
+    NSString* key = [self openCountKeyForFileNode:node];
+    NSMutableDictionary* counts = openCountsDictionary();
+    NSUInteger n = [(NSNumber*)counts[key] unsignedIntegerValue];
+    counts[key] = @(n + 1);
+    saveOpenCounts(counts);
+}
+
+- (void)recordOpenForPlayableItem:(NSDictionary*)item
+{
+    NSString* key = [self openCountKeyForPlayableItem:item];
+    NSMutableDictionary* counts = openCountsDictionary();
+    NSUInteger n = [(NSNumber*)counts[key] unsignedIntegerValue];
+    counts[key] = @(n + 1);
+    saveOpenCounts(counts);
+}
+
+- (NSUInteger)openCountForFileNode:(FileListNode*)node
+{
+    NSString* key = [self openCountKeyForFileNode:node];
+    return [(NSNumber*)openCountsDictionary()[key] unsignedIntegerValue];
+}
+
+- (NSString*)openCountLabelForFileNode:(FileListNode*)node
+{
+    NSUInteger n = [self openCountForFileNode:node];
+    if (n == 0)
+    {
+        return nil;
+    }
+    NSString* category = node.isFolder ? nil : [self mediaCategoryForFile:node.indexes.firstIndex];
+    BOOL isPlayed = [category isEqualToString:@"video"] || [category isEqualToString:@"adult"] ||
+                    [category isEqualToString:@"audio"];
+    NSString* format = isPlayed ? NSLocalizedString(@"Played: %lu", "Files tab -> open count for video/audio")
+                                : NSLocalizedString(@"Opened: %lu", "Files tab -> open count for other");
+    return [NSString stringWithFormat:format, (unsigned long)n];
+}
+
+- (NSString*)openCountLabelForPlayableItem:(NSDictionary*)item
+{
+    NSString* key = [self openCountKeyForPlayableItem:item];
+    NSUInteger n = [(NSNumber*)openCountsDictionary()[key] unsignedIntegerValue];
+    if (n == 0)
+    {
+        return nil;
+    }
+    NSString* category = item[@"category"] ?: @"";
+    BOOL isPlayed = [category isEqualToString:@"video"] || [category isEqualToString:@"adult"] ||
+                    [category isEqualToString:@"audio"];
+    NSString* format = isPlayed ? NSLocalizedString(@"Played: %lu", "Play button tooltip -> open count for video/audio")
+                                : NSLocalizedString(@"Opened: %lu", "Play button tooltip -> open count for other");
+    return [NSString stringWithFormat:format, (unsigned long)n];
 }
 
 - (NSString*)cueFilePathForAudioPath:(NSString*)audioPath

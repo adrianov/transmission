@@ -210,7 +210,8 @@ static CGFloat const kPaddingBetweenNameAndFolderStatus = 4.0;
         }
     }
 
-    self.toolTip = path;
+    NSString* openLabel = [torrent openCountLabelForFileNode:node];
+    self.toolTip = openLabel.length > 0 ? [NSString stringWithFormat:@"%@\n%@", path, openLabel] : path;
 }
 
 - (void)setBackgroundStyle:(NSBackgroundStyle)backgroundStyle
