@@ -129,7 +129,7 @@ function(tr_process_list_conditions VAR_PREFIX)
 endfunction()
 
 macro(tr_add_external_auto_library ID DIRNAME LIBNAME)
-    cmake_parse_arguments(_TAEAL_ARG "SUBPROJECT" "TARGET" "CMAKE_ARGS" ${ARGN})
+    cmake_parse_arguments(_TAEAL_ARG "SUBPROJECT" "TARGET" "CMAKE_ARGS;DEPENDS" ${ARGN})
 
     if(USE_SYSTEM_${ID})
         tr_get_required_flag(USE_SYSTEM_${ID} SYSTEM_${ID}_IS_REQUIRED)
@@ -183,11 +183,16 @@ macro(tr_add_external_auto_library ID DIRNAME LIBNAME)
                 "-DVCPKG_CHAINLOAD_TOOLCHAIN_FILE=${VCPKG_CHAINLOAD_TOOLCHAIN_FILE}")
         endif()
 
+        set(_TAEAL_EP_DEPENDS)
+        if(_TAEAL_ARG_DEPENDS)
+            set(_TAEAL_EP_DEPENDS DEPENDS ${_TAEAL_ARG_DEPENDS})
+        endif()
         ExternalProject_Add(
             ${${ID}_UPSTREAM_TARGET}
             PREFIX "${TR_THIRD_PARTY_BINARY_DIR}/${DIRNAME}.bld"
             SOURCE_DIR "${TR_THIRD_PARTY_SOURCE_DIR}/${DIRNAME}"
             INSTALL_DIR "${${ID}_PREFIX}"
+            ${_TAEAL_EP_DEPENDS}
             CMAKE_ARGS
                 -Wno-dev # We don't want to be warned over unused variables
                 --no-warn-unused-cli

@@ -561,6 +561,7 @@ if(ENABLE_MAC)
 endif()
 
 # JBIG2 (jbig2enc/leptonica) for DjVu→PDF conversion (macOS only).
+# jbig2enc configure needs LeptonicaConfig.cmake, so libjbig2enc must depend on leptonica-install.
 if(ENABLE_MAC)
     tr_add_external_auto_library(LEPTONICA leptonica leptonica
         TARGET leptonica::leptonica
@@ -575,8 +576,11 @@ if(ENABLE_MAC)
             -DENABLE_WEBP=OFF
             -DENABLE_OPENJPEG=OFF)
 
+    ExternalProject_Add_StepTargets(leptonica install)
+
     tr_add_external_auto_library(JBIG2ENC jbig2enc libjbig2enc
         TARGET jbig2enc::jbig2enc
+        DEPENDS leptonica-install
         CMAKE_ARGS
             -DBUILD_SHARED_LIBS=OFF
             "-DLeptonica_DIR=${LEPTONICA_PREFIX}/lib/cmake/leptonica")
