@@ -10,6 +10,7 @@
 static NSMutableDictionary<NSString*, NSNumber*>* sIINAUnwatchedCache;
 static dispatch_once_t sIINAUnwatchedCacheOnce;
 
+/// ~/Library/Application Support/com.colliderli.iina/watch_later — Transmission must have read access for unwatched state.
 static NSString* iinaWatchLaterDir(void)
 {
     NSArray<NSString*>* dirs = NSSearchPathForDirectoriesInDomains(NSApplicationSupportDirectory, NSUserDomainMask, YES);
@@ -18,29 +19,64 @@ static NSString* iinaWatchLaterDir(void)
     return [dirs.firstObject stringByAppendingPathComponent:@"com.colliderli.iina/watch_later"];
 }
 
-/// Normalize path so MD5 matches IINA/mpv watch_later key (they hash the path when opening).
-static NSString* normalizedPathForIINALookup(NSString* path)
+/// Normalize to absolute path and standardize; optionally resolve symlinks if file exists.
+static NSString* normalizedPathForIINALookup(NSString* path, BOOL resolveSymlinks)
 {
     if (!path || path.length == 0)
         return nil;
-    NSString* s = [path stringByStandardizingPath];
-    return s.length > 0 ? s : path;
+    NSString* absolutePath = [path stringByExpandingTildeInPath];
+    if (![absolutePath isAbsolutePath])
+    {
+        NSString* currentDir = [NSFileManager.defaultManager currentDirectoryPath];
+        absolutePath = [currentDir stringByAppendingPathComponent:absolutePath];
+    }
+    NSString* standardized = [absolutePath stringByStandardizingPath];
+    if (standardized.length == 0)
+        standardized = absolutePath;
+    if (resolveSymlinks && [NSFileManager.defaultManager fileExistsAtPath:standardized])
+    {
+        NSString* resolved = [standardized stringByResolvingSymlinksInPath];
+        if (resolved && resolved.length > 0)
+            standardized = resolved;
+    }
+    return standardized;
 }
 
-static NSString* md5HexForPath(NSString* path)
+/// Fills UPPERCASE and lowercase MD5 hex of path (UTF-8). Formula: UPPERCASE( MD5( UTF8( PATH ) ) ); IINA uses uppercase.
+static void md5HexForPath(NSString* path, NSMutableString* uppercaseHex, NSMutableString* lowercaseHex)
 {
     NSData* data = [path dataUsingEncoding:NSUTF8StringEncoding];
     if (!data || data.length == 0)
-        return nil;
+        return;
     unsigned char digest[CC_MD5_DIGEST_LENGTH];
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
     CC_MD5(data.bytes, (CC_LONG)data.length, digest);
 #pragma clang diagnostic pop
-    NSMutableString* hex = [NSMutableString stringWithCapacity:CC_MD5_DIGEST_LENGTH * 2];
     for (NSUInteger i = 0; i < CC_MD5_DIGEST_LENGTH; i++)
-        [hex appendFormat:@"%02x", digest[i]];
-    return hex;
+    {
+        [uppercaseHex appendFormat:@"%02X", digest[i]];
+        [lowercaseHex appendFormat:@"%02x", digest[i]];
+    }
+}
+
+/// Returns path to watch_later file if it exists. IINA uses uppercase MD5 filenames; we check uppercase first, then lowercase for case-sensitive volumes.
+static NSString* existingWatchLaterPath(NSString* dir, NSString* pathKey)
+{
+    if (!pathKey || pathKey.length == 0)
+        return nil;
+    NSMutableString* upper = [NSMutableString stringWithCapacity:CC_MD5_DIGEST_LENGTH * 2];
+    NSMutableString* lower = [NSMutableString stringWithCapacity:CC_MD5_DIGEST_LENGTH * 2];
+    md5HexForPath(pathKey, upper, lower);
+    if (upper.length == 0)
+        return nil;
+    NSString* pathUpper = [dir stringByAppendingPathComponent:upper];
+    if ([NSFileManager.defaultManager fileExistsAtPath:pathUpper])
+        return pathUpper;
+    NSString* pathLower = [dir stringByAppendingPathComponent:lower];
+    if ([NSFileManager.defaultManager fileExistsAtPath:pathLower])
+        return pathLower;
+    return nil;
 }
 
 static double parseIINAStartFromFile(NSString* filePath)
@@ -91,21 +127,26 @@ NSString* const kIINAWatchCacheDidUpdateNotification = @"IINAWatchCacheDidUpdate
     dispatch_once(&sIINAUnwatchedCacheOnce, ^{
         sIINAUnwatchedCache = [NSMutableDictionary dictionary];
     });
-    NSString* key = normalizedPathForIINALookup(path);
+    NSString* key = normalizedPathForIINALookup(path, YES);
     if (!key)
         key = path;
     NSNumber* cached = sIINAUnwatchedCache[key];
     if (cached != nil)
         return cached.boolValue;
     NSString* dir = iinaWatchLaterDir();
-    NSString* hash = md5HexForPath(key);
-    if (!dir || !hash)
+    if (!dir)
     {
         sIINAUnwatchedCache[key] = @YES;
         return YES;
     }
-    NSString* watchFile = [dir stringByAppendingPathComponent:hash];
-    if (![NSFileManager.defaultManager fileExistsAtPath:watchFile])
+    NSString* watchFile = existingWatchLaterPath(dir, key);
+    if (!watchFile)
+    {
+        NSString* keyNoResolve = normalizedPathForIINALookup(path, NO);
+        if (keyNoResolve && keyNoResolve != key)
+            watchFile = existingWatchLaterPath(dir, keyNoResolve);
+    }
+    if (!watchFile)
     {
         sIINAUnwatchedCache[key] = @YES;
         return YES;
@@ -116,21 +157,21 @@ NSString* const kIINAWatchCacheDidUpdateNotification = @"IINAWatchCacheDidUpdate
         sIINAUnwatchedCache[key] = @YES;
         return YES;
     }
-    sIINAUnwatchedCache[key] = @YES;
+    // Assume watched until async confirms start/duration; avoids showing unwatched for watched files.
+    sIINAUnwatchedCache[key] = @NO;
     __weak id weakObj = completionObject;
     NSString* pathForDuration = [path copy];
     NSString* keyCopy = [key copy];
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
         NSTimeInterval duration = durationForVideoPath(pathForDuration);
-        BOOL unwatched = YES;
-        if (duration > 0)
-            unwatched = (start / duration) < 0.9;
+        // When duration unknown (path unreadable, timeout, unsupported), show unwatched (green) instead of incorrectly gray.
+        BOOL unwatched = (duration <= 0) ? YES : ((start / duration) < 0.9);
         dispatch_async(dispatch_get_main_queue(), ^{
             sIINAUnwatchedCache[keyCopy] = @(unwatched);
             [NSNotificationCenter.defaultCenter postNotificationName:kIINAWatchCacheDidUpdateNotification object:weakObj];
         });
     });
-    return YES;
+    return NO;
 }
 
 + (void)invalidateCacheForPath:(NSString*)path
@@ -140,8 +181,22 @@ NSString* const kIINAWatchCacheDidUpdateNotification = @"IINAWatchCacheDidUpdate
     dispatch_once(&sIINAUnwatchedCacheOnce, ^{
         sIINAUnwatchedCache = [NSMutableDictionary dictionary];
     });
-    NSString* key = normalizedPathForIINALookup(path);
+    NSString* key = normalizedPathForIINALookup(path, YES);
     [sIINAUnwatchedCache removeObjectForKey:key ?: path];
+    NSString* keyNoResolve = normalizedPathForIINALookup(path, NO);
+    if (keyNoResolve && ![keyNoResolve isEqualToString:key])
+        [sIINAUnwatchedCache removeObjectForKey:keyNoResolve];
+}
+
++ (NSString*)watchLaterBasenameForPath:(NSString*)path resolveSymlinks:(BOOL)resolveSymlinks
+{
+    NSString* key = normalizedPathForIINALookup(path, resolveSymlinks);
+    if (!key || key.length == 0)
+        return nil;
+    NSMutableString* upper = [NSMutableString stringWithCapacity:CC_MD5_DIGEST_LENGTH * 2];
+    NSMutableString* lower = [NSMutableString stringWithCapacity:CC_MD5_DIGEST_LENGTH * 2];
+    md5HexForPath(key, upper, lower);
+    return upper.length > 0 ? upper : nil;
 }
 
 @end

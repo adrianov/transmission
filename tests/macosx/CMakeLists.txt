@@ -4,11 +4,14 @@ add_executable(macosx-test)
 
 target_sources(macosx-test
     PRIVATE
+        IINAWatchHelper-test.mm
         NSStringAdditions-test.mm
-        ${CMAKE_SOURCE_DIR}/macosx/NSStringAdditions.mm
-        ${CMAKE_SOURCE_DIR}/macosx/NSStringAdditions.h
+        ${CMAKE_SOURCE_DIR}/macosx/IINAWatchHelper.h
+        ${CMAKE_SOURCE_DIR}/macosx/IINAWatchHelper.mm
+        ${CMAKE_SOURCE_DIR}/macosx/NSDataAdditions.h
         ${CMAKE_SOURCE_DIR}/macosx/NSDataAdditions.mm
-        ${CMAKE_SOURCE_DIR}/macosx/NSDataAdditions.h)
+        ${CMAKE_SOURCE_DIR}/macosx/NSStringAdditions.h
+        ${CMAKE_SOURCE_DIR}/macosx/NSStringAdditions.mm)
 
 set_property(
     TARGET macosx-test
@@ -38,10 +41,13 @@ target_include_directories(macosx-test
         ${CMAKE_SOURCE_DIR}/macosx
         ${CMAKE_SOURCE_DIR})
 
-# Link Foundation framework for macOS
+# Link frameworks for macOS (IINAWatchHelper uses AVFoundation and CommonCrypto)
 if(APPLE)
     find_library(FOUNDATION_LIB Foundation)
-    target_link_libraries(macosx-test PRIVATE ${FOUNDATION_LIB})
+    target_link_libraries(macosx-test PRIVATE
+        ${FOUNDATION_LIB}
+        "-framework AVFoundation"
+        "-framework Security")
     
     # Set minimum deployment target
     set_target_properties(macosx-test PROPERTIES
