@@ -4,21 +4,51 @@
 
 #import "PlayButton.h"
 
+/// Bezel fill uses PlayButton.fillColorUnwatched:hovered:. No system bezel.
+@interface PlayButtonCell : NSButtonCell
+@end
+
+@implementation PlayButtonCell
+
+- (void)drawBezelWithFrame:(NSRect)frame inView:(NSView*)controlView
+{
+    if (NSIsEmptyRect(frame))
+        return;
+    PlayButton* button = [controlView isKindOfClass:[PlayButton class]] ? (PlayButton*)controlView : nil;
+    BOOL hovered = button ? button.isHovered : NO;
+    BOOL unwatched = button ? button.iinaUnwatched : NO;
+    NSColor* fill = [PlayButton fillColorUnwatched:unwatched hovered:hovered];
+    [fill setFill];
+    [[NSBezierPath bezierPathWithRoundedRect:frame xRadius:4.0 yRadius:4.0] fill];
+}
+
+@end
+
 @implementation PlayButton
+
++ (NSColor*)fillColorUnwatched:(BOOL)unwatched hovered:(BOOL)hovered
+{
+    if (unwatched)
+        return hovered ? [NSColor colorWithCalibratedRed:0.28 green:0.72 blue:0.28 alpha:0.65] :
+                         [NSColor colorWithCalibratedRed:0.22 green:0.62 blue:0.22 alpha:0.6];
+    return hovered ? [NSColor colorWithCalibratedWhite:0.15 alpha:0.6] :
+                     [NSColor colorWithCalibratedWhite:0.1 alpha:0.5];
+}
+
++ (Class)cellClass
+{
+    return [PlayButtonCell class];
+}
 
 - (instancetype)init
 {
     self = [super init];
     if (self)
     {
-        self.wantsLayer = YES;
-        self.layer.cornerRadius = 4.0;
-        self.layer.masksToBounds = YES;
-        self.layerContentsRedrawPolicy = NSViewLayerContentsRedrawOnSetNeedsDisplay;
-
-        // Default styling for all play buttons
-        self.bezelStyle = NSBezelStyleRecessed;
-        self.showsBorderOnlyWhileMouseInside = YES;
+        // No layer so the cell's drawBezelWithFrame is used (reliable in table/scroll views).
+        self.bordered = YES;
+        self.bezelStyle = NSBezelStyleRounded;
+        self.showsBorderOnlyWhileMouseInside = NO;
         self.font = [NSFont systemFontOfSize:11];
         self.controlSize = NSControlSizeSmall;
         self.imagePosition = NSImageLeft;
@@ -27,8 +57,6 @@
         [self setupTrackingArea];
         self.cell.lineBreakMode = NSLineBreakByTruncatingTail;
         self.cell.truncatesLastVisibleLine = YES;
-
-        [self updateBackground];
     }
     return self;
 }
@@ -48,7 +76,7 @@
     self.toolTip = nil;
     self.state = NSControlStateValueOff;
     self.highlighted = NO;
-    [self updateBackground];
+    [self setNeedsDisplay:YES];
 }
 
 - (void)setupTrackingArea
@@ -63,18 +91,15 @@
 - (void)mouseEntered:(NSEvent*)event
 {
     self.isHovered = YES;
-    [self updateBackground];
-
+    [self setNeedsDisplay:YES];
     if (self.onHover)
-    {
         self.onHover(self);
-    }
 }
 
 - (void)mouseExited:(NSEvent*)event
 {
     self.isHovered = NO;
-    [self updateBackground];
+    [self setNeedsDisplay:YES];
 }
 
 - (void)setIinaUnwatched:(BOOL)iinaUnwatched
@@ -82,19 +107,8 @@
     if (_iinaUnwatched != iinaUnwatched)
     {
         _iinaUnwatched = iinaUnwatched;
-        [self updateBackground];
+        [self setNeedsDisplay:YES];
     }
-}
-
-- (void)updateBackground
-{
-    NSColor* bgColor;
-    if (self.iinaUnwatched)
-        bgColor = self.isHovered ? [NSColor colorWithRed:0.2 green:0.6 blue:0.2 alpha:0.35] :
-                                   [NSColor colorWithRed:0.2 green:0.55 blue:0.2 alpha:0.25];
-    else
-        bgColor = self.isHovered ? [NSColor colorWithWhite:0.0 alpha:0.12] : [NSColor colorWithWhite:0.0 alpha:0.05];
-    self.layer.backgroundColor = bgColor.CGColor;
 }
 
 @end

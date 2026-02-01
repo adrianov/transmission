@@ -15,6 +15,9 @@
 /// Pure function: computes state and layout from snapshot; safe on background queue.
 + (NSDictionary*)stateAndLayoutFromSnapshot:(NSArray<NSDictionary*>*)snapshot;
 
+/// Fills iinaUnwatched on video/adult entries in state. Call on main before applying state to UI.
++ (void)enrichStateWithIinaUnwatched:(NSMutableArray<NSMutableDictionary*>*)state forTorrent:(Torrent*)torrent;
+
 /// Returns cached or newly built state; updates torrent's cachedPlayButton*.
 + (NSMutableArray<NSMutableDictionary*>*)stateForTorrent:(Torrent*)torrent;
 

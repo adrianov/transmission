@@ -123,6 +123,18 @@ static NSDictionary* stateAndLayoutFromSnapshotImpl(NSArray<NSDictionary*>* snap
     return stateAndLayoutFromSnapshotImpl(snapshot);
 }
 
++ (void)enrichStateWithIinaUnwatched:(NSMutableArray<NSMutableDictionary*>*)state forTorrent:(Torrent*)torrent
+{
+    for (NSMutableDictionary* entry in state)
+    {
+        NSString* category = entry[@"category"];
+        if (![category isEqualToString:@"video"] && ![category isEqualToString:@"adult"])
+            continue;
+        NSString* pathToOpen = [torrent pathToOpenForPlayableItem:entry];
+        entry[@"iinaUnwatched"] = (pathToOpen.length > 0) ? @([torrent iinaUnwatchedForVideoPath:pathToOpen]) : @YES;
+    }
+}
+
 + (NSMutableArray<NSMutableDictionary*>*)stateForTorrent:(Torrent*)torrent
 {
     NSArray<NSDictionary*>* playableFiles = torrent.playableFiles;
@@ -195,16 +207,14 @@ static NSDictionary* stateAndLayoutFromSnapshotImpl(NSArray<NSDictionary*>* snap
             entry[@"visible"] = @(visible);
             if (visible && ![type hasPrefix:@"document"] && progress < 1.0 && progressPct < 100)
                 entry[@"title"] = [NSString stringWithFormat:@"%@ (%d%%)", entry[@"baseTitle"], progressPct];
-            // IINA watch-later green (unwatched) only for TV series (season > 0); use path we open so hash matches IINA
+            // IINA watch-later: iinaUnwatched → green button; watched or no path → gray. Needs read access to IINA watch_later folder.
             if ([category isEqualToString:@"video"] || [category isEqualToString:@"adult"])
             {
-                NSNumber* season = entry[@"season"];
-                if (season && season.integerValue > 0)
-                {
-                    NSString* pathToOpen = [torrent pathToOpenForPlayableItem:entry];
-                    if (pathToOpen.length > 0)
-                        entry[@"iinaUnwatched"] = @([torrent iinaUnwatchedForVideoPath:pathToOpen]);
-                }
+                NSString* pathToOpen = [torrent pathToOpenForPlayableItem:entry];
+                if (pathToOpen.length > 0)
+                    entry[@"iinaUnwatched"] = @([torrent iinaUnwatchedForVideoPath:pathToOpen]);
+                else
+                    entry[@"iinaUnwatched"] = @YES; // No path yet → show green (unwatched) until we can check IINA.
             }
             [state addObject:entry];
         }
