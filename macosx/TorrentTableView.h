@@ -13,6 +13,12 @@ extern CGFloat const kGroupSeparatorHeight;
 /// Updates status/progress/hover for visible torrent cells without re-requesting row views (no flow view reconfig).
 - (void)updateVisibleRowsContent;
 
+/// Refreshes row heights and content button containers when View > Content Buttons is toggled. Call after changing the preference.
+- (void)refreshContentButtonsVisibility;
+
+/// Schedules content button config for visible rows that still need it. Call when scroll ends to fix empty flow view after scroll.
+- (void)ensureContentButtonsForVisibleRows;
+
 - (BOOL)isGroupCollapsed:(NSInteger)value;
 - (void)removeCollapsedGroup:(NSInteger)value;
 - (void)removeAllCollapsedGroups;
