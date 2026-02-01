@@ -1287,16 +1287,75 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
     return self.fIcon;
 }
 
+/// Path extension of a playable item dict (from @"path" or @"originalExt"). Nil if none.
+- (NSString*)pathExtensionOfPlayableItem:(NSDictionary*)item
+{
+    id pathObj = item[@"path"];
+    if ([pathObj isKindOfClass:[NSString class]] && [(NSString*)pathObj length] > 0)
+    {
+        NSString* ext = [(NSString*)pathObj pathExtension];
+        if (ext.length > 0)
+            return ext.lowercaseString;
+    }
+    NSString* ext = item[@"originalExt"];
+    return ext.length > 0 ? ext.lowercaseString : nil;
+}
+
+/// YES when file-based audio is represented entirely by .cue+companion pairs (one playable entry per pair).
+/// When YES, icon subtitle shows "albums" and count = playable count; when NO, shows "audios" and count = fMediaFileCount.
+- (BOOL)isFileBasedAudioCueBased
+{
+    if (self.fMediaType != TorrentMediaTypeAudio)
+        return NO;
+    NSArray<NSDictionary*>* playable = self.playableFiles;
+    if (playable.count == 0)
+        return NO;
+    for (NSDictionary* item in playable)
+    {
+        NSString* ext = [self pathExtensionOfPlayableItem:item];
+        if ([ext isEqualToString:@"cue"])
+            continue;
+        if ([self cueFilePathForAudioPath:item[@"path"]] == nil)
+            return NO;
+    }
+    return YES;
+}
+
+#pragma mark - File-based icon subtitle (albums vs audios)
+
+/// Count to show in file-based icon subtitle (e.g. number of video/audio files or cue+audio pairs). Used by iconSubtitle.
+- (NSUInteger)iconSubtitleCountForFileBased
+{
+    if ([self isFileBasedAudioCueBased])
+        return self.playableFiles.count;
+    return self.fMediaFileCount;
+}
+
+/// Label for file-based icon subtitle (e.g. "videos", "audios", "albums"). Nil if no label. Used by iconSubtitle.
+- (NSString*)iconSubtitleLabelForFileBasedMediaType:(TorrentMediaType)mediaType
+{
+    switch (mediaType)
+    {
+    case TorrentMediaTypeVideo:
+        return @"videos";
+    case TorrentMediaTypeAudio:
+        return [self isFileBasedAudioCueBased] ? @"albums" : @"audios";
+    case TorrentMediaTypeBooks:
+        return @"books";
+    case TorrentMediaTypeSoftware:
+        return @"software";
+    default:
+        return nil;
+    }
+}
+
 - (NSString*)iconSubtitle
 {
     if (!self.folder || self.magnet)
-    {
         return nil;
-    }
 
     [self detectMediaType];
 
-    // Folder-based: show folder count
     if (self.fFolderItems.count > 1)
     {
         if (self.fIsDVD || self.fIsBluRay)
@@ -1305,18 +1364,10 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
             return [NSString stringWithFormat:@"%lu albums", (unsigned long)self.fFolderItems.count];
     }
 
-    // File-based: show file count
-    if (self.fMediaFileCount > 1)
-    {
-        if (self.fMediaType == TorrentMediaTypeVideo)
-            return [NSString stringWithFormat:@"%lu videos", (unsigned long)self.fMediaFileCount];
-        if (self.fMediaType == TorrentMediaTypeAudio)
-            return [NSString stringWithFormat:@"%lu audios", (unsigned long)self.fMediaFileCount];
-        if (self.fMediaType == TorrentMediaTypeBooks)
-            return [NSString stringWithFormat:@"%lu books", (unsigned long)self.fMediaFileCount];
-        if (self.fMediaType == TorrentMediaTypeSoftware)
-            return [NSString stringWithFormat:@"%lu software", (unsigned long)self.fMediaFileCount];
-    }
+    NSUInteger const count = [self iconSubtitleCountForFileBased];
+    NSString* const label = [self iconSubtitleLabelForFileBasedMediaType:self.fMediaType];
+    if (count > 1 && label)
+        return [NSString stringWithFormat:@"%lu %@", (unsigned long)count, label];
     return nil;
 }
 
@@ -1470,6 +1521,24 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
     // Individual media files (not folder-based)
     self.fPlayableFiles = [self buildIndividualFilePlayables];
     return self.fPlayableFiles;
+}
+
+- (NSDictionary*)preferredPlayableItemFromList:(NSArray<NSDictionary*>*)playableFiles
+{
+    if (playableFiles.count == 0)
+        return nil;
+    for (NSDictionary* item in playableFiles)
+    {
+        NSString* path = item[@"path"];
+        if ([path.pathExtension.lowercaseString isEqualToString:@"cue"])
+            return item;
+    }
+    for (NSDictionary* item in playableFiles)
+    {
+        if ([item[@"progress"] doubleValue] > 0)
+            return item;
+    }
+    return playableFiles.firstObject;
 }
 
 /// Builds playable entries for individual media files
@@ -2565,6 +2634,99 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
     return allTrackers;
 }
 
+- (Torrent*)selfForSorting
+{
+    return self;
+}
+
+// Returns 0 for no match; 1 = substring, 2 = word start, 3 = full word. Callers use > 0 for filter and sum for sort.
+static NSUInteger relevanceScoreForSearchStringInText(NSString* searchString, NSString* text, NSStringCompareOptions opts)
+{
+    if (searchString.length == 0 || text.length == 0)
+        return 0;
+    NSRange range = [text rangeOfString:searchString options:opts];
+    if (range.location == NSNotFound)
+        return 0;
+    static NSCharacterSet* alnum = nil;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        alnum = NSCharacterSet.alphanumericCharacterSet;
+    });
+    BOOL wordStart = range.location == 0 || ![alnum characterIsMember:[text characterAtIndex:range.location - 1]];
+    NSUInteger end = range.location + range.length;
+    BOOL wordEnd = end >= text.length || ![alnum characterIsMember:[text characterAtIndex:end]];
+    if (wordStart && wordEnd)
+        return 3;
+    if (wordStart)
+        return 2;
+    return 1;
+}
+
+- (NSArray<NSString*>*)searchableTextsByTracker:(BOOL)byTracker includePlayableTitles:(BOOL)includePlayableTitles
+{
+    if (byTracker)
+        return self.allTrackersFlat;
+    NSMutableArray<NSString*>* texts = [NSMutableArray arrayWithObject:self.name];
+    if (includePlayableTitles)
+    {
+        for (NSDictionary* item in self.playableFiles)
+        {
+            NSString* baseTitle = item[@"baseTitle"];
+            if (baseTitle.length > 0)
+                [texts addObject:baseTitle];
+        }
+    }
+    return texts;
+}
+
+- (BOOL)matchesSearchStrings:(NSArray<NSString*>*)strings
+                   byTracker:(BOOL)byTracker
+       includePlayableTitles:(BOOL)includePlayableTitles
+{
+    if (strings.count == 0)
+        return YES;
+    NSStringCompareOptions const opts = NSCaseInsensitiveSearch | NSDiacriticInsensitiveSearch;
+    NSArray<NSString*>* texts = [self searchableTextsByTracker:byTracker includePlayableTitles:includePlayableTitles];
+    for (NSString* searchString in strings)
+    {
+        BOOL found = NO;
+        for (NSString* text in texts)
+        {
+            if (relevanceScoreForSearchStringInText(searchString, text, opts) > 0)
+            {
+                found = YES;
+                break;
+            }
+        }
+        if (!found)
+            return NO;
+    }
+    return YES;
+}
+
+- (NSUInteger)searchMatchScoreForStrings:(NSArray<NSString*>*)strings
+                               byTracker:(BOOL)byTracker
+                   includePlayableTitles:(BOOL)includePlayableTitles
+{
+    if (strings.count == 0)
+        return 0;
+    NSStringCompareOptions const opts = NSCaseInsensitiveSearch | NSDiacriticInsensitiveSearch;
+    NSArray<NSString*>* texts = [self searchableTextsByTracker:byTracker includePlayableTitles:includePlayableTitles];
+    NSUInteger total = 0;
+    for (NSString* searchString in strings)
+    {
+        NSUInteger best = 0;
+        for (NSString* text in texts)
+        {
+            NSUInteger score = relevanceScoreForSearchStringInText(searchString, text, opts);
+            if (score > best)
+                best = score;
+        }
+        total += best;
+    }
+    return total;
+}
+
 - (BOOL)addTrackerToNewTier:(NSString*)new_tracker
 {
     new_tracker = [new_tracker stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
@@ -2745,6 +2907,114 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
         auto const location = tr_torrentFindFile(self.fHandle, node.indexes.firstIndex);
         return std::empty(location) ? nil : @(location.c_str());
     }
+}
+
+- (NSString*)pathToOpenForAudioPath:(NSString*)path
+{
+    if (!path || path.length == 0)
+        return path;
+    NSString* cuePath = [self cueFilePathForAudioPath:path];
+    return cuePath ?: path;
+}
+
+- (NSString*)pathToOpenForFileNode:(FileListNode*)node
+{
+    NSString* path = [self fileLocation:node];
+    if (!path)
+        return nil;
+    if (node.isFolder)
+    {
+        NSString* basePath = node.path.length > 0 ? [node.path stringByAppendingPathComponent:node.name] : node.name;
+        NSString* cuePath = [self cueFilePathForFolder:basePath];
+        return cuePath ?: path;
+    }
+    return [self pathToOpenForAudioPath:path];
+}
+
+- (NSString*)pathToOpenForPlayableItem:(NSDictionary*)item
+{
+    NSString* type = item[@"type"] ?: @"file";
+    NSString* path = item[@"path"];
+    if ([type isEqualToString:@"album"])
+    {
+        NSString* folder = item[@"folder"];
+        if (folder.length > 0)
+        {
+            NSString* cuePath = [self cueFilePathForFolder:folder];
+            if (cuePath)
+                return cuePath;
+        }
+    }
+    else if (path.length > 0)
+    {
+        return [self pathToOpenForAudioPath:path];
+    }
+    return path;
+}
+
+/// Path to use when deriving UI display name for a playable item (menu, tooltip). Prefers .cue when present for audio.
+- (NSString*)pathForDisplayNameForPlayableItem:(NSDictionary*)item
+{
+    // Tracks are per-file audio (e.g. 01.flac); album has one .cue. Use folder's .cue for display.
+    NSString* type = item[@"type"] ?: @"file";
+    if ([type isEqualToString:@"track"])
+    {
+        NSString* folder = item[@"folder"];
+        if (folder.length > 0)
+        {
+            NSString* cuePath = [self cueFilePathForFolder:folder];
+            if (cuePath.length > 0)
+                return cuePath;
+        }
+    }
+    NSString* pathToOpen = [self pathToOpenForPlayableItem:item];
+    if (pathToOpen.length > 0)
+    {
+        static NSSet<NSString*>* audioExts;
+        static dispatch_once_t onceToken;
+        dispatch_once(&onceToken, ^{
+            audioExts = [NSSet setWithArray:@[ @"flac", @"ape", @"wav", @"wma", @"alac", @"aiff", @"wv" ]];
+        });
+        NSString* ext = pathToOpen.pathExtension.lowercaseString;
+        if ([audioExts containsObject:ext])
+        {
+            NSString* cuePath = [self cueFilePathForAudioPath:pathToOpen];
+            if (cuePath.length > 0)
+                return cuePath;
+        }
+        return pathToOpen;
+    }
+    NSString* itemPath = item[@"path"];
+    if (itemPath.length > 0)
+    {
+        NSString* cuePath = [self cueFilePathForAudioPath:itemPath];
+        if (cuePath.length > 0)
+            return cuePath;
+    }
+    return @"";
+}
+
+- (NSString*)displayNameForPlayableItem:(NSDictionary*)item
+{
+    NSString* pathForName = [self pathForDisplayNameForPlayableItem:item];
+    if (pathForName.length > 0)
+    {
+        NSString* base = pathForName.lastPathComponent.stringByDeletingPathExtension;
+        if (base.length > 0)
+        {
+            NSString* name = base.humanReadableFileName;
+            // Track items: show .cue album name plus track so submenu items are distinguishable
+            if ([item[@"type"] isEqualToString:@"track"])
+            {
+                NSString* trackName = item[@"name"];
+                if (trackName.length > 0)
+                    return [NSString stringWithFormat:@"%@ – %@", name, trackName];
+            }
+            return name;
+        }
+    }
+    NSString* fallback = item[@"baseTitle"] ?: item[@"name"];
+    return fallback.length > 0 ? fallback : @"";
 }
 
 static NSString* const kOpenCountsUserDefaultsKey = @"TransmissionOpenCounts";
@@ -3017,59 +3287,8 @@ static void saveOpenCounts(NSDictionary<NSString*, NSNumber*>* counts)
         }
     }
 
-    // For audio files or .cue files, check if there's a matching .cue file
-    // This handles both audio files that should show their .cue companion,
-    // and .cue files that should show their own path
     if (resultPath && resultPath.length > 0)
-    {
-        // Extract relative path from absolute path to match against torrent metadata
-        NSString* torrentDir = self.currentDirectory;
-        NSString* relativePath = nil;
-
-        if ([resultPath hasPrefix:torrentDir])
-        {
-            relativePath = [resultPath substringFromIndex:torrentDir.length];
-            if ([relativePath hasPrefix:@"/"])
-            {
-                relativePath = [relativePath substringFromIndex:1];
-            }
-        }
-        else if (![resultPath isAbsolutePath])
-        {
-            relativePath = resultPath;
-        }
-
-        // If we have a relative path, try to find matching .cue file in torrent metadata
-        if (relativePath && relativePath.length > 0)
-        {
-            NSString* ext = relativePath.pathExtension.lowercaseString;
-            static NSSet<NSString*>* cueCompanionExtensions;
-            static dispatch_once_t onceToken;
-            dispatch_once(&onceToken, ^{
-                cueCompanionExtensions = [NSSet
-                    setWithArray:@[ @"flac", @"ape", @"wav", @"wma", @"alac", @"aiff", @"wv", @"cue" ]];
-            });
-
-            // Check if this is an audio file or .cue file that might have a companion
-            if ([cueCompanionExtensions containsObject:ext])
-            {
-                NSString* cuePath = [self cueFilePathForAudioPath:resultPath];
-                if (cuePath)
-                {
-                    resultPath = cuePath;
-                }
-            }
-        }
-        else
-        {
-            // Fallback: try to find .cue file using the path as-is
-            NSString* cuePath = [self cueFilePathForAudioPath:resultPath];
-            if (cuePath)
-            {
-                resultPath = cuePath;
-            }
-        }
-    }
+        resultPath = [self pathToOpenForAudioPath:resultPath];
 
     // Ensure we always return an absolute path based on torrent metadata
     if (resultPath && resultPath.length > 0)

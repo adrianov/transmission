@@ -103,6 +103,8 @@ extern NSString* const kTorrentDidChangeGroupNotification;
 /// - "path": NSString file path on disk (nil if not downloaded)
 /// Only includes files that are video/audio and exist on disk.
 @property(nonatomic, readonly) NSArray<NSDictionary*>* playableFiles;
+/// Best item to play from playableFiles: prefers .cue, then first with progress > 0, then first. Nil if list empty.
+- (NSDictionary*)preferredPlayableItemFromList:(NSArray<NSDictionary*>*)playableFiles;
 
 /// Returns YES if torrent has any playable media files on disk.
 @property(nonatomic, readonly) BOOL hasPlayableMedia;
@@ -166,6 +168,14 @@ extern NSString* const kTorrentDidChangeGroupNotification;
 @property(nonatomic, readonly) BOOL allFilesMissing;
 @property(nonatomic, readonly) NSString* lastKnownDataLocation;
 - (NSString*)fileLocation:(FileListNode*)node;
+/// Path to open for this file/folder (prefers .cue for audio/album). Nil if location unknown.
+- (NSString*)pathToOpenForFileNode:(FileListNode*)node;
+/// Path to open for an audio path: .cue path if companion exists, else path. Used for double-click and play.
+- (NSString*)pathToOpenForAudioPath:(NSString*)path;
+/// Path that would be opened for this playable item (e.g. .cue when present for audio). Used by play menu and play action.
+- (NSString*)pathToOpenForPlayableItem:(NSDictionary*)item;
+/// Display name for play menu; should reflect the file that is opened (e.g. .cue when present).
+- (NSString*)displayNameForPlayableItem:(NSDictionary*)item;
 
 // Returns .cue file path for a given audio file path, or nil if no matching .cue file found
 - (NSString*)cueFilePathForAudioPath:(NSString*)audioPath;
@@ -175,6 +185,18 @@ extern NSString* const kTorrentDidChangeGroupNotification;
 
 // Returns the path to show in tooltip (prefers .cue file if available for audio files or album folders)
 - (NSString*)tooltipPathForItemPath:(NSString*)path type:(NSString*)type folder:(NSString*)folder;
+
+/// Returns self. Used as NSSortDescriptor key so comparator receives Torrent objects, not key-path values.
+@property(nonatomic, readonly) Torrent* selfForSorting;
+
+/// YES if every string in strings appears in tracker list (byTracker) or in name/playable titles (includePlayableTitles). Used by filter bar search.
+- (BOOL)matchesSearchStrings:(NSArray<NSString*>*)strings
+                   byTracker:(BOOL)byTracker
+       includePlayableTitles:(BOOL)includePlayableTitles;
+/// Count of search strings that appear (0..strings.count). Used to sort filtered list by most matched first.
+- (NSUInteger)searchMatchScoreForStrings:(NSArray<NSString*>*)strings
+                               byTracker:(BOOL)byTracker
+                   includePlayableTitles:(BOOL)includePlayableTitles;
 
 /// Open/play count (double-click, play menu, content buttons). Key: hash|f<index> or hash|d<folder>.
 - (void)recordOpenForFileNode:(FileListNode*)node;

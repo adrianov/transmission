@@ -3155,6 +3155,30 @@ void onTorrentCompletenessChanged(tr_torrent* tor, tr_completeness status, bool 
         descriptors = @[ orderDescriptor ];
     }
 
+    NSArray<NSString*>* searchStrings = [self.fToolbarSearchField.stringValue
+        nonEmptyComponentsSeparatedByCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+    if (searchStrings.count == 0)
+        searchStrings = nil;
+    if (searchStrings.count > 0)
+    {
+        BOOL const filterTracker = [[self.fDefaults stringForKey:@"FilterSearchType"] isEqualToString:FilterSearchTypeTracker];
+        BOOL const includePlayable = [self.fDefaults boolForKey:@"ShowContentButtons"];
+        NSSortDescriptor* matchDescriptor = [NSSortDescriptor
+            sortDescriptorWithKey:@"selfForSorting"
+                        ascending:NO comparator:^NSComparisonResult(Torrent* a, Torrent* b) {
+                            NSUInteger const sa = [a searchMatchScoreForStrings:searchStrings byTracker:filterTracker
+                                                          includePlayableTitles:includePlayable];
+                            NSUInteger const sb = [b searchMatchScoreForStrings:searchStrings byTracker:filterTracker
+                                                          includePlayableTitles:includePlayable];
+                            if (sa > sb)
+                                return NSOrderedAscending;
+                            if (sa < sb)
+                                return NSOrderedDescending;
+                            return NSOrderedSame;
+                        }];
+        descriptors = [@[ matchDescriptor ] arrayByAddingObjectsFromArray:descriptors];
+    }
+
     BOOL beganTableUpdate = !callUpdates;
 
     //actually sort
@@ -3273,121 +3297,68 @@ void onTorrentCompletenessChanged(tr_torrent* tor, tr_completeness status, bool 
     auto* errorRef = &error;
     //filter & get counts of each type
     NSIndexSet* indexesOfNonFilteredTorrents = [self.fTorrents
-        indexesOfObjectsWithOptions:NSEnumerationConcurrent passingTest:^BOOL(Torrent* torrent, NSUInteger /*torrentIdx*/, BOOL* /*stopTorrentsEnumeration*/) {
-            //check status
-            if (torrent.active && !torrent.checkingWaiting)
-            {
-                BOOL const isActive = torrent.transmitting;
-                if (isActive)
-                {
-                    std::atomic_fetch_add_explicit(activeRef, 1, std::memory_order_relaxed);
-                }
-
-                if (torrent.seeding)
-                {
-                    std::atomic_fetch_add_explicit(seedingRef, 1, std::memory_order_relaxed);
-                    if (filterStatus && !((filterActive && isActive) || filterSeed))
-                    {
-                        return NO;
-                    }
-                }
-                else
-                {
-                    std::atomic_fetch_add_explicit(downloadingRef, 1, std::memory_order_relaxed);
-                    if (filterStatus && !((filterActive && isActive) || filterDownload))
-                    {
-                        return NO;
-                    }
-                }
-            }
-            else if (torrent.error)
-            {
-                std::atomic_fetch_add_explicit(errorRef, 1, std::memory_order_relaxed);
-                if (filterStatus && !filterError)
-                {
-                    return NO;
-                }
-            }
-            else
-            {
-                std::atomic_fetch_add_explicit(pausedRef, 1, std::memory_order_relaxed);
-                if (filterStatus && !filterPause)
-                {
-                    return NO;
-                }
-            }
-
-            //checkGroup
-            if (filterGroup)
-                if (torrent.groupValue != groupFilterValue)
-                {
-                    return NO;
-                }
-
-            //check text field
-            if (searchStrings)
-            {
-                __block BOOL removeTextField = NO;
-                if (filterTracker)
-                {
-                    NSArray<NSString*>* trackers = torrent.allTrackersFlat;
-                    NSStringCompareOptions const searchOpts = NSCaseInsensitiveSearch | NSDiacriticInsensitiveSearch;
-                    for (NSString* searchString in searchStrings)
-                    {
-                        BOOL found = NO;
-                        for (NSString* tracker in trackers)
-                        {
-                            if ([tracker rangeOfString:searchString options:searchOpts].location != NSNotFound)
+        indexesOfObjectsWithOptions:NSEnumerationConcurrent
+                        passingTest:^BOOL(Torrent* torrent, NSUInteger /*torrentIdx*/, BOOL* /*stopTorrentsEnumeration*/) {
+                            //check status
+                            if (torrent.active && !torrent.checkingWaiting)
                             {
-                                found = YES;
-                                break;
-                            }
-                        }
-                        if (!found)
-                        {
-                            removeTextField = YES;
-                            break;
-                        }
-                    }
-                }
-                else
-                {
-                    BOOL const showContentButtons = [self.fDefaults boolForKey:@"ShowContentButtons"];
-                    NSStringCompareOptions const searchOpts = NSCaseInsensitiveSearch | NSDiacriticInsensitiveSearch;
-                    NSArray<NSDictionary*>* playable = nil;
-                    for (NSString* searchString in searchStrings)
-                    {
-                        BOOL matched = [torrent.name rangeOfString:searchString options:searchOpts].location != NSNotFound;
-                        if (!matched && showContentButtons)
-                        {
-                            if (!playable)
-                                playable = torrent.playableFiles;
-                            for (NSDictionary* item in playable)
-                            {
-                                NSString* baseTitle = item[@"baseTitle"];
-                                if (baseTitle && [baseTitle rangeOfString:searchString options:searchOpts].location != NSNotFound)
+                                BOOL const isActive = torrent.transmitting;
+                                if (isActive)
                                 {
-                                    matched = YES;
-                                    break;
+                                    std::atomic_fetch_add_explicit(activeRef, 1, std::memory_order_relaxed);
+                                }
+
+                                if (torrent.seeding)
+                                {
+                                    std::atomic_fetch_add_explicit(seedingRef, 1, std::memory_order_relaxed);
+                                    if (filterStatus && !((filterActive && isActive) || filterSeed))
+                                    {
+                                        return NO;
+                                    }
+                                }
+                                else
+                                {
+                                    std::atomic_fetch_add_explicit(downloadingRef, 1, std::memory_order_relaxed);
+                                    if (filterStatus && !((filterActive && isActive) || filterDownload))
+                                    {
+                                        return NO;
+                                    }
                                 }
                             }
-                        }
-                        if (!matched)
-                        {
-                            removeTextField = YES;
-                            break;
-                        }
-                    }
-                }
+                            else if (torrent.error)
+                            {
+                                std::atomic_fetch_add_explicit(errorRef, 1, std::memory_order_relaxed);
+                                if (filterStatus && !filterError)
+                                {
+                                    return NO;
+                                }
+                            }
+                            else
+                            {
+                                std::atomic_fetch_add_explicit(pausedRef, 1, std::memory_order_relaxed);
+                                if (filterStatus && !filterPause)
+                                {
+                                    return NO;
+                                }
+                            }
 
-                if (removeTextField)
-                {
-                    return NO;
-                }
-            }
+                            //checkGroup
+                            if (filterGroup)
+                                if (torrent.groupValue != groupFilterValue)
+                                {
+                                    return NO;
+                                }
 
-            return YES;
-        }];
+                            if (searchStrings)
+                            {
+                                BOOL const includePlayable = [self.fDefaults boolForKey:@"ShowContentButtons"];
+                                if (![torrent matchesSearchStrings:searchStrings byTracker:filterTracker
+                                             includePlayableTitles:includePlayable])
+                                    return NO;
+                            }
+
+                            return YES;
+                        }];
 
     NSArray<Torrent*>* allTorrents = [self.fTorrents objectsAtIndexes:indexesOfNonFilteredTorrents];
 
@@ -4449,6 +4420,7 @@ void onTorrentCompletenessChanged(tr_torrent* tor, tr_completeness status, bool 
 - (void)toggleShowContentButtons:(id)sender
 {
     [self.fDefaults setBool:![self.fDefaults boolForKey:@"ShowContentButtons"] forKey:@"ShowContentButtons"];
+    [self.fTableView refreshContentButtonsVisibility];
     [self refreshVisibleTransferRows];
     [self updateForAutoSize];
 }
