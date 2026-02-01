@@ -197,7 +197,7 @@ static NSTimeInterval const kUpdateSeconds = 0.75;
         break;
 
     case TR_LOG_INFO:
-        color = NSColor.systemGreenColor;
+        color = [NSColor colorWithCalibratedWhite:0.45 alpha:1.0];
         break;
 
     case TR_LOG_DEBUG:

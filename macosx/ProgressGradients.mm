@@ -67,39 +67,26 @@
     }
 }
 
+// Black-ish gradients for seeding/complete state (no green).
 + (NSGradient*)progressGreenGradient
 {
-    if (NSApp.darkMode)
-    {
-        return [[self class] progressGradientForRed:0.44 * 2.0 / 3.0 green:0.89 * 2.0 / 3.0 blue:0.40 * 2.0 / 3.0];
-    }
-    else
-    {
-        return [[self class] progressGradientForRed:0.44 green:0.89 blue:0.40];
-    }
+    return [[self class] progressGrayGradient];
 }
 
 + (NSGradient*)progressLightGreenGradient
 {
-    if (NSApp.darkMode)
-    {
-        return [[self class] progressGradientForRed:0.62 * 3.0 / 4.0 green:0.99 * 3.0 / 4.0 blue:0.58 * 3.0 / 4.0];
-    }
-    else
-    {
-        return [[self class] progressGradientForRed:0.62 green:0.99 blue:0.58];
-    }
+    return [[self class] progressLightGrayGradient];
 }
 
 + (NSGradient*)progressDarkGreenGradient
 {
     if (NSApp.darkMode)
     {
-        return [[self class] progressGradientForRed:0.627 * 2.0 / 3.0 green:0.714 * 2.0 / 3.0 blue:0.639 * 2.0 / 3.0];
+        return [[self class] progressGradientForRed:0.2 green:0.2 blue:0.2];
     }
     else
     {
-        return [[self class] progressGradientForRed:0.627 green:0.714 blue:0.639];
+        return [[self class] progressGradientForRed:0.6 green:0.6 blue:0.6];
     }
 }
 
