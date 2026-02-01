@@ -198,6 +198,8 @@ target_sources(${TR_NAME}-mac
         TorrentGroup.mm
         TorrentTableView.h
         TorrentTableView.mm
+        TorrentTableView+Flow.mm
+        TorrentTableView+PlayMenu.mm
         TrackerCell.h
         TrackerCell.mm
         TrackerNode.h
