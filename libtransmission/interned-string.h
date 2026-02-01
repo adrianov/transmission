@@ -7,8 +7,7 @@
 
 #include <string_view>
 
-#include <fmt/format.h>
-
+#include "libtransmission/fmt.h"
 #include "libtransmission/quark.h"
 
 /**

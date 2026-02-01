@@ -12,7 +12,7 @@
 #include <string>
 #include <string_view>
 
-#include <fmt/format.h>
+#include "libtransmission/fmt.h"
 
 namespace libtransmission::Values
 {
