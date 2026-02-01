@@ -70,9 +70,6 @@
 [submodule "third-party/libjpeg-turbo"]
 	path = third-party/libjpeg-turbo
 	url = https://github.com/libjpeg-turbo/libjpeg-turbo.git
-[submodule "third-party/grok"]
-	path = third-party/grok
-	url = https://github.com/GrokImageCompression/grok.git
 [submodule "third-party/jbig2enc"]
 	path = third-party/jbig2enc
 	url = https://github.com/agl/jbig2enc.git

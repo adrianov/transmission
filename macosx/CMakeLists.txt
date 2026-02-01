@@ -35,6 +35,8 @@ add_subdirectory(QuickLookPlugin)
 add_subdirectory(VDKQueue)
 
 add_executable(${TR_NAME}-mac MACOSX_BUNDLE)
+# Homebrew fmt triggers -Wfloat-equal; pragmas in libtransmission/fmt.h don't apply with C++ modules
+target_compile_options(${TR_NAME}-mac PRIVATE -Wno-float-equal)
 
 target_sources(${TR_NAME}-mac
     PRIVATE
@@ -440,14 +442,9 @@ target_link_libraries(${TR_NAME}-mac
 # DjVu→PDF conversion deps (static)
 target_link_libraries(${TR_NAME}-mac
     PRIVATE
-        grok::grokj2k
         leptonica::leptonica
         jbig2enc::jbig2enc
         libjpeg-turbo::turbojpeg)
-
-if(GROK_UPSTREAM_TARGET)
-    add_dependencies(${TR_NAME}-mac ${GROK_UPSTREAM_TARGET})
-endif()
 if(LEPTONICA_UPSTREAM_TARGET)
     add_dependencies(${TR_NAME}-mac ${LEPTONICA_UPSTREAM_TARGET})
 endif()
