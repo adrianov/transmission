@@ -18,7 +18,7 @@ static int8_t const kHighPeers = 10;
 
 static NSColor* const DoneColor = NSColor.systemBlueColor;
 static NSColor* const BlinkColor = NSColor.systemOrangeColor;
-static NSColor* const HighColor = NSColor.systemGreenColor; // high availability
+static NSColor* const HighColor = [NSColor colorWithCalibratedWhite:0.5 alpha:1.0]; // high availability
 
 typedef struct PieceInfo
 {
