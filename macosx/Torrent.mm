@@ -3095,6 +3095,23 @@ static TorrentSearchResult computeSearchResult(NSArray<NSString*>* strings, NSAr
     return @"";
 }
 
+/// YES if path has .cue extension (display name then means album; otherwise it may be the track file and would duplicate the track title).
+- (BOOL)pathIsCueFile:(NSString*)path
+{
+    return path.length > 0 && [path.pathExtension.lowercaseString isEqualToString:@"cue"];
+}
+
+/// Display name for a track submenu item. pathForName is the path used to derive nameFromPath (e.g. .cue or audio file).
+- (NSString*)displayNameForTrackItem:(NSDictionary*)item pathForName:(NSString*)pathForName nameFromPath:(NSString*)nameFromPath
+{
+    if (![self pathIsCueFile:pathForName])
+        return nameFromPath;
+    NSString* trackName = item[@"name"];
+    if (trackName.length > 0)
+        return [NSString stringWithFormat:@"%@ – %@", nameFromPath, trackName];
+    return nameFromPath;
+}
+
 - (NSString*)displayNameForPlayableItem:(NSDictionary*)item
 {
     NSString* pathForName = [self pathForDisplayNameForPlayableItem:item];
@@ -3104,13 +3121,8 @@ static TorrentSearchResult computeSearchResult(NSArray<NSString*>* strings, NSAr
         if (base.length > 0)
         {
             NSString* name = base.humanReadableFileName;
-            // Track items: show .cue album name plus track so submenu items are distinguishable
             if ([item[@"type"] isEqualToString:@"track"])
-            {
-                NSString* trackName = item[@"name"];
-                if (trackName.length > 0)
-                    return [NSString stringWithFormat:@"%@ – %@", name, trackName];
-            }
+                return [self displayNameForTrackItem:item pathForName:pathForName nameFromPath:name];
             return name;
         }
     }
