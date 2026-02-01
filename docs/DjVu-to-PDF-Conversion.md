@@ -6,7 +6,7 @@ Transmission’s macOS client can create a companion `.pdf` for completed `.djvu
 
 - **Correctness**: PDF page size matches the DjVu’s page size (uses DjVu pixel size + DPI).
 - **Responsiveness**: conversions run off the UI thread and are throttled.
-- **Deterministic encoding**: PDF uses explicit image filters (/JBIG2Decode + /JPXDecode), not “draw pixels and let CoreGraphics choose”.
+- **Deterministic encoding**: PDF uses explicit image filters (/JBIG2Decode + /DCTDecode), not “draw pixels and let CoreGraphics choose”.
 
 ### Backend (always-on, deterministic)
 
@@ -14,19 +14,19 @@ The converter writes an image-only PDF directly (PDF objects + xref), using:
 
 - **DjVuLibre** (`ddjvuapi`) to decode and render.
 - **JBIG2** via **jbig2enc + Leptonica** for 1‑bit masks (`/JBIG2Decode` + `/JBIG2Globals`).
-- **JPEG 2000** via **Grok** for grayscale/color backgrounds (`/JPXDecode`, JP2 stream).
+- **JPEG** via **libjpeg-turbo** for grayscale/color backgrounds (`/DCTDecode`).
 
 ### Content detection and encoding
 
 Each page is encoded as a **single image XObject**, chosen by content:
 
 - **Bitonal pages** → **JBIG2** (1‑bit) using DjVu’s mask rendering.
-- **Grayscale pages** → **JP2 grayscale** (Grok).
-- **Color pages** → **JP2 RGB** (Grok).
+- **Grayscale pages** → **JPEG** (libjpeg-turbo).
+- **Color pages** → **JPEG RGB** (libjpeg-turbo).
 
 Bitonal detection uses `ddjvu_page_get_type()` when available: PHOTO pages are never treated as bitonal; BITONAL pages are treated as bitonal; otherwise it is based on the rendered grayscale content.
 
-**Compound pages** (photo/background + text): the converter merges into a **single JBIG2** only when **separately** just the background layer or just the full-page composite (photo) is considered bitonal. In that case it binarizes the background at render size, ORs with the text mask, crops, and encodes as one JBIG2. Otherwise the page is encoded as background JP2 + foreground JBIG2 (two layers). The background layer is rendered at up to 150 DPI (`MaxBgDpi`).
+**Compound pages** (photo/background + text): the converter merges into a **single JBIG2** only when **separately** just the background layer or just the full-page composite (photo) is considered bitonal. In that case it binarizes the background at render size, ORs with the text mask, crops, and encodes as one JBIG2. Otherwise the page is encoded as background JPEG + foreground JBIG2 (two layers). The background layer is rendered at up to 150 DPI (`MaxBgDpi`).
 
 ### Pipeline overview
 
@@ -47,7 +47,7 @@ Bitonal detection uses `ddjvu_page_get_type()` when available: PHOTO pages are n
    - Detects content and crops to the minimal bounding rectangle using **Otsu adaptive threshold** (Leptonica) on grayscale; bitonal pages use DjVu’s mask rendering and clip to foreground.
    - Encodes deterministically:
      - **JBIG2** via jbig2enc for bitonal pages (shared globals + per-page segments).
-     - **JP2** via Grok for grayscale/color pages.
+     - **JPEG** via libjpeg-turbo for grayscale/color pages.
    - Builds the PDF in memory, then writes once to the final path with a single `fwrite` (no temp file; no leftover `.tmp` on shutdown).
 
 3. **Write the PDF** (`IncrementalPdfWriter`)
@@ -85,5 +85,5 @@ Outline parsing behavior:
 
 ### Notes
 
-- **Licensing**: Grok is AGPL. Ensure this is acceptable for your distribution.
+- Grayscale/color encoding uses JPEG (libjpeg-turbo).
 
