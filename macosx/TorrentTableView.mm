@@ -213,27 +213,10 @@ static dispatch_queue_t gFlowComputeQueue(void)
     self.needsDisplay = YES;
 }
 
+/// Called on UpdateUI. Refreshes visible torrent rows in place so play buttons and status stay in sync (no row re-request, no flicker).
 - (void)updateVisiblePlayButtons
 {
-    NSRange visibleRows = [self rowsInRect:self.visibleRect];
-    NSMutableIndexSet* rowsToUpdate = [[NSMutableIndexSet alloc] init];
-
-    for (NSUInteger row = visibleRows.location; row < NSMaxRange(visibleRows); row++)
-    {
-        id item = [self itemAtRow:row];
-        if (![item isKindOfClass:[Torrent class]])
-            continue;
-
-        Torrent* torrent = (Torrent*)item;
-        (void)torrent; // Suppress unused variable warning
-
-        [rowsToUpdate addIndex:row];
-    }
-
-    if (rowsToUpdate.count > 0)
-    {
-        [self reloadDataForRowIndexes:rowsToUpdate columnIndexes:[NSIndexSet indexSetWithIndex:0]];
-    }
+    [self refreshVisibleTorrentRowsInPlace];
 }
 
 //make sure we don't lose selection on manual reloads
@@ -244,60 +227,48 @@ static dispatch_queue_t gFlowComputeQueue(void)
     self.selectedTorrents = selectedTorrents;
 }
 
-- (void)reloadVisibleRows
+/// Row indexes that are currently visible. With SortByGroup, includes floating group rows in the range.
+- (NSIndexSet*)visibleRowIndexSet
 {
     NSRect visibleRect = self.visibleRect;
     NSRange range = [self rowsInRect:visibleRect];
+    if (![self.fDefaults boolForKey:@"SortByGroup"])
+        return [NSIndexSet indexSetWithIndexesInRange:range];
+    NSRange fullRange = NSMakeRange(0, range.location + range.length);
+    NSMutableIndexSet* visibleIndexSet = [NSMutableIndexSet indexSet];
+    [[NSIndexSet indexSetWithIndexesInRange:fullRange] enumerateIndexesUsingBlock:^(NSUInteger row, BOOL*) {
+        id rowItem = [self itemAtRow:row];
+        if ([rowItem isKindOfClass:[TorrentGroup class]] || NSIntersectsRect(visibleRect, [self rectOfRow:row]))
+            [visibleIndexSet addIndex:row];
+    }];
+    return visibleIndexSet;
+}
 
-    //since we use floating group rows, we need some magic to find visible group rows
-    if ([self.fDefaults boolForKey:@"SortByGroup"])
-    {
-        NSInteger location = range.location;
-        NSInteger length = range.length;
-        NSRange fullRange = NSMakeRange(0, length + location);
-        NSIndexSet* fullIndexSet = [NSIndexSet indexSetWithIndexesInRange:fullRange];
-        NSMutableIndexSet* visibleIndexSet = [[NSMutableIndexSet alloc] init];
+/// Refreshes all visible torrent rows in place (status, progress, hover, control button). Does not re-request row views, so flow views do not flicker.
+- (void)refreshVisibleTorrentRowsInPlace
+{
+    NSIndexSet* visible = [self visibleRowIndexSet];
+    [visible enumerateIndexesUsingBlock:^(NSUInteger row, BOOL*) {
+        if ([[self itemAtRow:row] isKindOfClass:[Torrent class]])
+            [self refreshTorrentRowInPlace:(NSInteger)row];
+    }];
+}
 
-        [fullIndexSet enumerateIndexesUsingBlock:^(NSUInteger row, BOOL*) {
-            id rowItem = [self itemAtRow:row];
-            if ([rowItem isKindOfClass:[TorrentGroup class]])
-            {
-                [visibleIndexSet addIndex:row];
-            }
-            else if (NSIntersectsRect(visibleRect, [self rectOfRow:row]))
-            {
-                [visibleIndexSet addIndex:row];
-            }
-        }];
-
-        [self reloadDataForRowIndexes:visibleIndexSet columnIndexes:[NSIndexSet indexSetWithIndex:0]];
-    }
-    else
-    {
-        [self reloadDataForRowIndexes:[NSIndexSet indexSetWithIndexesInRange:range] columnIndexes:[NSIndexSet indexSetWithIndex:0]];
-    }
+- (void)updateVisibleRowsContent
+{
+    [self refreshVisibleTorrentRowsInPlace];
 }
 
 - (void)reloadDataForRowIndexes:(NSIndexSet*)rowIndexes columnIndexes:(NSIndexSet*)columnIndexes
 {
     [super reloadDataForRowIndexes:rowIndexes columnIndexes:columnIndexes];
 
-    //redraw fControlButton
-    BOOL minimal = [self.fDefaults boolForKey:@"SmallView"];
     [rowIndexes enumerateIndexesUsingBlock:^(NSUInteger row, BOOL*) {
-        id rowItem = [self itemAtRow:row];
-        if (![rowItem isKindOfClass:[TorrentGroup class]])
+        if (![[self itemAtRow:row] isKindOfClass:[TorrentGroup class]])
         {
-            if (minimal)
-            {
-                SmallTorrentCell* smallCell = [self viewAtColumn:0 row:row makeIfNecessary:NO];
-                [(TorrentCellControlButton*)smallCell.fControlButton resetImage];
-            }
-            else
-            {
-                TorrentCell* torrentCell = [self viewAtColumn:0 row:row makeIfNecessary:NO];
-                [(TorrentCellControlButton*)torrentCell.fControlButton resetImage];
-            }
+            TorrentCell* cell = [self viewAtColumn:0 row:row makeIfNecessary:NO];
+            if ([cell isKindOfClass:[TorrentCell class]])
+                [self resetControlButtonForTorrentCell:cell];
         }
     }];
 }
@@ -386,7 +357,6 @@ static CGFloat const kPlayButtonVerticalPadding = 4.0;
             torrentCell = [outlineView makeViewWithIdentifier:@"SmallTorrentCell" owner:self];
             BOOL const sameTorrentMinimal = [torrentCell.fTorrentHash isEqualToString:torrentHash];
 
-            // Static content - only update when torrent changes
             if (!sameTorrentMinimal)
             {
                 torrentCell.fTorrentHash = torrentHash;
@@ -394,36 +364,10 @@ static CGFloat const kPlayButtonVerticalPadding = 4.0;
                 torrentCell.fTorrentTitleField.stringValue = torrent.displayName;
             }
 
-            // fix: hide play buttons in minimal mode
             if (torrentCell.fPlayButtonsView)
-            {
                 torrentCell.fPlayButtonsView.hidden = YES;
-            }
 
-            // Dynamic content - always update
-            torrentCell.fTorrentStatusField.stringValue = self.fDisplaySmallStatusRegular ? torrent.shortStatusString :
-                                                                                            torrent.remainingTimeString;
-
-            if (self.fHoverEventDict)
-            {
-                NSInteger row = [self rowForItem:item];
-                NSInteger hoverRow = [self.fHoverEventDict[@"row"] integerValue];
-
-                if (row == hoverRow)
-                {
-                    torrentCell.fTorrentStatusField.hidden = YES;
-                    torrentCell.fControlButton.hidden = NO;
-                    torrentCell.fRevealButton.hidden = NO;
-                    torrentCell.fURLButton.hidden = (torrent.commentURL == nil);
-                }
-            }
-            else
-            {
-                torrentCell.fTorrentStatusField.hidden = NO;
-                torrentCell.fControlButton.hidden = YES;
-                torrentCell.fRevealButton.hidden = YES;
-                torrentCell.fURLButton.hidden = YES;
-            }
+            [self applyDynamicContentToTorrentCell:torrentCell torrent:torrent row:[self rowForItem:item]];
         }
         else
         {
@@ -440,7 +384,8 @@ static CGFloat const kPlayButtonVerticalPadding = 4.0;
             }
             if (!sameTorrentFull)
                 torrentCell.fTorrentHash = torrentHash;
-            [self scheduleConfigurePlayButtonsForCell:torrentCell torrent:torrent];
+            if ([self cellNeedsContentButtonsConfigForCell:torrentCell torrent:torrent])
+                [self scheduleConfigurePlayButtonsForCell:torrentCell torrent:torrent];
 
             // Static content - only update when torrent changes
             if (!sameTorrentFull)
@@ -487,39 +432,13 @@ static CGFloat const kPlayButtonVerticalPadding = 4.0;
                 torrentCell.fTorrentTitleField.stringValue = torrent.displayName;
             }
 
-            // set URL button visibility
             torrentCell.fURLButton.hidden = (torrent.commentURL == nil);
-
-            // show status, control, reveal and icon buttons (they might have been hidden in minimal mode)
             torrentCell.fTorrentStatusField.hidden = NO;
             torrentCell.fControlButton.hidden = NO;
             torrentCell.fRevealButton.hidden = NO;
             torrentCell.fIconView.hidden = NO;
 
-            // Dynamic content - always update
-            NSString* progressString = torrent.progressString;
-            if (![torrentCell.fTorrentProgressField.stringValue isEqualToString:progressString])
-            {
-                torrentCell.fTorrentProgressField.stringValue = progressString;
-            }
-
-            // set torrent status
-            NSString* status;
-            if (self.fHoverEventDict)
-            {
-                NSInteger row = [self rowForItem:item];
-                NSInteger hoverRow = [self.fHoverEventDict[@"row"] integerValue];
-
-                if (row == hoverRow)
-                {
-                    status = self.fHoverEventDict[@"string"];
-                }
-            }
-            NSString* statusString = status ?: torrent.statusString;
-            if (![torrentCell.fTorrentStatusField.stringValue isEqualToString:statusString])
-            {
-                torrentCell.fTorrentStatusField.stringValue = statusString;
-            }
+            [self applyDynamicContentToTorrentCell:torrentCell torrent:torrent row:[self rowForItem:item]];
         }
 
         torrentCell.fTorrentTableView = self;
@@ -623,6 +542,72 @@ static CGFloat const kPlayButtonVerticalPadding = 4.0;
     return nil;
 }
 
+/// Updates status, progress, and hover state for a torrent cell. Does not touch flow view (play buttons).
+- (void)applyDynamicContentToTorrentCell:(TorrentCell*)torrentCell torrent:(Torrent*)torrent row:(NSInteger)row
+{
+    BOOL const minimal = [torrentCell isKindOfClass:[SmallTorrentCell class]];
+
+    if (minimal)
+    {
+        torrentCell.fTorrentStatusField.stringValue = self.fDisplaySmallStatusRegular ? torrent.shortStatusString :
+                                                                                       torrent.remainingTimeString;
+    }
+    else
+    {
+        NSString* progressString = torrent.progressString;
+        if (![torrentCell.fTorrentProgressField.stringValue isEqualToString:progressString])
+            torrentCell.fTorrentProgressField.stringValue = progressString;
+
+        NSString* statusString = nil;
+        if (self.fHoverEventDict && [self.fHoverEventDict[@"row"] integerValue] == row)
+            statusString = self.fHoverEventDict[@"string"];
+        if (!statusString)
+            statusString = torrent.statusString;
+        if (![torrentCell.fTorrentStatusField.stringValue isEqualToString:statusString])
+            torrentCell.fTorrentStatusField.stringValue = statusString;
+    }
+
+    if (self.fHoverEventDict && [self.fHoverEventDict[@"row"] integerValue] == row)
+    {
+        torrentCell.fTorrentStatusField.hidden = YES;
+        torrentCell.fControlButton.hidden = NO;
+        torrentCell.fRevealButton.hidden = NO;
+        torrentCell.fURLButton.hidden = (torrent.commentURL == nil);
+    }
+    else
+    {
+        torrentCell.fTorrentStatusField.hidden = NO;
+        if (minimal)
+        {
+            torrentCell.fControlButton.hidden = YES;
+            torrentCell.fRevealButton.hidden = YES;
+            torrentCell.fURLButton.hidden = YES;
+        }
+    }
+}
+
+/// Resets the control button image for a torrent cell. Used after content updates so play/pause icon is correct.
+- (void)resetControlButtonForTorrentCell:(TorrentCell*)cell
+{
+    if ([cell isKindOfClass:[TorrentCell class]] && cell.fControlButton)
+        [(TorrentCellControlButton*)cell.fControlButton resetImage];
+}
+
+/// Updates one torrent row's cell in place (status, hover, control button). Avoids reloadDataForRowIndexes so the flow view is not re-requested.
+- (void)refreshTorrentRowInPlace:(NSInteger)row
+{
+    id item = [self itemAtRow:row];
+    if (![item isKindOfClass:[Torrent class]])
+        return;
+    Torrent* torrent = (Torrent*)item;
+    NSView* cellView = [self viewAtColumn:0 row:row makeIfNecessary:NO];
+    if (![cellView isKindOfClass:[TorrentCell class]])
+        return;
+    TorrentCell* cell = (TorrentCell*)cellView;
+    [self applyDynamicContentToTorrentCell:cell torrent:torrent row:row];
+    [self resetControlButtonForTorrentCell:cell];
+}
+
 - (NSString*)outlineView:(NSOutlineView*)outlineView typeSelectStringForTableColumn:(NSTableColumn*)tableColumn item:(id)item
 {
     if ([item isKindOfClass:[Torrent class]])
@@ -650,7 +635,10 @@ static CGFloat const kPlayButtonVerticalPadding = 4.0;
         [self noteHeightOfRowsWithIndexesChanged:heightRows];
     }
     self.fSelectedRowIndexes = self.selectedRowIndexes;
-    [self reloadVisibleRows];
+    if (oldSelected >= 0)
+        [self refreshTorrentRowInPlace:oldSelected];
+    if (newSelected >= 0 && newSelected != oldSelected)
+        [self refreshTorrentRowInPlace:newSelected];
 }
 
 - (void)outlineViewItemDidExpand:(NSNotification*)notification
@@ -1321,8 +1309,7 @@ static CGFloat const kPlayButtonVerticalPadding = 4.0;
         }
     }
 
-    // Only reload the specific row instead of all visible rows
-    [self reloadDataForRowIndexes:[NSIndexSet indexSetWithIndex:row] columnIndexes:[NSIndexSet indexSetWithIndex:0]];
+    [self refreshTorrentRowInPlace:row];
 }
 
 - (void)hoverEventEndedForView:(id)view
@@ -1347,8 +1334,7 @@ static CGFloat const kPlayButtonVerticalPadding = 4.0;
     if (update)
     {
         self.fHoverEventDict = nil;
-        // Only reload the specific row instead of all visible rows
-        [self reloadDataForRowIndexes:[NSIndexSet indexSetWithIndex:row] columnIndexes:[NSIndexSet indexSetWithIndex:0]];
+        [self refreshTorrentRowInPlace:row];
     }
 }
 
@@ -1357,7 +1343,14 @@ static CGFloat const kPlayButtonVerticalPadding = 4.0;
     BOOL displayGroupRowRatio = self.fDisplayGroupRowRatio;
     [self.fDefaults setBool:!displayGroupRowRatio forKey:@"DisplayGroupRowRatio"];
     [self updateDefaultsCache];
-    [self reloadVisibleRows];
+    NSIndexSet* visible = [self visibleRowIndexSet];
+    NSMutableIndexSet* groupRows = [NSMutableIndexSet indexSet];
+    [visible enumerateIndexesUsingBlock:^(NSUInteger row, BOOL*) {
+        if ([[self itemAtRow:(NSInteger)row] isKindOfClass:[TorrentGroup class]])
+            [groupRows addIndex:row];
+    }];
+    if (groupRows.count > 0)
+        [self reloadDataForRowIndexes:groupRows columnIndexes:[NSIndexSet indexSetWithIndex:0]];
 }
 
 - (IBAction)toggleControlForTorrent:(id)sender
@@ -1546,6 +1539,25 @@ static NSString* flowViewTorrentHash(FlowLayoutView* flowView)
 {
     id obj = objc_getAssociatedObject(flowView, &kFlowViewTorrentHashKey);
     return [obj isKindOfClass:[NSString class]] ? (NSString*)obj : nil;
+}
+
+/// Returns YES when configurePlayButtonsForCell must run (clear, create, or rebuild content buttons).
+/// Returns NO when the cell already shows the correct flow view for this torrent so config can be skipped (e.g. after reloadData).
+- (BOOL)cellNeedsContentButtonsConfigForCell:(TorrentCell*)cell torrent:(Torrent*)torrent
+{
+    if (![self.fDefaults boolForKey:@"ShowContentButtons"])
+        return YES;
+    if (!cell.fPlayButtonsView)
+        return YES;
+    NSString* hash = torrent.hashString;
+    if (![flowViewTorrentHash((FlowLayoutView*)cell.fPlayButtonsView) isEqualToString:hash])
+        return YES;
+    NSArray* playable = torrent.playableFiles;
+    FlowLayoutView* flowView = (FlowLayoutView*)cell.fPlayButtonsView;
+    NSUInteger buttonCount = [flowView arrangedSubviews].count;
+    if (playable.count > 0 && buttonCount == 0)
+        return YES;
+    return NO;
 }
 
 /// Builds snapshot of playable files + progress/wanted/category for background state/layout computation. Main thread only.

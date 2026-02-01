@@ -10,7 +10,8 @@ extern CGFloat const kGroupSeparatorHeight;
 
 @interface TorrentTableView : NSOutlineView<NSOutlineViewDelegate, NSAnimationDelegate, NSPopoverDelegate, NSMenuItemValidation, NSMenuDelegate>
 
-- (void)reloadVisibleRows;
+/// Updates status/progress/hover for visible torrent cells without re-requesting row views (no flow view reconfig).
+- (void)updateVisibleRowsContent;
 
 - (BOOL)isGroupCollapsed:(NSInteger)value;
 - (void)removeCollapsedGroup:(NSInteger)value;

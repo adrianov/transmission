@@ -3,6 +3,7 @@
 // License text can be found in the licenses/ folder.
 
 @import Carbon;
+@import QuartzCore;
 @import UserNotifications;
 @import UniformTypeIdentifiers;
 
@@ -2697,7 +2698,7 @@ void onTorrentCompletenessChanged(tr_torrent* tor, tr_completeness status, bool 
                     [self.fInfoController updateInfoStats];
                 }
 
-                [self.fTableView reloadVisibleRows];
+                [self refreshVisibleTransferRows];
             }
 
             [self updateSearchPlaceholder];
@@ -3733,54 +3734,71 @@ void onTorrentCompletenessChanged(tr_torrent* tor, tr_completeness status, bool 
     }
     [NSAnimationContext endGrouping];
 
-    //reloaddata, otherwise the tableview has a bunch of empty cells
+    BOOL listChangeWasAdditionsOnly = (self.fAddingTransfers.count > 0) && skipSorting && (groupRows == wasGroupRows);
+    [self refreshTransfersTableAfterListChange:groupRows
+                                 filterActive:(filterStatus || filterGroup || (searchStrings != nil))
+                            reloadTableContent:!listChangeWasAdditionsOnly];
+}
+
+/// Single place that performs the transfers table content reload after list changes.
+- (void)reloadTransfersTableContent
+{
+    [CATransaction begin];
+    [CATransaction setDisableActions:YES];
     [self.fTableView reloadData];
+    [CATransaction commit];
+}
 
-    [self resetInfo]; //if group is already selected, but the torrents in it change
+/// Refreshes visible transfer rows (status, progress) from the UI timer. Does not re-request row views to avoid flow view flicker.
+- (void)refreshVisibleTransferRows
+{
+    [self.fTableView updateVisibleRowsContent];
+}
 
-    [self setBottomCountText:groupRows || filterStatus || filterGroup || searchStrings];
+/// Refreshes table after the displayed transfer list changed. When reloadTableContent is NO (e.g. additions only),
+/// skips full reload to avoid re-requesting row views and empty flow boxes until async play button config runs.
+- (void)refreshTransfersTableAfterListChange:(BOOL)groupRows filterActive:(BOOL)filterActive reloadTableContent:(BOOL)reloadTableContent
+{
+    if (reloadTableContent)
+        [self reloadTransfersTableContent];
 
+    [self resetInfo];
+    [self setBottomCountText:groupRows || filterActive];
     [self setWindowSizeToFit];
+    [self scrollToFirstNewTransferIfNeeded];
+}
 
-    if (self.fAddingTransfers)
-    {
-        // Scroll to show the first newly added torrent
-        // Dispatch to next run loop to ensure table layout is complete
-        Torrent* firstNew = self.fAddingTransfers.anyObject;
-        self.fAddingTransfers = nil;
-
-        if (firstNew)
+/// If we just added transfers, scroll to and select the first new one. Clears fAddingTransfers.
+- (void)scrollToFirstNewTransferIfNeeded
+{
+    if (self.fAddingTransfers.count == 0)
+        return;
+    Torrent* firstNew = self.fAddingTransfers.anyObject;
+    self.fAddingTransfers = nil;
+    if (!firstNew)
+        return;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        NSInteger row = [self.fTableView rowForItem:firstNew];
+        if (row == -1 && [self.fDefaults boolForKey:@"SortByGroup"])
         {
-            dispatch_async(dispatch_get_main_queue(), ^{
-                // Ensure table view layout is complete before finding row
-                NSInteger row = [self.fTableView rowForItem:firstNew];
-
-                // If row not found and grouping is enabled, check if torrent is in a collapsed group
-                if (row == -1 && [self.fDefaults boolForKey:@"SortByGroup"])
-                {
-                    __block TorrentGroup* parent = nil;
-                    [self.fDisplayedTorrents enumerateObjectsWithOptions:NSEnumerationConcurrent
-                                                              usingBlock:^(TorrentGroup* group, NSUInteger /*idx*/, BOOL* stop) {
-                                                                  if ([group.torrents containsObject:firstNew])
-                                                                  {
-                                                                      parent = group;
-                                                                      *stop = YES;
-                                                                  }
-                                                              }];
-                    if (parent)
-                    {
-                        [self.fTableView expandItem:parent];
-                        row = [self.fTableView rowForItem:firstNew];
-                    }
-                }
-
-                if (row >= 0 && row < self.fTableView.numberOfRows)
-                {
-                    [self.fTableView selectAndScrollToRow:row];
-                }
-            });
+            __block TorrentGroup* parent = nil;
+            [self.fDisplayedTorrents enumerateObjectsWithOptions:NSEnumerationConcurrent
+                                                      usingBlock:^(TorrentGroup* group, NSUInteger /*idx*/, BOOL* stop) {
+                                                          if ([group.torrents containsObject:firstNew])
+                                                          {
+                                                              parent = group;
+                                                              *stop = YES;
+                                                          }
+                                                      }];
+            if (parent)
+            {
+                [self.fTableView expandItem:parent];
+                row = [self.fTableView rowForItem:firstNew];
+            }
         }
-    }
+        if (row >= 0 && row < self.fTableView.numberOfRows)
+            [self.fTableView selectAndScrollToRow:row];
+    });
 }
 
 - (void)switchFilter:(id)sender
