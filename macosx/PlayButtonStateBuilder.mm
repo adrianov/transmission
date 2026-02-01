@@ -115,6 +115,15 @@ static NSDictionary* stateAndLayoutFromSnapshotImpl(NSArray<NSDictionary*>* snap
         entry[@"wanted"] = @(wanted);
         [snapshot addObject:entry];
     }
+    for (NSMutableDictionary* entry in snapshot)
+    {
+        NSString* category = entry[@"category"];
+        if (![category isEqualToString:@"video"] && ![category isEqualToString:@"adult"])
+            continue;
+        NSString* pathToOpen = [torrent pathToOpenForPlayableItem:entry];
+        BOOL const isUnwatched = (pathToOpen.length > 0) ? [torrent iinaUnwatchedForVideoPath:pathToOpen] : NO;
+        entry[@"iinaUnwatched"] = @(isUnwatched);
+    }
     return @{ @"snapshot" : snapshot, @"playableFiles" : playableFiles };
 }
 
@@ -131,7 +140,8 @@ static NSDictionary* stateAndLayoutFromSnapshotImpl(NSArray<NSDictionary*>* snap
         if (![category isEqualToString:@"video"] && ![category isEqualToString:@"adult"])
             continue;
         NSString* pathToOpen = [torrent pathToOpenForPlayableItem:entry];
-        entry[@"iinaUnwatched"] = (pathToOpen.length > 0) ? @([torrent iinaUnwatchedForVideoPath:pathToOpen]) : @YES;
+        BOOL const isUnwatched = (pathToOpen.length > 0) ? [torrent iinaUnwatchedForVideoPath:pathToOpen] : NO;
+        entry[@"iinaUnwatched"] = @(isUnwatched);
     }
 }
 
@@ -211,10 +221,8 @@ static NSDictionary* stateAndLayoutFromSnapshotImpl(NSArray<NSDictionary*>* snap
             if ([category isEqualToString:@"video"] || [category isEqualToString:@"adult"])
             {
                 NSString* pathToOpen = [torrent pathToOpenForPlayableItem:entry];
-                if (pathToOpen.length > 0)
-                    entry[@"iinaUnwatched"] = @([torrent iinaUnwatchedForVideoPath:pathToOpen]);
-                else
-                    entry[@"iinaUnwatched"] = @YES; // No path yet → show green (unwatched) until we can check IINA.
+                BOOL const isUnwatched = (pathToOpen.length > 0) ? [torrent iinaUnwatchedForVideoPath:pathToOpen] : NO;
+                entry[@"iinaUnwatched"] = @(isUnwatched);
             }
             [state addObject:entry];
         }
@@ -223,7 +231,10 @@ static NSDictionary* stateAndLayoutFromSnapshotImpl(NSArray<NSDictionary*>* snap
 
     NSUInteger statsGeneration = torrent.statsGeneration;
     if (torrent.cachedPlayButtonProgressGeneration == statsGeneration)
+    {
+        [self enrichStateWithIinaUnwatched:state forTorrent:torrent];
         return state;
+    }
 
     BOOL visibilityChanged = NO;
     for (NSMutableDictionary* entry in state)
@@ -265,6 +276,7 @@ static NSDictionary* stateAndLayoutFromSnapshotImpl(NSArray<NSDictionary*>* snap
     if (visibilityChanged)
         torrent.cachedPlayButtonLayout = nil;
 
+    [self enrichStateWithIinaUnwatched:state forTorrent:torrent];
     torrent.cachedPlayButtonProgressGeneration = statsGeneration;
     return state;
 }
