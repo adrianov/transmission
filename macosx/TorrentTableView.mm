@@ -259,6 +259,31 @@ static dispatch_queue_t gFlowComputeQueue(void)
     [self refreshVisibleTorrentRowsInPlace];
 }
 
+/// Single place for the Show Content Buttons preference (View menu).
+- (BOOL)showContentButtonsPref
+{
+    return [self.fDefaults boolForKey:@"ShowContentButtons"];
+}
+
+/// Call when Show Content Buttons preference changes so row heights and content button containers redraw immediately.
+- (void)refreshContentButtonsVisibility
+{
+    NSIndexSet* allRows = [NSIndexSet indexSetWithIndexesInRange:NSMakeRange(0, self.numberOfRows)];
+    [self beginUpdates];
+    [self noteHeightOfRowsWithIndexesChanged:allRows];
+    [self endUpdates];
+
+    NSIndexSet* visible = [self visibleRowIndexSet];
+    [visible enumerateIndexesUsingBlock:^(NSUInteger row, BOOL*) {
+        id item = [self itemAtRow:row];
+        if (![item isKindOfClass:[Torrent class]])
+            return;
+        NSView* cellView = [self viewAtColumn:0 row:row makeIfNecessary:NO];
+        if ([cellView isKindOfClass:[TorrentCell class]])
+            [self configurePlayButtonsForCell:(TorrentCell*)cellView torrent:(Torrent*)item];
+    }];
+}
+
 - (void)reloadDataForRowIndexes:(NSIndexSet*)rowIndexes columnIndexes:(NSIndexSet*)columnIndexes
 {
     [super reloadDataForRowIndexes:rowIndexes columnIndexes:columnIndexes];
@@ -328,7 +353,7 @@ static CGFloat const kPlayButtonVerticalPadding = 4.0;
         CGFloat height = self.rowHeight;
 
         // Content buttons uncollapsed: every row with playable content gets play button height so user can open any item with one click.
-        BOOL showPlayButtonsHeight = !self.fSmallView && [self.fDefaults boolForKey:@"ShowContentButtons"];
+        BOOL showPlayButtonsHeight = !self.fSmallView && [self showContentButtonsPref];
         if (showPlayButtonsHeight)
         {
             CGFloat cachedHeight = torrent.cachedPlayButtonsHeight;
@@ -782,16 +807,16 @@ static CGFloat const kPlayButtonVerticalPadding = 4.0;
     }
 }
 
-- (NSImage*)iconForPlayableFileItem:(NSDictionary*)fileItem
+- (NSImage*)iconForPlayableFileItem:(NSDictionary*)fileItem torrent:(Torrent*)torrent
 {
     if (@available(macOS 11.0, *))
     {
         NSString* type = fileItem[@"type"] ?: @"file";
         NSString* category = fileItem[@"category"];
-        NSString* path = fileItem[@"path"] ?: @"";
+        NSString* path = torrent ? [torrent pathToOpenForPlayableItem:fileItem] : (fileItem[@"path"] ?: @"");
 
         // Check if path is a .cue file - always treat as album
-        BOOL const isCueFile = [path.pathExtension.lowercaseString isEqualToString:@"cue"];
+        BOOL const isCueFile = path.length > 0 && [path.pathExtension.lowercaseString isEqualToString:@"cue"];
 
         // Cache key based on type, category, and cue file status
         NSString* cacheKey = [NSString stringWithFormat:@"%@:%@:%@", type, category ?: @"", isCueFile ? @"cue" : @""];
@@ -895,6 +920,7 @@ static CGFloat const kPlayButtonVerticalPadding = 4.0;
         [tracks addObject:@{
             @"type" : @"track",
             @"category" : @"audio",
+            @"folder" : folder,
             @"index" : @(idx),
             @"name" : displayName,
             @"path" : path,
@@ -908,6 +934,19 @@ static CGFloat const kPlayButtonVerticalPadding = 4.0;
     }];
 
     return tracks.count > 0 ? tracks : nil;
+}
+
+/// Returns the string to show for a play menu item (with optional progress). Single place for menu titles.
+- (NSString*)menuTitleForPlayableItem:(NSDictionary*)item torrent:(Torrent*)torrent includeProgress:(BOOL)includeProgress
+{
+    NSString* baseName = [torrent displayNameForPlayableItem:item];
+    if (!includeProgress || baseName.length == 0)
+        return baseName;
+    CGFloat progress = [item[@"progress"] doubleValue];
+    if (progress <= 0 || progress >= 1.0)
+        return baseName;
+    int pct = (int)floor(progress * 100);
+    return pct < 100 ? [NSString stringWithFormat:@"%@ (%d%%)", baseName, pct] : baseName;
 }
 
 - (NSMenu*)playMenuForTorrent:(Torrent*)torrent
@@ -964,16 +1003,7 @@ static CGFloat const kPlayButtonVerticalPadding = 4.0;
             }
 
             NSString* type = fileItem[@"type"] ?: @"file";
-            NSString* name = fileItem[@"name"] ?: @"";
-            CGFloat progress = [fileItem[@"progress"] doubleValue];
-
-            NSString* menuTitle = name;
-            if (progress > 0 && progress < 1.0)
-            {
-                int progressPct = (int)floor(progress * 100);
-                if (progressPct < 100)
-                    menuTitle = [NSString stringWithFormat:@"%@ (%d%%)", name, progressPct];
-            }
+            NSString* menuTitle = [self menuTitleForPlayableItem:fileItem torrent:torrent includeProgress:YES];
 
             // For albums, check if we can expand to individual tracks
             if ([type isEqualToString:@"album"])
@@ -983,7 +1013,7 @@ static CGFloat const kPlayButtonVerticalPadding = 4.0;
                 {
                     // Create submenu for album with individual tracks
                     NSMenuItem* albumItem = [[NSMenuItem alloc] initWithTitle:menuTitle action:nil keyEquivalent:@""];
-                    albumItem.image = [self iconForPlayableFileItem:fileItem];
+                    albumItem.image = [self iconForPlayableFileItem:fileItem torrent:torrent];
                     NSMenu* albumMenu = [[NSMenu alloc] initWithTitle:menuTitle];
                     albumMenu.delegate = self;
                     albumItem.submenu = albumMenu;
@@ -991,21 +1021,13 @@ static CGFloat const kPlayButtonVerticalPadding = 4.0;
                     // Add individual tracks to submenu
                     for (NSDictionary* track in tracks)
                     {
-                        NSString* trackName = track[@"name"];
-                        CGFloat trackProgress = [track[@"progress"] doubleValue];
-                        NSString* trackTitle = trackName;
-                        if (trackProgress > 0 && trackProgress < 1.0)
-                        {
-                            int trackPct = (int)floor(trackProgress * 100);
-                            if (trackPct < 100)
-                                trackTitle = [NSString stringWithFormat:@"%@ (%d%%)", trackName, trackPct];
-                        }
+                        NSString* trackTitle = [self menuTitleForPlayableItem:track torrent:torrent includeProgress:YES];
 
                         NSMenuItem* trackItem = [[NSMenuItem alloc] initWithTitle:trackTitle action:@selector(playContextItem:)
                                                                     keyEquivalent:@""];
                         trackItem.target = self;
                         trackItem.representedObject = @{ @"torrent" : torrent, @"item" : track };
-                        trackItem.image = [self iconForPlayableFileItem:track];
+                        trackItem.image = [self iconForPlayableFileItem:track torrent:nil];
                         [albumMenu addItem:trackItem];
                     }
 
@@ -1019,7 +1041,7 @@ static CGFloat const kPlayButtonVerticalPadding = 4.0;
             menuItem.target = self;
             menuItem.representedObject = @{ @"torrent" : torrent, @"item" : fileItem };
 
-            menuItem.image = [self iconForPlayableFileItem:fileItem];
+            menuItem.image = [self iconForPlayableFileItem:fileItem torrent:torrent];
 
             [currentMenu addItem:menuItem];
         }
@@ -1075,8 +1097,9 @@ static CGFloat const kPlayButtonVerticalPadding = 4.0;
             NSDictionary* itemInfo = firstItem.representedObject;
             if ([itemInfo isKindOfClass:[NSDictionary class]])
             {
-                NSString* path = itemInfo[@"item"][@"path"] ?: itemInfo[@"path"];
-                leadsToCue = [path.pathExtension.lowercaseString isEqualToString:@"cue"];
+                NSDictionary* firstFileItem = itemInfo[@"item"];
+                NSString* pathToOpen = firstFileItem ? [torrent pathToOpenForPlayableItem:firstFileItem] : nil;
+                leadsToCue = pathToOpen.length > 0 && [pathToOpen.pathExtension.lowercaseString isEqualToString:@"cue"];
             }
         }
 
@@ -1405,79 +1428,6 @@ static CGFloat const kPlayButtonVerticalPadding = 4.0;
     }
 }
 
-/// Creates a play button from playable item info
-/// Item types: "file", "dvd", "bluray", "album"
-- (PlayButton*)createPlayButtonFromItem:(NSDictionary*)item torrent:(Torrent*)torrent
-{
-    NSString* type = item[@"type"] ?: @"file";
-    NSString* path = item[@"path"];
-    NSString* baseTitle = item[@"baseTitle"];
-    CGFloat progress = [item[@"progress"] doubleValue];
-
-    // Build button title with progress
-    NSString* title = item[@"title"];
-    if (!title)
-    {
-        if ([type hasPrefix:@"document"])
-            title = baseTitle;
-        else if (progress > 0 && progress < 1.0)
-            title = [NSString stringWithFormat:@"%@ (%d%%)", baseTitle, (int)floor(progress * 100)];
-        else
-            title = baseTitle;
-    }
-
-    NSString* openLabel = [torrent openCountLabelForPlayableItem:item];
-
-    PlayButton* playButton = [[PlayButton alloc] init];
-    playButton.title = title;
-    playButton.image = [self iconForPlayableFileItem:item];
-    playButton.imagePosition = NSImageLeft;
-    playButton.target = self;
-    playButton.action = @selector(playMediaFile:);
-    __weak TorrentTableView* weakSelf = self;
-    playButton.onHover = ^(PlayButton* button) {
-        [weakSelf setHighPriorityForButton:button];
-    };
-    playButton.bezelStyle = NSBezelStyleRecessed;
-    playButton.showsBorderOnlyWhileMouseInside = YES;
-    playButton.font = [NSFont systemFontOfSize:11];
-    playButton.controlSize = NSControlSizeSmall;
-    // Use .cue file path for tooltip if available (for audio files or album folders)
-    NSString* folder = item[@"folder"];
-    NSString* tooltipPath = [torrent tooltipPathForItemPath:path type:type folder:folder ?: @""];
-    playButton.toolTip = openLabel.length > 0 ? [NSString stringWithFormat:@"%@\n%@", tooltipPath, openLabel] : tooltipPath;
-    playButton.identifier = path;
-
-    // Store type for playback handling, base title for updates
-    playButton.accessibilityHelp = type;
-    playButton.accessibilityLabel = baseTitle;
-
-    // For files, store index for progress updates; folders use NSNotFound
-    NSNumber* index = item[@"index"];
-    playButton.tag = index ? index.integerValue : NSNotFound;
-    if (folder.length > 0)
-    {
-        objc_setAssociatedObject(playButton, @selector(folderForPlayButton:), folder, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    }
-
-    // Hide until download starts (or completion for documents)
-    NSNumber* visible = item[@"visible"];
-    if (visible != nil)
-    {
-        playButton.hidden = !visible.boolValue;
-    }
-    else if ([type hasPrefix:@"document"])
-    {
-        playButton.hidden = (progress < 1.0);
-    }
-    else
-    {
-        playButton.hidden = (progress <= 0);
-    }
-
-    return playButton;
-}
-
 static id playButtonFolderCache(NSButton* sender)
 {
     return objc_getAssociatedObject(sender, &kPlayButtonFolderKey);
@@ -1543,7 +1493,7 @@ static NSString* flowViewTorrentHash(FlowLayoutView* flowView)
 /// Returns NO when the cell already shows the correct flow view for this torrent so config can be skipped (e.g. after reloadData).
 - (BOOL)cellNeedsContentButtonsConfigForCell:(TorrentCell*)cell torrent:(Torrent*)torrent
 {
-    if (![self.fDefaults boolForKey:@"ShowContentButtons"])
+    if (![self showContentButtonsPref])
         return YES;
     if (!cell.fPlayButtonsView)
         return YES;
@@ -1974,7 +1924,7 @@ static NSDictionary* computeStateAndLayoutFromSnapshot(NSArray<NSDictionary*>* s
 
     NSString* type = item[@"type"] ?: @"file";
     NSString* path = item[@"path"];
-    NSString* baseTitle = item[@"baseTitle"];
+    NSString* baseTitle = [torrent displayNameForPlayableItem:item];
     CGFloat progress = [item[@"progress"] doubleValue];
 
     NSString* title = item[@"title"];
@@ -2017,9 +1967,9 @@ static NSDictionary* computeStateAndLayoutFromSnapshot(NSArray<NSDictionary*>* s
         playButton.hidden = (progress <= 0);
     }
 
-    // Image - set based on type/category (cached)
-    // Check if this audio file has a .cue companion (always an album)
-    BOOL const leadsToCue = [path.pathExtension.lowercaseString isEqualToString:@"cue"] || ([torrent cueFilePathForAudioPath:path] != nil);
+    // Image - set based on type/category (cached); use path we open so cue companion shows album icon
+    NSString* pathToOpen = [torrent pathToOpenForPlayableItem:item];
+    BOOL const leadsToCue = pathToOpen.length > 0 && [pathToOpen.pathExtension.lowercaseString isEqualToString:@"cue"];
     NSImage* icon = nil;
     if (leadsToCue)
     {
@@ -2035,7 +1985,7 @@ static NSDictionary* computeStateAndLayoutFromSnapshot(NSArray<NSDictionary*>* s
 
     if (!icon)
     {
-        icon = [self iconForPlayableFileItem:item];
+        icon = [self iconForPlayableFileItem:item torrent:torrent];
     }
     playButton.image = icon;
     playButton.imagePosition = icon ? NSImageLeft : NSNoImage;
@@ -2217,8 +2167,7 @@ static NSTimeInterval const kHeightFlushDelay = 0.1;
 
 - (void)configurePlayButtonsForCell:(TorrentCell*)cell torrent:(Torrent*)torrent
 {
-    // Check if content buttons should be shown
-    if (![self.fDefaults boolForKey:@"ShowContentButtons"])
+    if (![self showContentButtonsPref])
     {
         if (cell.fPlayButtonsView)
         {
@@ -2573,44 +2522,9 @@ static NSTimeInterval const kHeightFlushDelay = 0.1;
         [self.fController showInfo:nil];
         return;
     }
-
-    // Find the best file to play:
-    // 1. First file that has started downloading (progress > 0)
-    // 2. First file in the list
-    NSDictionary* bestItem = nil;
-
-    // Prioritize .cue files
-    for (NSDictionary* item in playableFiles)
-    {
-        NSString* path = item[@"path"];
-        if ([path.pathExtension.lowercaseString isEqualToString:@"cue"])
-        {
-            bestItem = item;
-            break;
-        }
-    }
-
-    if (!bestItem)
-    {
-        for (NSDictionary* item in playableFiles)
-        {
-            if ([item[@"progress"] doubleValue] > 0)
-            {
-                bestItem = item;
-                break;
-            }
-        }
-    }
-
-    if (!bestItem)
-    {
-        bestItem = playableFiles.firstObject;
-    }
-
+    NSDictionary* bestItem = [torrent preferredPlayableItemFromList:playableFiles];
     if (bestItem)
-    {
         [self playMediaItem:bestItem forTorrent:torrent];
-    }
 }
 
 - (NSIndexSet*)targetFileIndexesForPlayItem:(NSDictionary*)item torrent:(Torrent*)torrent isComplete:(BOOL*)isComplete
@@ -2685,7 +2599,7 @@ static NSTimeInterval const kHeightFlushDelay = 0.1;
     // Update last played date for the torrent
     tr_torrentSetLastPlayedDate(torrent.torrentStruct, time(nullptr));
 
-    NSString* path = item[@"path"];
+    NSString* path = [torrent pathToOpenForPlayableItem:item];
     if (!path)
         return;
 
@@ -2807,13 +2721,7 @@ static NSTimeInterval const kHeightFlushDelay = 0.1;
     NSString* folder = objc_getAssociatedObject(sender, &kPlayButtonFolderKey) ?: @"";
     NSString* path = sender.identifier ?: @"";
 
-    // Check if this is a cue-companion audio file and find matching .cue file
-    NSString* cuePath = [torrent cueFilePathForAudioPath:path];
-    if (cuePath)
-    {
-        path = cuePath;
-    }
-
+    path = [torrent pathToOpenForAudioPath:path];
     NSDictionary* item = @{ @"path" : path, @"type" : type, @"index" : @(sender.tag), @"folder" : folder };
 
     [self playMediaItem:item forTorrent:torrent];

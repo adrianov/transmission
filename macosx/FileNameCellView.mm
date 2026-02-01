@@ -184,31 +184,11 @@ static CGFloat const kPaddingBetweenNameAndFolderStatus = 4.0;
     FileListNode* node = self.node;
     Torrent* torrent = node.torrent;
 
-    NSString* path = [torrent fileLocation:node];
+    NSString* path = [torrent pathToOpenForFileNode:node];
     if (!path)
-    {
+        path = [torrent fileLocation:node];
+    if (!path)
         path = [node.path stringByAppendingPathComponent:node.name];
-    }
-
-    // For folders, check if there's a .cue file in the folder
-    if (node.isFolder)
-    {
-        NSString* folderPath = [node.path stringByAppendingPathComponent:node.name];
-        NSString* cuePath = [torrent cueFilePathForFolder:folderPath];
-        if (cuePath)
-        {
-            path = cuePath;
-        }
-    }
-    else
-    {
-        // For files, use .cue file path for tooltip if this is a cue-companion audio file
-        NSString* cuePath = [torrent cueFilePathForAudioPath:path];
-        if (cuePath)
-        {
-            path = cuePath;
-        }
-    }
 
     NSString* openLabel = [torrent openCountLabelForFileNode:node];
     self.toolTip = openLabel.length > 0 ? [NSString stringWithFormat:@"%@\n%@", path, openLabel] : path;

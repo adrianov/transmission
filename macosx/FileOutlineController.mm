@@ -389,7 +389,7 @@ typedef NS_ENUM(NSUInteger, FilePriorityMenuTag) { //
     NSMutableArray* paths = [NSMutableArray arrayWithCapacity:indexes.count];
     for (NSUInteger i = indexes.firstIndex; i != NSNotFound; i = [indexes indexGreaterThanIndex:i])
     {
-        NSString* path = [self.torrent fileLocation:[self.fOutline itemAtRow:i]];
+        NSString* path = [self.torrent pathToOpenForFileNode:[self.fOutline itemAtRow:i]];
         if (path)
         {
             [paths addObject:[NSURL fileURLWithPath:path]];
@@ -404,11 +404,13 @@ typedef NS_ENUM(NSUInteger, FilePriorityMenuTag) { //
 
 - (void)openFile:(id)sender
 {
-    NSIndexSet* indexes = self.fOutline.selectedRowIndexes;
+    NSOutlineView* outline = self.fOutline;
+    NSIndexSet* indexes = (sender == outline && outline.clickedRow >= 0) ? [NSIndexSet indexSetWithIndex:outline.clickedRow] :
+                                                                           outline.selectedRowIndexes;
     for (NSUInteger i = indexes.firstIndex; i != NSNotFound; i = [indexes indexGreaterThanIndex:i])
     {
-        FileListNode* node = [self.fOutline itemAtRow:i];
-        NSString* path = [self.torrent fileLocation:node];
+        FileListNode* node = [outline itemAtRow:i];
+        NSString* path = [self.torrent pathToOpenForFileNode:node];
         if (path)
         {
             [self.torrent recordOpenForFileNode:node];
@@ -463,7 +465,7 @@ typedef NS_ENUM(NSUInteger, FilePriorityMenuTag) { //
         NSIndexSet* indexSet = self.fOutline.selectedRowIndexes;
         for (NSInteger i = indexSet.firstIndex; i != NSNotFound; i = [indexSet indexGreaterThanIndex:i])
         {
-            if ([self.torrent fileLocation:[self.fOutline itemAtRow:i]] != nil)
+            if ([self.torrent pathToOpenForFileNode:[self.fOutline itemAtRow:i]] != nil)
             {
                 return YES;
             }
