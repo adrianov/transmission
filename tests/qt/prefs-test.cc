@@ -126,8 +126,8 @@ private slots:
         auto constexpr Idx = Prefs::RATIO;
         auto constexpr ValA = 1.234;
         auto constexpr ValB = 5.678;
-        auto const val_a_str = fmt::format("{}", ValA);
-        auto const val_b_str = fmt::format("{}", ValB);
+        auto const val_a_str = tr_format_double(ValA);
+        auto const val_b_str = tr_format_double(ValB);
 
         auto prefs = Prefs{};
         verify_get_set_by_property(prefs, Idx, ValA, ValB);

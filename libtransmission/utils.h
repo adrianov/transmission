@@ -241,6 +241,10 @@ template<typename T, std::enable_if_t<std::is_floating_point_v<T>, bool> = true>
     @param infinity the string representation of "infinity" */
 [[nodiscard]] std::string tr_strratio(double ratio, std::string_view none, std::string_view infinity);
 
+/** Formats a double for embedding in strings (e.g. JSON, logs). Single call site for default float
+    formatting so -Wfloat-equal in fmt can be addressed here. */
+[[nodiscard]] std::string tr_format_double(double x);
+
 // ---
 
 namespace libtransmission::detail::tr_time

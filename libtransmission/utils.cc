@@ -10,6 +10,7 @@
 #include <charconv> // std::from_chars()
 #include <chrono>
 #include <cstdint> // SIZE_MAX
+#include <cstdio> // snprintf()
 #include <cstdlib> // getenv()
 #include <cstring> /* strerror() */
 #include <ctime>
@@ -579,6 +580,13 @@ std::string tr_strratio(double ratio, std::string_view const none, std::string_v
     }
 
     return tr_strpercent(ratio);
+}
+
+std::string tr_format_double(double x)
+{
+    char buf[64];
+    snprintf(buf, sizeof(buf), "%.15g", x);
+    return std::string{ buf };
 }
 
 // ---
