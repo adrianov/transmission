@@ -7,6 +7,8 @@
 #import "TorrentTableView.h"
 #import "Controller.h"
 #import "FileListNode.h"
+#import "IINAWatchHelper.h"
+#import "PlayButtonStateBuilder.h"
 #import "InfoOptionsViewController.h"
 #import "NSKeyedUnarchiverAdditions.h"
 #import "NSStringAdditions.h"
@@ -166,6 +168,7 @@ static dispatch_queue_t gFlowComputeQueue(void)
     NSNotificationCenter* nc = NSNotificationCenter.defaultCenter;
     [nc addObserver:self selector:@selector(refreshTorrentTable) name:@"RefreshTorrentTable" object:nil];
     [nc addObserver:self selector:@selector(updateVisiblePlayButtons) name:@"UpdateUI" object:nil];
+    [nc addObserver:self selector:@selector(iinaWatchCacheDidUpdate:) name:kIINAWatchCacheDidUpdateNotification object:nil];
     [nc addObserver:self selector:@selector(updateDefaultsCache) name:NSUserDefaultsDidChangeNotification object:nil];
 
     // Pre-warm button pool asynchronously to avoid startup lag
@@ -220,6 +223,16 @@ static dispatch_queue_t gFlowComputeQueue(void)
 - (void)refreshTorrentTable
 {
     self.needsDisplay = YES;
+}
+
+- (void)iinaWatchCacheDidUpdate:(NSNotification*)notification
+{
+    Torrent* torrent = notification.object;
+    if (![torrent isKindOfClass:[Torrent class]])
+        return;
+    torrent.cachedPlayButtonState = nil;
+    torrent.cachedPlayButtonLayout = nil;
+    [self updateVisiblePlayButtons];
 }
 
 /// Called on UpdateUI. Refreshes visible torrent rows in place so play buttons and status stay in sync (no row re-request, no flicker).
@@ -1548,345 +1561,24 @@ static NSString* flowViewTorrentHash(FlowLayoutView* flowView)
     return NO;
 }
 
-/// Builds snapshot of playable files + progress/wanted/category for background state/layout computation. Main thread only.
-/// Returns @{ @"snapshot": NSArray, @"playableFiles": NSArray } or nil if no playable files.
 - (NSDictionary*)buildFlowSnapshotForTorrent:(Torrent*)torrent
 {
-    NSArray<NSDictionary*>* playableFiles = torrent.playableFiles;
-    if (playableFiles.count == 0)
-        return nil;
-    NSMutableArray<NSDictionary*>* snapshot = [NSMutableArray arrayWithCapacity:playableFiles.count];
-    BOOL singleItem = playableFiles.count == 1;
-    for (NSDictionary* fileInfo in playableFiles)
-    {
-        NSMutableDictionary* entry = [fileInfo mutableCopy];
-        NSString* type = entry[@"type"] ?: @"file";
-        NSString* category = entry[@"category"];
-        if (!category)
-        {
-            if ([type isEqualToString:@"file"] || [type hasPrefix:@"document"])
-                category = [torrent mediaCategoryForFile:[entry[@"index"] unsignedIntegerValue]];
-            else
-                category = ([type isEqualToString:@"album"]) ? @"audio" : @"video";
-            entry[@"category"] = category;
-        }
-        BOOL itemIsBooks = [category isEqualToString:@"books"];
-        BOOL itemIsSoftware = [category isEqualToString:@"software"];
-        if (singleItem)
-            entry[@"baseTitle"] = itemIsBooks ? @"Read" : (itemIsSoftware ? @"Open" : @"Play");
-        else
-            entry[@"baseTitle"] = entry[@"baseTitle"] ?: @"";
-        CGFloat progress = 0.0;
-        if (entry[@"index"])
-            progress = [torrent fileProgressForIndex:[entry[@"index"] unsignedIntegerValue]];
-        else
-            progress = [entry[@"folder"] length] > 0 ? [torrent folderConsecutiveProgress:entry[@"folder"]] : 0.0;
-        entry[@"progress"] = @(progress);
-        NSNumber* indexNum = entry[@"index"];
-        BOOL wanted = indexNum ?
-            ([torrent checkForFiles:[NSIndexSet indexSetWithIndex:indexNum.unsignedIntegerValue]] == NSControlStateValueOn) :
-            YES;
-        entry[@"wanted"] = @(wanted);
-        [snapshot addObject:entry];
-    }
-    return @{ @"snapshot" : snapshot, @"playableFiles" : playableFiles };
+    return [PlayButtonStateBuilder buildSnapshotForTorrent:torrent];
 }
 
-/// Computes state and layout from snapshot; safe to call on background queue (no Torrent/UI).
 static NSDictionary* computeStateAndLayoutFromSnapshot(NSArray<NSDictionary*>* snapshot)
 {
-    if (snapshot.count == 0)
-        return @{@"state" : [NSMutableArray array], @"layout" : @[]};
-    NSMutableArray<NSMutableDictionary*>* state = [NSMutableArray arrayWithCapacity:snapshot.count];
-    for (NSDictionary* fileInfo in snapshot)
-    {
-        NSMutableDictionary* entry = [fileInfo mutableCopy];
-        NSString* type = entry[@"type"] ?: @"file";
-        CGFloat progress = [entry[@"progress"] doubleValue];
-        BOOL wanted = [entry[@"wanted"] boolValue];
-        int progressPct = (int)floor(progress * 100);
-        entry[@"progressPercent"] = @(progressPct);
-        BOOL visible = [type hasPrefix:@"document"] ? (progress >= 1.0) : (progress > 0.000001 && (wanted || progress >= 1.0));
-        entry[@"visible"] = @(visible);
-        entry[@"title"] = entry[@"baseTitle"] ?: @"";
-        if (visible && ![type hasPrefix:@"document"] && progress < 1.0 && progressPct < 100)
-            entry[@"title"] = [NSString stringWithFormat:@"%@ (%d%%)", entry[@"baseTitle"], progressPct];
-        [state addObject:entry];
-    }
-    if (state.count == 0)
-        return @{@"state" : state, @"layout" : @[]};
-    if (state.count == 1)
-        return @{@"state" : state, @"layout" : @[ @{ @"kind" : @"item", @"item" : state[0] } ]};
-    BOOL anyVisible = NO;
-    for (NSDictionary* e in state)
-    {
-        if ([e[@"visible"] boolValue])
-        {
-            anyVisible = YES;
-            break;
-        }
-    }
-    if (!anyVisible)
-        return @{@"state" : state, @"layout" : @[]};
-    NSMutableDictionary<NSNumber*, NSMutableArray<NSDictionary*>*>* seasonGroups = [NSMutableDictionary dictionary];
-    for (NSDictionary* fileInfo in state)
-    {
-        id seasonValue = fileInfo[@"season"];
-        NSNumber* season = (seasonValue && seasonValue != [NSNull null]) ? seasonValue : @0;
-        if (!seasonGroups[season])
-            seasonGroups[season] = [NSMutableArray array];
-        [seasonGroups[season] addObject:fileInfo];
-    }
-    NSArray<NSNumber*>* sortedSeasons = [seasonGroups.allKeys sortedArrayUsingSelector:@selector(compare:)];
-    BOOL hasMultipleSeasons = sortedSeasons.count > 1;
-    NSMutableArray<NSDictionary*>* layout = [NSMutableArray array];
-    NSUInteger totalFilesShown = 0;
-    NSUInteger const maxFiles = 1000;
-    for (NSNumber* season in sortedSeasons)
-    {
-        if (totalFilesShown >= maxFiles)
-            break;
-        NSArray<NSDictionary*>* filesInSeason = seasonGroups[season];
-        if (hasMultipleSeasons && season.integerValue > 0)
-            [layout addObject:@{ @"kind" : @"header", @"title" : [NSString stringWithFormat:@"Season %@:", season] }];
-        for (NSDictionary* fileInfo in filesInSeason)
-        {
-            if (totalFilesShown >= maxFiles)
-                break;
-            [layout addObject:@{ @"kind" : @"item", @"item" : fileInfo }];
-            totalFilesShown++;
-        }
-    }
-    return @{ @"state" : state, @"layout" : layout };
+    return [PlayButtonStateBuilder stateAndLayoutFromSnapshot:snapshot];
 }
 
 - (NSMutableArray<NSMutableDictionary*>*)playButtonStateForTorrent:(Torrent*)torrent
 {
-    NSArray<NSDictionary*>* playableFiles = torrent.playableFiles;
-    if (playableFiles.count == 0)
-    {
-        torrent.cachedPlayButtonSource = nil;
-        torrent.cachedPlayButtonState = nil;
-        torrent.cachedPlayButtonLayout = nil;
-        return nil;
-    }
-
-    BOOL isSameSource = [torrent.cachedPlayButtonSource isEqualToArray:playableFiles];
-    if (!isSameSource)
-    {
-        torrent.cachedPlayButtonSource = playableFiles;
-        torrent.cachedPlayButtonState = nil;
-        torrent.cachedPlayButtonLayout = nil;
-        torrent.cachedPlayButtonProgressGeneration = 0;
-    }
-
-    NSMutableArray<NSMutableDictionary*>* state = (NSMutableArray<NSMutableDictionary*>*)torrent.cachedPlayButtonState;
-    if (!state)
-    {
-        state = [NSMutableArray arrayWithCapacity:playableFiles.count];
-        BOOL singleItem = playableFiles.count == 1;
-
-        for (NSDictionary* fileInfo in playableFiles)
-        {
-            NSMutableDictionary* entry = [fileInfo mutableCopy];
-            NSString* type = entry[@"type"] ?: @"file";
-            NSString* category = entry[@"category"];
-            if (!category)
-            {
-                if ([type isEqualToString:@"file"] || [type hasPrefix:@"document"])
-                {
-                    category = [torrent mediaCategoryForFile:[entry[@"index"] unsignedIntegerValue]];
-                }
-                else
-                {
-                    category = ([type isEqualToString:@"album"]) ? @"audio" : @"video";
-                }
-                entry[@"category"] = category;
-            }
-
-            BOOL const itemIsBooks = [category isEqualToString:@"books"];
-            BOOL const itemIsSoftware = [category isEqualToString:@"software"];
-
-            if (singleItem)
-            {
-                NSString* baseTitle = itemIsBooks ? @"Read" : (itemIsSoftware ? @"Open" : @"Play");
-                entry[@"baseTitle"] = baseTitle;
-            }
-            else
-            {
-                // Multi-item: baseTitle humanized in Torrent.mm
-                entry[@"baseTitle"] = entry[@"baseTitle"] ?: @"";
-            }
-            entry[@"title"] = entry[@"baseTitle"] ?: @"";
-            // Compute initial progress and visibility
-            CGFloat progress = 0.0;
-            if (entry[@"index"])
-            {
-                progress = [torrent fileProgressForIndex:[entry[@"index"] unsignedIntegerValue]];
-            }
-            else
-            {
-                NSString* folder = entry[@"folder"];
-                progress = folder.length > 0 ? [torrent folderConsecutiveProgress:folder] : 0.0;
-            }
-            entry[@"progress"] = @(progress);
-            int progressPct = (int)floor(progress * 100);
-            entry[@"progressPercent"] = @(progressPct);
-            // Documents only visible when complete; media visible when progress > 0 and (wanted or complete)
-            NSNumber* indexNum = entry[@"index"];
-            BOOL wanted = indexNum ?
-                ([torrent checkForFiles:[NSIndexSet indexSetWithIndex:indexNum.unsignedIntegerValue]] == NSControlStateValueOn) :
-                YES;
-            BOOL visible = [type hasPrefix:@"document"] ? (progress >= 1.0) : (progress > 0.000001 && (wanted || progress >= 1.0));
-            entry[@"visible"] = @(visible);
-            if (visible && ![type hasPrefix:@"document"] && progress < 1.0 && progressPct < 100)
-            {
-                entry[@"title"] = [NSString stringWithFormat:@"%@ (%d%%)", entry[@"baseTitle"], progressPct];
-            }
-            [state addObject:entry];
-        }
-        torrent.cachedPlayButtonState = state;
-    }
-
-    NSUInteger statsGeneration = torrent.statsGeneration;
-    if (torrent.cachedPlayButtonProgressGeneration == statsGeneration)
-    {
-        return state;
-    }
-
-    BOOL visibilityChanged = NO;
-    for (NSMutableDictionary* entry in state)
-    {
-        NSString* type = entry[@"type"] ?: @"file";
-        NSNumber* index = entry[@"index"];
-        CGFloat progress = [entry[@"progress"] doubleValue];
-        BOOL wasVisible = [entry[@"visible"] boolValue];
-        CGFloat newProgress = progress;
-        if (index)
-        {
-            newProgress = [torrent fileProgressForIndex:index.unsignedIntegerValue];
-        }
-        else
-        {
-            NSString* folder = entry[@"folder"];
-            newProgress = folder.length > 0 ? [torrent folderConsecutiveProgress:folder] : 0.0;
-        }
-        if (std::fabs(newProgress - progress) > 0.000001)
-        {
-            progress = newProgress;
-            entry[@"progress"] = @(progress);
-            int progressPct = (int)floor(progress * 100);
-            entry[@"progressPercent"] = @(progressPct);
-            // Documents only visible when complete; media visible when progress > 0 and (wanted or complete)
-            NSNumber* indexNum = entry[@"index"];
-            BOOL wanted = indexNum ?
-                ([torrent checkForFiles:[NSIndexSet indexSetWithIndex:indexNum.unsignedIntegerValue]] == NSControlStateValueOn) :
-                YES;
-            BOOL visible = [type hasPrefix:@"document"] ? (progress >= 1.0) : (progress > 0.000001 && (wanted || progress >= 1.0));
-            entry[@"visible"] = @(visible);
-            if (visible != wasVisible)
-            {
-                visibilityChanged = YES;
-            }
-            NSString* baseTitle = entry[@"baseTitle"] ?: @"";
-            NSString* title = baseTitle;
-            if (visible && ![type hasPrefix:@"document"] && progress < 1.0 && progressPct < 100)
-            {
-                title = [NSString stringWithFormat:@"%@ (%d%%)", baseTitle, progressPct];
-            }
-            entry[@"title"] = title;
-        }
-    }
-
-    if (visibilityChanged)
-    {
-        torrent.cachedPlayButtonLayout = nil;
-    }
-
-    torrent.cachedPlayButtonProgressGeneration = statsGeneration;
-    return state;
+    return [PlayButtonStateBuilder stateForTorrent:torrent];
 }
 
 - (NSArray<NSDictionary*>*)playButtonLayoutForTorrent:(Torrent*)torrent state:(NSArray<NSDictionary*>*)state
 {
-    if (torrent.cachedPlayButtonLayout != nil)
-    {
-        return torrent.cachedPlayButtonLayout;
-    }
-
-    if (state.count == 0)
-    {
-        return nil;
-    }
-
-    NSMutableArray<NSDictionary*>* layout = [NSMutableArray array];
-    if (state.count == 1)
-    {
-        [layout addObject:@{ @"kind" : @"item", @"item" : state[0] }];
-        torrent.cachedPlayButtonLayout = layout;
-        return layout;
-    }
-
-    // For multiple items, only show them if at least one has started downloading
-    // or if they are all finished. This prevents showing a single generic "Play"
-    // button when multiple items are planned.
-    BOOL anyVisible = NO;
-    for (NSDictionary* entry in state)
-    {
-        if ([entry[@"visible"] boolValue])
-        {
-            anyVisible = YES;
-            break;
-        }
-    }
-
-    if (!anyVisible)
-    {
-        return nil;
-    }
-
-    NSMutableDictionary<NSNumber*, NSMutableArray<NSDictionary*>*>* seasonGroups = [NSMutableDictionary dictionary];
-    for (NSDictionary* fileInfo in state)
-    {
-        id seasonValue = fileInfo[@"season"];
-        NSNumber* season = (seasonValue && seasonValue != [NSNull null]) ? seasonValue : @0;
-        if (!seasonGroups[season])
-        {
-            seasonGroups[season] = [NSMutableArray array];
-        }
-        [seasonGroups[season] addObject:fileInfo];
-    }
-
-    NSArray<NSNumber*>* sortedSeasons = [seasonGroups.allKeys sortedArrayUsingSelector:@selector(compare:)];
-    BOOL hasMultipleSeasons = sortedSeasons.count > 1;
-
-    NSUInteger totalFilesShown = 0;
-    NSUInteger const maxFiles = 1000; // High limit to effectively remove quantity limitation
-
-    for (NSNumber* season in sortedSeasons)
-    {
-        if (totalFilesShown >= maxFiles)
-            break;
-
-        NSArray<NSDictionary*>* filesInSeason = seasonGroups[season];
-
-        if (hasMultipleSeasons && season.integerValue > 0)
-        {
-            NSString* title = [NSString stringWithFormat:@"Season %@:", season];
-            [layout addObject:@{ @"kind" : @"header", @"title" : title }];
-        }
-
-        for (NSDictionary* fileInfo in filesInSeason)
-        {
-            if (totalFilesShown >= maxFiles)
-                break;
-            [layout addObject:@{ @"kind" : @"item", @"item" : fileInfo }];
-            totalFilesShown++;
-        }
-    }
-
-    torrent.cachedPlayButtonLayout = layout;
-    return layout;
+    return [PlayButtonStateBuilder layoutForTorrent:torrent state:state];
 }
 
 - (CGFloat)playButtonsAvailableWidthForCell:(TorrentCell*)cell
@@ -1953,7 +1645,10 @@ static NSDictionary* computeStateAndLayoutFromSnapshot(NSArray<NSDictionary*>* s
     }
 }
 
-- (void)attachCachedFlowView:(FlowLayoutView*)cached toCell:(TorrentCell*)cell torrent:(Torrent*)torrent playableFiles:(NSArray*)playableFiles
+- (void)attachCachedFlowView:(FlowLayoutView*)cached
+                      toCell:(TorrentCell*)cell
+                     torrent:(Torrent*)torrent
+               playableFiles:(NSArray*)playableFiles
 {
     [cached removeFromSuperview];
     [cell addSubview:cached];
@@ -2096,6 +1791,8 @@ static NSDictionary* computeStateAndLayoutFromSnapshot(NSArray<NSDictionary*>* s
     }
     playButton.image = icon;
     playButton.imagePosition = icon ? NSImageLeft : NSNoImage;
+    NSNumber* iinaUnwatchedNum = item[@"iinaUnwatched"];
+    playButton.iinaUnwatched = iinaUnwatchedNum ? iinaUnwatchedNum.boolValue : NO;
 
     return playButton;
 }
@@ -2452,6 +2149,13 @@ static NSTimeInterval const kHeightFlushDelay = 0.1;
                         [flowView invalidateSizeForView:button];
                         layoutNeeded = YES;
                     }
+                    NSNumber* iinaUnwatchedNum = entry[@"iinaUnwatched"];
+                    BOOL iinaUnwatched = iinaUnwatchedNum ? iinaUnwatchedNum.boolValue : NO;
+                    if (button.iinaUnwatched != iinaUnwatched)
+                    {
+                        button.iinaUnwatched = iinaUnwatched;
+                        layoutNeeded = YES;
+                    }
                 }
             }
             continue;
@@ -2635,6 +2339,14 @@ static NSTimeInterval const kHeightFlushDelay = 0.1;
     NSString* path = [torrent pathToOpenForPlayableItem:item];
     if (!path)
         return;
+
+    [Torrent invalidateIINAWatchCacheForPath:path];
+    NSString* itemPath = item[@"path"];
+    if (itemPath && ![itemPath isEqualToString:path])
+        [Torrent invalidateIINAWatchCacheForPath:itemPath];
+    torrent.cachedPlayButtonState = nil;
+    torrent.cachedPlayButtonLayout = nil;
+    [self updateVisiblePlayButtons];
 
     NSString* type = item[@"type"];
     NSURL* fileURL = [NSURL fileURLWithPath:path];

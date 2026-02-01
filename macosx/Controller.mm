@@ -2928,6 +2928,7 @@ void onTorrentCompletenessChanged(tr_torrent* tor, tr_completeness status, bool 
     }
 
     [self fullUpdateUI];
+    [self selectAndScrollToTorrent:torrent];
 }
 
 - (void)torrentRestartedDownloading:(NSNotification*)notification
@@ -3750,23 +3751,19 @@ void onTorrentCompletenessChanged(tr_torrent* tor, tr_completeness status, bool 
     [self scrollToFirstNewTransferIfNeeded];
 }
 
-/// If we just added transfers, scroll to and select the first new one. Clears fAddingTransfers.
-- (void)scrollToFirstNewTransferIfNeeded
+/// Selects the given torrent in the transfer list and scrolls so it is visible. No-op if torrent not in table.
+- (void)selectAndScrollToTorrent:(Torrent*)torrent
 {
-    if (self.fAddingTransfers.count == 0)
-        return;
-    Torrent* firstNew = self.fAddingTransfers.anyObject;
-    self.fAddingTransfers = nil;
-    if (!firstNew)
+    if (!torrent)
         return;
     dispatch_async(dispatch_get_main_queue(), ^{
-        NSInteger row = [self.fTableView rowForItem:firstNew];
+        NSInteger row = [self.fTableView rowForItem:torrent];
         if (row == -1 && [self.fDefaults boolForKey:@"SortByGroup"])
         {
             __block TorrentGroup* parent = nil;
             [self.fDisplayedTorrents enumerateObjectsWithOptions:NSEnumerationConcurrent
                                                       usingBlock:^(TorrentGroup* group, NSUInteger /*idx*/, BOOL* stop) {
-                                                          if ([group.torrents containsObject:firstNew])
+                                                          if ([group.torrents containsObject:torrent])
                                                           {
                                                               parent = group;
                                                               *stop = YES;
@@ -3775,12 +3772,22 @@ void onTorrentCompletenessChanged(tr_torrent* tor, tr_completeness status, bool 
             if (parent)
             {
                 [self.fTableView expandItem:parent];
-                row = [self.fTableView rowForItem:firstNew];
+                row = [self.fTableView rowForItem:torrent];
             }
         }
         if (row >= 0 && row < self.fTableView.numberOfRows)
             [self.fTableView selectAndScrollToRow:row];
     });
+}
+
+/// If we just added transfers, scroll to and select the first new one. Clears fAddingTransfers.
+- (void)scrollToFirstNewTransferIfNeeded
+{
+    if (self.fAddingTransfers.count == 0)
+        return;
+    Torrent* firstNew = self.fAddingTransfers.anyObject;
+    self.fAddingTransfers = nil;
+    [self selectAndScrollToTorrent:firstNew];
 }
 
 - (void)switchFilter:(id)sender

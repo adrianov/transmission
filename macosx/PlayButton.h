@@ -8,6 +8,7 @@
 @interface PlayButton : NSButton
 
 @property(nonatomic) BOOL isHovered;
+@property(nonatomic) BOOL iinaUnwatched;
 @property(nonatomic, copy) void (^onHover)(PlayButton* button);
 
 /// Resets the button state for reuse in a pool.

@@ -24,6 +24,7 @@
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 
 #import "Torrent.h"
+#import "IINAWatchHelper.h"
 #import "GroupsController.h"
 #import "FileListNode.h"
 #import "NSStringAdditions.h"
@@ -3051,6 +3052,16 @@ static TorrentSearchResult computeSearchResult(NSArray<NSString*>* strings, NSAr
         return [self pathToOpenForAudioPath:path];
     }
     return path;
+}
+
+- (BOOL)iinaUnwatchedForVideoPath:(NSString*)path
+{
+    return [IINAWatchHelper unwatchedForVideoPath:path completionObject:self];
+}
+
++ (void)invalidateIINAWatchCacheForPath:(NSString*)path
+{
+    [IINAWatchHelper invalidateCacheForPath:path];
 }
 
 /// Path to use when deriving UI display name for a playable item (menu, tooltip). Prefers .cue when present for audio.

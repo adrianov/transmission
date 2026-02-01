@@ -116,6 +116,11 @@ extern NSString* const kTorrentDidChangeGroupNotification;
 /// Returns detected media category for a specific file index.
 - (NSString*)mediaCategoryForFile:(NSUInteger)index;
 
+/// YES if video at path is unwatched in IINA (no watch_later or played under 90%). Used to highlight play buttons green.
+- (BOOL)iinaUnwatchedForVideoPath:(NSString*)path;
+/// Invalidates IINA watch cache for path (call after user plays file so next show reflects IINA state).
++ (void)invalidateIINAWatchCacheForPath:(NSString*)path;
+
 /// Cached height for play buttons view (calculated by TorrentTableView).
 @property(nonatomic) CGFloat cachedPlayButtonsHeight;
 /// Cached width used for play buttons layout (calculated by TorrentTableView).

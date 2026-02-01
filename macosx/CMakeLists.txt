@@ -124,6 +124,8 @@ target_sources(${TR_NAME}-mac
         InfoViewController.h
         InfoWindowController.h
         InfoWindowController.mm
+        IINAWatchHelper.h
+        IINAWatchHelper.mm
         main.mm
         MessageWindowController.h
         MessageWindowController.mm
@@ -180,6 +182,8 @@ target_sources(${TR_NAME}-mac
         TorrentCell.mm
         PlayButton.h
         PlayButton.mm
+        PlayButtonStateBuilder.h
+        PlayButtonStateBuilder.mm
         FlowLayoutView.h
         FlowLayoutView.mm
         TorrentCellActionButton.h
@@ -432,6 +436,7 @@ target_link_libraries(${TR_NAME}-mac
         djvulibre
         ${SPARKLE_FRAMEWORK}
         "-framework AppKit"
+        "-framework AVFoundation"
         "-framework Carbon"
         "-framework Foundation"
         "-framework Quartz"

@@ -41,6 +41,7 @@
     self.identifier = nil;
     self.hidden = NO;
     self.isHovered = NO;
+    self.iinaUnwatched = NO;
     self.onHover = nil;
     self.accessibilityHelp = nil;
     self.accessibilityLabel = nil;
@@ -76,10 +77,23 @@
     [self updateBackground];
 }
 
+- (void)setIinaUnwatched:(BOOL)iinaUnwatched
+{
+    if (_iinaUnwatched != iinaUnwatched)
+    {
+        _iinaUnwatched = iinaUnwatched;
+        [self updateBackground];
+    }
+}
+
 - (void)updateBackground
 {
-    // Use slightly darker gray for non-hovered to look more "properly gray"
-    NSColor* bgColor = self.isHovered ? [NSColor colorWithWhite:0.0 alpha:0.12] : [NSColor colorWithWhite:0.0 alpha:0.05];
+    NSColor* bgColor;
+    if (self.iinaUnwatched)
+        bgColor = self.isHovered ? [NSColor colorWithRed:0.2 green:0.6 blue:0.2 alpha:0.35] :
+                                   [NSColor colorWithRed:0.2 green:0.55 blue:0.2 alpha:0.25];
+    else
+        bgColor = self.isHovered ? [NSColor colorWithWhite:0.0 alpha:0.12] : [NSColor colorWithWhite:0.0 alpha:0.05];
     self.layer.backgroundColor = bgColor.CGColor;
 }
 
