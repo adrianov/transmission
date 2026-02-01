@@ -123,7 +123,7 @@ NSString* const kIINAWatchCacheDidUpdateNotification = @"IINAWatchCacheDidUpdate
 + (BOOL)unwatchedForVideoPath:(NSString*)path completionObject:(id)completionObject
 {
     if (!path || path.length == 0)
-        return YES;
+        return NO;
     dispatch_once(&sIINAUnwatchedCacheOnce, ^{
         sIINAUnwatchedCache = [NSMutableDictionary dictionary];
     });
@@ -136,8 +136,8 @@ NSString* const kIINAWatchCacheDidUpdateNotification = @"IINAWatchCacheDidUpdate
     NSString* dir = iinaWatchLaterDir();
     if (!dir)
     {
-        sIINAUnwatchedCache[key] = @YES;
-        return YES;
+        sIINAUnwatchedCache[key] = @NO;
+        return NO;
     }
     NSString* watchFile = existingWatchLaterPath(dir, key);
     if (!watchFile)
@@ -154,8 +154,8 @@ NSString* const kIINAWatchCacheDidUpdateNotification = @"IINAWatchCacheDidUpdate
     double start = parseIINAStartFromFile(watchFile);
     if (start < 0)
     {
-        sIINAUnwatchedCache[key] = @YES;
-        return YES;
+        sIINAUnwatchedCache[key] = @NO;
+        return NO;
     }
     // Assume watched until async confirms start/duration; avoids showing unwatched for watched files.
     sIINAUnwatchedCache[key] = @NO;
@@ -164,8 +164,8 @@ NSString* const kIINAWatchCacheDidUpdateNotification = @"IINAWatchCacheDidUpdate
     NSString* keyCopy = [key copy];
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
         NSTimeInterval duration = durationForVideoPath(pathForDuration);
-        // When duration unknown (path unreadable, timeout, unsupported), show unwatched (green) instead of incorrectly gray.
-        BOOL unwatched = (duration <= 0) ? YES : ((start / duration) < 0.9);
+        // When duration unknown (path unreadable, timeout, unsupported), default to gray.
+        BOOL unwatched = (duration > 0) && ((start / duration) < 0.9);
         dispatch_async(dispatch_get_main_queue(), ^{
             sIINAUnwatchedCache[keyCopy] = @(unwatched);
             [NSNotificationCenter.defaultCenter postNotificationName:kIINAWatchCacheDidUpdateNotification object:weakObj];
