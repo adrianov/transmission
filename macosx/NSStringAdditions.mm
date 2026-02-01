@@ -15,6 +15,10 @@
 
 @end
 
+@interface NSString (PrivateHumanizedTitle)
+- (NSString*)tr_stringByRemovingExtractedYear:(NSString* _Nullable)year yearInterval:(NSString* _Nullable)yearInterval;
+@end
+
 @implementation NSString (NSStringAdditions)
 
 + (NSString*)ellipsis
@@ -704,24 +708,7 @@
                                                                                        options:NSRegularExpressionCaseInsensitive
                                                                                          error:nil];
     title = [seasonRemoveRegex stringByReplacingMatchesInString:title options:0 range:NSMakeRange(0, title.length) withTemplate:@""];
-    // Remove year interval (and preceding dot or surrounding parentheses)
-    if (yearInterval)
-    {
-        NSRegularExpression* yearIntervalRemoveRegex = [NSRegularExpression regularExpressionWithPattern:@"\\.?\\(?(?:19|20)\\d{2}\\s*-\\s*(?:19|20)\\d{2}\\)?"
-                                                                                                 options:0
-                                                                                                   error:nil];
-        title = [yearIntervalRemoveRegex stringByReplacingMatchesInString:title options:0 range:NSMakeRange(0, title.length)
-                                                             withTemplate:@""];
-    }
-    if (year)
-    {
-        // Remove year and surrounding parentheses or preceding dot
-        NSRegularExpression* yearRemoveRegex = [NSRegularExpression regularExpressionWithPattern:@"\\.?\\(?(19\\d{2}|20\\d{2})\\)?"
-                                                                                         options:0
-                                                                                           error:nil];
-        title = [yearRemoveRegex stringByReplacingMatchesInString:title options:0 range:NSMakeRange(0, title.length)
-                                                     withTemplate:@""];
-    }
+    title = [title tr_stringByRemovingExtractedYear:year yearInterval:yearInterval];
     // Remove both date formats
     title = [fullDateRegex stringByReplacingMatchesInString:title options:0 range:NSMakeRange(0, title.length) withTemplate:@""];
     title = [shortDateRegex stringByReplacingMatchesInString:title options:0 range:NSMakeRange(0, title.length) withTemplate:@""];
@@ -1242,6 +1229,102 @@
     }
 
     return nil; // No season/episode pattern found
+}
+
+@end
+
+@implementation NSString (PrivateHumanizedTitle)
+
+// Removes one extracted year from the title. Keeps parentheses balanced: when the year is inside
+// a parenthetical (e.g. "(2024 Elemental Mixes)"), removes the entire span; otherwise removes just the year.
+- (NSString*)tr_stringByRemovingOneYear:(NSString*)year
+{
+    if (year.length == 0)
+        return self;
+    NSMutableString* result = [self mutableCopy];
+    NSCharacterSet* spaces = NSCharacterSet.whitespaceCharacterSet;
+    while (YES)
+    {
+        NSRange yearRange = [result rangeOfString:year];
+        if (yearRange.location == NSNotFound)
+            break;
+        NSInteger start = (NSInteger)yearRange.location;
+        NSInteger end = (NSInteger)(yearRange.location + yearRange.length);
+        NSInteger len = (NSInteger)result.length;
+
+        NSInteger parenStart = NSNotFound;
+        NSInteger i = start - 1;
+        while (i >= 0)
+        {
+            unichar c = [result characterAtIndex:(NSUInteger)i];
+            if ([spaces characterIsMember:c])
+            {
+                i--;
+                continue;
+            }
+            if (c == '(')
+            {
+                NSRange between = NSMakeRange((NSUInteger)(i + 1), (NSUInteger)(start - (i + 1)));
+                if ([result rangeOfString:@")" options:0 range:between].location == NSNotFound)
+                {
+                    parenStart = i;
+                }
+                break;
+            }
+            break;
+        }
+
+        if (parenStart != NSNotFound)
+        {
+            NSInteger depth = 1;
+            NSInteger j = parenStart + 1;
+            while (j < len && depth > 0)
+            {
+                unichar c = [result characterAtIndex:(NSUInteger)j];
+                if (c == '(')
+                    depth++;
+                else if (c == ')')
+                    depth--;
+                j++;
+            }
+            NSInteger parenEnd = (depth == 0) ? j - 1 : NSNotFound;
+            if (parenEnd != NSNotFound)
+            {
+                NSRange remove = NSMakeRange((NSUInteger)parenStart, (NSUInteger)(parenEnd - parenStart + 1));
+                [result deleteCharactersInRange:remove];
+                continue;
+            }
+        }
+
+        NSInteger removeStart = start;
+        NSInteger removeEnd = end;
+        if (removeStart > 0 && [result characterAtIndex:(NSUInteger)(removeStart - 1)] == '(' && removeEnd < len &&
+            [result characterAtIndex:(NSUInteger)removeEnd] == ')')
+        {
+            removeStart--;
+            removeEnd++;
+        }
+        else if (removeStart > 0 && [result characterAtIndex:(NSUInteger)(removeStart - 1)] == '.')
+            removeStart--;
+        [result deleteCharactersInRange:NSMakeRange((NSUInteger)removeStart, (NSUInteger)(removeEnd - removeStart))];
+    }
+    return [result copy];
+}
+
+- (NSString*)tr_stringByRemovingExtractedYear:(NSString*)year yearInterval:(NSString*)yearInterval
+{
+    NSString* result = self;
+    if (yearInterval.length > 0)
+    {
+        NSRegularExpression* yearIntervalRemoveRegex = [NSRegularExpression regularExpressionWithPattern:@"\\.?\\(?(?:19|20)\\d{2}\\s*-\\s*(?:19|20)\\d{2}\\)?"
+                                                                                                 options:0
+                                                                                                   error:nil];
+        result = [yearIntervalRemoveRegex stringByReplacingMatchesInString:result options:0 range:NSMakeRange(0, result.length)
+                                                              withTemplate:@""];
+    }
+    if (year.length > 0)
+        result = [result tr_stringByRemovingOneYear:year];
+    return result;
 }
 
 @end
