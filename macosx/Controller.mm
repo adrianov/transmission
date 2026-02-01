@@ -3171,9 +3171,9 @@ void onTorrentCompletenessChanged(tr_torrent* tor, tr_completeness status, bool 
                             NSUInteger const sb = [b searchMatchScoreForStrings:searchStrings byTracker:filterTracker
                                                           includePlayableTitles:includePlayable];
                             if (sa > sb)
-                                return NSOrderedAscending;
-                            if (sa < sb)
                                 return NSOrderedDescending;
+                            if (sa < sb)
+                                return NSOrderedAscending;
                             return NSOrderedSame;
                         }];
         descriptors = [@[ matchDescriptor ] arrayByAddingObjectsFromArray:descriptors];
