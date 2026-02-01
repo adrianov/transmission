@@ -70,7 +70,8 @@ static void initMediaExtensionSets(void)
             setWithArray:
                 @[ @"mp3", @"flac", @"wav", @"aac", @"ogg", @"wma", @"m4a", @"ape", @"alac", @"aiff", @"opus", @"wv" ]];
         sBookExtensions = [NSSet setWithArray:@[ @"pdf", @"epub", @"djv", @"djvu", @"fb2", @"mobi" ]];
-        sSoftwareExtensions = [NSSet setWithArray:@[ @"exe", @"msi", @"dmg", @"iso", @"pkg", @"deb", @"rpm", @"appimage", @"apk", @"run" ]];
+        sSoftwareExtensions = [NSSet
+            setWithArray:@[ @"exe", @"msi", @"dmg", @"iso", @"pkg", @"deb", @"rpm", @"appimage", @"apk", @"run" ]];
     });
 }
 
@@ -80,9 +81,9 @@ static dispatch_once_t sAdultKeywordsOnce;
 static void initAdultKeywords(void)
 {
     dispatch_once(&sAdultKeywordsOnce, ^{
-        sAdultKeywords = [NSSet setWithArray:@[
-            @"[18+]", @"[adult]", @"[porn]", @"[xxx]", @"nsfw", @"onlyfans", @"porn", @"pornhub", @"xxx", @"xvideos"
-        ]];
+        sAdultKeywords = [NSSet
+            setWithArray:
+                @[ @"[18+]", @"[adult]", @"[porn]", @"[xxx]", @"nsfw", @"onlyfans", @"porn", @"pornhub", @"xxx", @"xvideos" ]];
     });
 }
 
@@ -2814,10 +2815,9 @@ static void saveOpenCounts(NSDictionary<NSString*, NSNumber*>* counts)
         return nil;
     }
     NSString* category = node.isFolder ? nil : [self mediaCategoryForFile:node.indexes.firstIndex];
-    BOOL isPlayed = [category isEqualToString:@"video"] || [category isEqualToString:@"adult"] ||
-                    [category isEqualToString:@"audio"];
-    NSString* format = isPlayed ? NSLocalizedString(@"Played: %lu", "Files tab -> open count for video/audio")
-                                : NSLocalizedString(@"Opened: %lu", "Files tab -> open count for other");
+    BOOL isPlayed = [category isEqualToString:@"video"] || [category isEqualToString:@"adult"] || [category isEqualToString:@"audio"];
+    NSString* format = isPlayed ? NSLocalizedString(@"Played: %lu", "Files tab -> open count for video/audio") :
+                                  NSLocalizedString(@"Opened: %lu", "Files tab -> open count for other");
     return [NSString stringWithFormat:format, (unsigned long)n];
 }
 
@@ -2830,10 +2830,9 @@ static void saveOpenCounts(NSDictionary<NSString*, NSNumber*>* counts)
         return nil;
     }
     NSString* category = item[@"category"] ?: @"";
-    BOOL isPlayed = [category isEqualToString:@"video"] || [category isEqualToString:@"adult"] ||
-                    [category isEqualToString:@"audio"];
-    NSString* format = isPlayed ? NSLocalizedString(@"Played: %lu", "Play button tooltip -> open count for video/audio")
-                                : NSLocalizedString(@"Opened: %lu", "Play button tooltip -> open count for other");
+    BOOL isPlayed = [category isEqualToString:@"video"] || [category isEqualToString:@"adult"] || [category isEqualToString:@"audio"];
+    NSString* format = isPlayed ? NSLocalizedString(@"Played: %lu", "Play button tooltip -> open count for video/audio") :
+                                  NSLocalizedString(@"Opened: %lu", "Play button tooltip -> open count for other");
     return [NSString stringWithFormat:format, (unsigned long)n];
 }
 

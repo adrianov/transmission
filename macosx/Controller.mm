@@ -3435,12 +3435,8 @@ void onTorrentCompletenessChanged(tr_torrent* tor, tr_completeness status, bool 
 
     BOOL beganUpdates = NO;
 
-    //don't animate torrents when first launching
-    static dispatch_once_t onceToken;
-    dispatch_once(&onceToken, ^{
-        NSAnimationContext.currentContext.duration = 0;
-    });
     [NSAnimationContext beginGrouping];
+    NSAnimationContext.currentContext.duration = 0;
 
     //add/remove torrents (and rearrange for groups), one by one
     if (!groupRows && !wasGroupRows)
@@ -3734,10 +3730,23 @@ void onTorrentCompletenessChanged(tr_torrent* tor, tr_completeness status, bool 
     }
     [NSAnimationContext endGrouping];
 
-    BOOL listChangeWasAdditionsOnly = (self.fAddingTransfers.count > 0) && skipSorting && (groupRows == wasGroupRows);
-    [self refreshTransfersTableAfterListChange:groupRows
-                                 filterActive:(filterStatus || filterGroup || (searchStrings != nil))
-                            reloadTableContent:!listChangeWasAdditionsOnly];
+    BOOL const skipFullReload = [self shouldSkipFullTableReloadForListChangeWithAddingCount:self.fAddingTransfers.count
+                                                                                skipSorting:skipSorting
+                                                                                  groupRows:groupRows
+                                                                               wasGroupRows:wasGroupRows
+                                                                 didIncrementalTableUpdates:beganUpdates];
+    [self refreshTransfersTableAfterListChange:groupRows filterActive:(filterStatus || filterGroup || (searchStrings != nil))
+                            reloadTableContent:!skipFullReload];
+}
+
+/// Returns YES when the list change allows skipping full table reload to avoid flow view flicker.
+- (BOOL)shouldSkipFullTableReloadForListChangeWithAddingCount:(NSUInteger)addingCount
+                                                  skipSorting:(BOOL)skipSorting
+                                                    groupRows:(BOOL)groupRows
+                                                 wasGroupRows:(BOOL)wasGroupRows
+                                   didIncrementalTableUpdates:(BOOL)didIncrementalUpdates
+{
+    return (groupRows == wasGroupRows && addingCount > 0 && skipSorting) || didIncrementalUpdates;
 }
 
 /// Single place that performs the transfers table content reload after list changes.
@@ -3757,7 +3766,9 @@ void onTorrentCompletenessChanged(tr_torrent* tor, tr_completeness status, bool 
 
 /// Refreshes table after the displayed transfer list changed. When reloadTableContent is NO (e.g. additions only),
 /// skips full reload to avoid re-requesting row views and empty flow boxes until async play button config runs.
-- (void)refreshTransfersTableAfterListChange:(BOOL)groupRows filterActive:(BOOL)filterActive reloadTableContent:(BOOL)reloadTableContent
+- (void)refreshTransfersTableAfterListChange:(BOOL)groupRows
+                                filterActive:(BOOL)filterActive
+                          reloadTableContent:(BOOL)reloadTableContent
 {
     if (reloadTableContent)
         [self reloadTransfersTableContent];
@@ -4419,8 +4430,7 @@ void onTorrentCompletenessChanged(tr_torrent* tor, tr_completeness status, bool 
         noteHeightOfRowsWithIndexesChanged:[NSIndexSet indexSetWithIndexesInRange:NSMakeRange(0, self.fTableView.numberOfRows)]];
     [self.fTableView endUpdates];
 
-    //reloaddata, otherwise the tableview has a bunch of empty cells
-    [self.fTableView reloadData];
+    [self reloadTransfersTableContent];
     [self updateForAutoSize];
 }
 
@@ -4439,7 +4449,7 @@ void onTorrentCompletenessChanged(tr_torrent* tor, tr_completeness status, bool 
 - (void)toggleShowContentButtons:(id)sender
 {
     [self.fDefaults setBool:![self.fDefaults boolForKey:@"ShowContentButtons"] forKey:@"ShowContentButtons"];
-    [self.fTableView reloadData];
+    [self refreshVisibleTransferRows];
     [self updateForAutoSize];
 }
 

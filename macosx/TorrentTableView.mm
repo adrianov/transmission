@@ -390,7 +390,6 @@ static CGFloat const kPlayButtonVerticalPadding = 4.0;
             // Static content - only update when torrent changes
             if (!sameTorrentFull)
             {
-
                 // set torrent icon and error badge
                 NSImage* fileImage = torrent.icon;
                 if (error)
@@ -549,8 +548,7 @@ static CGFloat const kPlayButtonVerticalPadding = 4.0;
 
     if (minimal)
     {
-        torrentCell.fTorrentStatusField.stringValue = self.fDisplaySmallStatusRegular ? torrent.shortStatusString :
-                                                                                       torrent.remainingTimeString;
+        torrentCell.fTorrentStatusField.stringValue = self.fDisplaySmallStatusRegular ? torrent.shortStatusString : torrent.remainingTimeString;
     }
     else
     {
@@ -688,38 +686,16 @@ static CGFloat const kPlayButtonVerticalPadding = 4.0;
         if (!item || [item isKindOfClass:[Torrent class]])
         {
             if (item)
-            {
-                Torrent* torrent = (Torrent*)item;
-                NSArray* playableFiles = torrent.playableFiles;
-                if (playableFiles.count == 1)
-                {
-                    [self playTorrentMedia:torrent];
-                }
-                else if (playableFiles.count > 1)
-                {
-                    NSMenu* menu = [self playMenuForTorrent:torrent];
-                    [NSMenu popUpContextMenu:menu withEvent:event forView:self];
-                }
-                else
-                {
-                    [self.fController showInfo:nil];
-                }
-            }
+                [self handleDoubleClickOnTorrent:(Torrent*)item withEvent:event];
             else
-            {
                 [self.fController showInfo:nil];
-            }
         }
         else
         {
             if ([self isItemExpanded:item])
-            {
                 [self collapseItem:item];
-            }
             else
-            {
                 [self expandItem:item];
-            }
         }
     }
     else if ([self pointInGroupStatusRect:point])
@@ -727,6 +703,29 @@ static CGFloat const kPlayButtonVerticalPadding = 4.0;
         //we check for this here rather than in the GroupCell
         //as using floating group rows causes all sorts of weirdness...
         [self toggleGroupRowRatio];
+    }
+}
+
+/// Handles double-click on a torrent row: play if one playable file, show play menu if multiple, else reveal in Finder if we have a location (unknown file types) or show Inspector.
+- (void)handleDoubleClickOnTorrent:(Torrent*)torrent withEvent:(NSEvent*)event
+{
+    NSArray* playableFiles = torrent.playableFiles;
+    if (playableFiles.count == 1)
+    {
+        [self playTorrentMedia:torrent];
+    }
+    else if (playableFiles.count > 1)
+    {
+        NSMenu* menu = [self playMenuForTorrent:torrent];
+        [NSMenu popUpContextMenu:menu withEvent:event forView:self];
+    }
+    else if (torrent.dataLocation)
+    {
+        [self revealTorrentInFinder:torrent];
+    }
+    else
+    {
+        [self.fController showInfo:nil];
     }
 }
 
@@ -1377,24 +1376,23 @@ static CGFloat const kPlayButtonVerticalPadding = 4.0;
     }
 }
 
+/// Reveals the torrent's data location in Finder (folder: open; single file: select). No-op if no location.
+- (void)revealTorrentInFinder:(Torrent*)torrent
+{
+    NSString* location = torrent.dataLocation;
+    if (!location)
+        return;
+    NSURL* file = [NSURL fileURLWithPath:location];
+    if (torrent.folder)
+        [NSWorkspace.sharedWorkspace openURL:file];
+    else
+        [NSWorkspace.sharedWorkspace activateFileViewerSelectingURLs:@[ file ]];
+}
+
 - (IBAction)revealTorrentFile:(id)sender
 {
     Torrent* torrent = [self itemAtRow:[self rowForView:[sender superview]]];
-    NSString* location = torrent.dataLocation;
-    if (location)
-    {
-        NSURL* file = [NSURL fileURLWithPath:location];
-        if (torrent.folder)
-        {
-            // Folder torrent - open the folder to show its contents
-            [NSWorkspace.sharedWorkspace openURL:file];
-        }
-        else
-        {
-            // Single file torrent - reveal/select it in Finder
-            [NSWorkspace.sharedWorkspace activateFileViewerSelectingURLs:@[ file ]];
-        }
-    }
+    [self revealTorrentInFinder:torrent];
 }
 
 - (IBAction)openCommentURL:(id)sender
@@ -1608,7 +1606,7 @@ static NSString* flowViewTorrentHash(FlowLayoutView* flowView)
 static NSDictionary* computeStateAndLayoutFromSnapshot(NSArray<NSDictionary*>* snapshot)
 {
     if (snapshot.count == 0)
-        return @{ @"state" : [NSMutableArray array], @"layout" : @[] };
+        return @{@"state" : [NSMutableArray array], @"layout" : @[]};
     NSMutableArray<NSMutableDictionary*>* state = [NSMutableArray arrayWithCapacity:snapshot.count];
     for (NSDictionary* fileInfo in snapshot)
     {
@@ -1626,9 +1624,9 @@ static NSDictionary* computeStateAndLayoutFromSnapshot(NSArray<NSDictionary*>* s
         [state addObject:entry];
     }
     if (state.count == 0)
-        return @{ @"state" : state, @"layout" : @[] };
+        return @{@"state" : state, @"layout" : @[]};
     if (state.count == 1)
-        return @{ @"state" : state, @"layout" : @[ @{ @"kind" : @"item", @"item" : state[0] } ] };
+        return @{@"state" : state, @"layout" : @[ @{ @"kind" : @"item", @"item" : state[0] } ]};
     BOOL anyVisible = NO;
     for (NSDictionary* e in state)
     {
@@ -1639,7 +1637,7 @@ static NSDictionary* computeStateAndLayoutFromSnapshot(NSArray<NSDictionary*>* s
         }
     }
     if (!anyVisible)
-        return @{ @"state" : state, @"layout" : @[] };
+        return @{@"state" : state, @"layout" : @[]};
     NSMutableDictionary<NSNumber*, NSMutableArray<NSDictionary*>*>* seasonGroups = [NSMutableDictionary dictionary];
     for (NSDictionary* fileInfo in state)
     {
@@ -2121,9 +2119,9 @@ static NSTimeInterval const kHeightFlushDelay = 0.1;
 /// Applies precomputed state/layout to cell and torrent cache; creates/updates flow view. Main thread only.
 - (void)applyFlowStateToCell:(TorrentCell*)cell
                      torrent:(Torrent*)torrent
-                      state:(NSArray<NSDictionary*>*)state
-                     layout:(NSArray<NSDictionary*>*)layout
-              playableFiles:(NSArray<NSDictionary*>*)playableFiles
+                       state:(NSArray<NSDictionary*>*)state
+                      layout:(NSArray<NSDictionary*>*)layout
+               playableFiles:(NSArray<NSDictionary*>*)playableFiles
 {
     NSString* currentHash = torrent.hashString;
     torrent.cachedPlayButtonSource = playableFiles;
@@ -2158,8 +2156,8 @@ static NSTimeInterval const kHeightFlushDelay = 0.1;
     BOOL const hasLayout = (layout.count > 0);
     BOOL const hasExistingButtons = existingFlowView && [existingFlowView arrangedSubviews].count > 0;
 
-    if (cell.fPlayButtonsView && [cell.fTorrentHash isEqualToString:currentHash] && flowViewMatchesTorrent &&
-        sameSource && (!hasLayout || hasExistingButtons))
+    if (cell.fPlayButtonsView && [cell.fTorrentHash isEqualToString:currentHash] && flowViewMatchesTorrent && sameSource &&
+        (!hasLayout || hasExistingButtons))
     {
         cell.fPlayButtonsView.hidden = NO;
         CGFloat const availableWidth = [self playButtonsAvailableWidthForCell:cell];
