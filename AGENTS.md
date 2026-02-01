@@ -59,6 +59,8 @@ cmake --build build -t transmission-qt
 
 **macOS convenience script:** `bin/build-mac` configures with Ninja/Release, builds the transmission-mac target, and opens the app (or build folder) in Finder.
 
+**IINA watch_later comparison:** `bin/compare-iina-watch-later [watch_later_dir] [downloads_dir]` lists how many files under Downloads have IINA watch state (same path normalization and MD5 as IINAWatchHelper). **Single-file check:** `bin/check-iina-watch-later <file_path> [watch_later_dir]` prints normalized path, expected hash, and whether an IINA watch_later file exists for that path. Formula: `WATCH_LATER_FILENAME = UPPERCASE( MD5( UTF8( NORMALIZED_FULL_PATH ) ) )` — 32-char hex in `~/Library/Application Support/com.colliderli.iina/watch_later/`.
+
 ## Lint Commands
 
 **Check C++ formatting:**

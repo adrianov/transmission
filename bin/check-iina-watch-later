@@ -1,0 +1,88 @@
+#!/usr/bin/env python3
+# Check if a given file path has an IINA watch_later entry.
+# Uses same path normalization and MD5 as IINAWatchHelper.
+# Usage: ./bin/check-iina-watch-later <file_path> [watch_later_dir]
+
+import hashlib
+import os
+import sys
+
+
+def normalized_path(path: str, resolve_symlinks: bool = True) -> str:
+    """Match IINAWatchHelper: expand tilde, absolute, standardize, optionally resolve symlinks."""
+    if not path or not path.strip():
+        return ""
+    p = os.path.expanduser(path.strip())
+    if not os.path.isabs(p):
+        p = os.path.join(os.getcwd(), p)
+    p = os.path.normpath(p)
+    if resolve_symlinks and os.path.exists(p):
+        p = os.path.realpath(p)
+    return p
+
+
+def md5_hex(path: str) -> tuple[str, str]:
+    """MD5 of path UTF-8; returns (uppercase_hex, lowercase_hex)."""
+    data = path.encode("utf-8")
+    h = hashlib.md5(data).hexdigest()
+    return (h.upper(), h.lower())
+
+
+def default_watch_later_dir() -> str:
+    home = os.path.expanduser("~")
+    return os.path.join(home, "Library", "Application Support", "com.colliderli.iina", "watch_later")
+
+
+def parse_start(watch_file: str) -> float | None:
+    """Parse start= value from IINA watch_later file. Returns None if not found or invalid."""
+    try:
+        with open(watch_file, encoding="utf-8") as f:
+            for line in f:
+                if line.startswith("start="):
+                    return float(line[6:].strip().split()[0])
+    except (OSError, ValueError):
+        pass
+    return None
+
+
+def main() -> None:
+    if len(sys.argv) < 2:
+        print("Usage: check-iina-watch-later <file_path> [watch_later_dir]", file=sys.stderr)
+        sys.exit(1)
+
+    file_path = sys.argv[1]
+    watch_later_dir = sys.argv[2] if len(sys.argv) > 2 else default_watch_later_dir()
+
+    if not os.path.isdir(watch_later_dir):
+        print(f"watch_later dir not found: {watch_later_dir}", file=sys.stderr)
+        sys.exit(1)
+
+    norm_resolved = normalized_path(file_path, resolve_symlinks=True)
+    norm_no_resolve = normalized_path(file_path, resolve_symlinks=False)
+    upper_res, lower_res = md5_hex(norm_resolved)
+    upper_no, lower_no = md5_hex(norm_no_resolve)
+
+    found: str | None = None
+    for name in (upper_res, lower_res, upper_no, lower_no):
+        candidate = os.path.join(watch_later_dir, name)
+        if os.path.isfile(candidate):
+            found = candidate
+            break
+
+    print(f"Input path:     {file_path}")
+    print(f"Normalized:     {norm_resolved}")
+    if norm_no_resolve != norm_resolved:
+        print(f"Normalized (no symlinks): {norm_no_resolve}")
+    print(f"Expected hash:  {upper_res} (IINA uses uppercase)")
+
+    if found:
+        start = parse_start(found)
+        print(f"Result:         IINA watch_later file found: {found}")
+        if start is not None:
+            print(f"start=          {start}")
+    else:
+        print("Result:         No IINA watch_later file for this path.")
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,80 @@
+#!/usr/bin/env python3
+# Compare IINA watch_later hashes with files under Downloads.
+# Uses same path normalization and MD5 as IINAWatchHelper so we can verify
+# which Download files have IINA watch state (and that our hashes match).
+# Usage: ./bin/compare-iina-watch-later [watch_later_dir] [downloads_dir]
+
+import hashlib
+import os
+import sys
+
+
+def normalized_path(path: str) -> str:
+    """Match IINAWatchHelper: expand tilde, absolute, standardize, resolve symlinks if exists."""
+    if not path or not path.strip():
+        return ""
+    p = os.path.expanduser(path.strip())
+    if not os.path.isabs(p):
+        p = os.path.join(os.getcwd(), p)
+    p = os.path.normpath(p)
+    if os.path.exists(p):
+        p = os.path.realpath(p)
+    return p
+
+
+def md5_hex(path: str) -> tuple[str, str]:
+    """MD5 of path UTF-8; returns (uppercase_hex, lowercase_hex)."""
+    data = path.encode("utf-8")
+    h = hashlib.md5(data).hexdigest()
+    return (h.upper(), h.lower())
+
+
+def main() -> None:
+    home = os.path.expanduser("~")
+    app_support = os.path.join(home, "Library", "Application Support")
+    default_watch_later = os.path.join(app_support, "com.colliderli.iina", "watch_later")
+    default_downloads = os.path.join(home, "Downloads")
+
+    watch_later_dir = sys.argv[1] if len(sys.argv) > 1 else default_watch_later
+    downloads_dir = sys.argv[2] if len(sys.argv) > 2 else default_downloads
+
+    if not os.path.isdir(watch_later_dir):
+        print(f"watch_later dir not found: {watch_later_dir}", file=sys.stderr)
+        sys.exit(1)
+    if not os.path.isdir(downloads_dir):
+        print(f"downloads dir not found: {downloads_dir}", file=sys.stderr)
+        sys.exit(1)
+
+    hash_set = set()
+    for name in os.listdir(watch_later_dir):
+        if len(name) == 32 and all(c in "0123456789AaBbCcDdEeFf" for c in name):
+            hash_set.add(name)
+
+    download_files: list[str] = []
+    for root, _dirs, files in os.walk(downloads_dir):
+        for f in files:
+            download_files.append(os.path.join(root, f))
+
+    matched_downloads: list[str] = []
+    matched_hashes: set[str] = set()
+    for path in download_files:
+        norm = normalized_path(path)
+        if not norm:
+            continue
+        upper, lower = md5_hex(norm)
+        if upper in hash_set or lower in hash_set:
+            matched_downloads.append(path)
+            matched_hashes.add(upper if upper in hash_set else lower)
+
+    print(f"watch_later entries: {len(hash_set)}")
+    print(f"files under {downloads_dir}: {len(download_files)}")
+    print(f"Download files with IINA watch state: {len(matched_downloads)}")
+    print(f"watch_later hashes that matched a Download file: {len(matched_hashes)}")
+    if matched_downloads:
+        print("\nSample matches (first 10):")
+        for p in matched_downloads[:10]:
+            print(f"  {p}")
+
+
+if __name__ == "__main__":
+    main()
