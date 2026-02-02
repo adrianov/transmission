@@ -32,8 +32,9 @@
             NSRect barRect = self.fTorrentProgressBarView.frame;
             if (barRect.size.width > 0 && barRect.size.height > 0)
             {
-                // Create cache key based on torrent state that affects progress bar appearance
-                NSString* cacheKey = [NSString stringWithFormat:@"%@_%f_%d_%d_%f_%f_%d_%f_%d",
+                // Cache key must include piecesBarPercent so toggling View → Pieces Bar invalidates cache (regression fix).
+                CGFloat const piecesPercent = self.fTorrentTableView.piecesBarPercent;
+                NSString* cacheKey = [NSString stringWithFormat:@"%@_%f_%d_%d_%f_%f_%d_%f_%d_%f",
                                                                 torrent.hashString,
                                                                 torrent.progress,
                                                                 torrent.active,
@@ -42,7 +43,8 @@
                                                                 torrent.availableDesired,
                                                                 torrent.seeding,
                                                                 torrent.progressStopRatio,
-                                                                torrent.allDownloaded];
+                                                                torrent.allDownloaded,
+                                                                piecesPercent];
 
                 // Check if we need to regenerate the progress bar image
                 if (!self.fCachedProgressBarImage || ![self.fProgressBarCacheKey isEqualToString:cacheKey] ||
