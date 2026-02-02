@@ -87,6 +87,9 @@ NS_ASSUME_NONNULL_BEGIN
  */
 @property(nonatomic, readonly, copy, nullable) NSArray<NSNumber*>* episodeNumbers;
 
+/// File URL from path safe for opening/revealing (percent-encodes ';' etc. so system/open apps do not misinterpret).
+- (NSURL*)fileURLForOpening;
+
 @end
 
 __attribute__((annotate("returns_localized_nsstring"))) static inline NSString* LocalizationNotNeeded(NSString* s)

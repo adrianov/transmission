@@ -1072,7 +1072,7 @@ extern char const kPlayButtonFolderKey = '\0';
     NSString* location = torrent.dataLocation;
     if (!location)
         return;
-    NSURL* file = [NSURL fileURLWithPath:location];
+    NSURL* file = [location fileURLForOpening];
     if (torrent.folder)
         [NSWorkspace.sharedWorkspace openURL:file];
     else
@@ -1277,7 +1277,7 @@ static void setPlayButtonFolderCache(NSButton* sender, id value)
     [self updateVisiblePlayButtons];
 
     NSString* type = item[@"type"];
-    NSURL* fileURL = [NSURL fileURLWithPath:path];
+    NSURL* fileURL = [path fileURLForOpening];
 
     if ([type isEqualToString:@"document-books"])
     {
@@ -1323,15 +1323,8 @@ static void setPlayButtonFolderCache(NSButton* sender, id value)
         // IINA can handle cue+flac albums better than most music players
         NSURL* iinaURL = [NSWorkspace.sharedWorkspace URLForApplicationWithBundleIdentifier:@"com.colliderli.iina"];
 
-        // If this is an album folder, check if it contains a .cue file and use that instead of the folder path
-        NSString* folder = item[@"folder"];
-        NSString* cuePath = [torrent cueFilePathForFolder:folder];
-        if (cuePath)
-        {
-            path = cuePath;
-            fileURL = [NSURL fileURLWithPath:path];
-        }
-
+        // path already set from pathToOpenForPlayableItem (folder vs .cue by count)
+        fileURL = [path fileURLForOpening];
         if (iinaURL)
         {
             NSWorkspaceOpenConfiguration* config = [NSWorkspaceOpenConfiguration configuration];

@@ -159,17 +159,56 @@
     return cuePath;
 }
 
+/// Path to open for a folder: .cue path if .cue count >= audio count, else folder path. Opens directory when 1 .cue and many audio.
+- (NSString*)pathToOpenForFolder:(NSString*)folder
+{
+    if (folder.length == 0)
+        return nil;
+
+    NSIndexSet* fileIndexes = [self fileIndexesForFolder:folder];
+    if (fileIndexes.count == 0)
+        return [self.currentDirectory stringByAppendingPathComponent:folder];
+
+    static NSSet<NSString*>* audioExts;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        audioExts = [NSSet setWithArray:@[ @"flac", @"ape", @"wav", @"wma", @"alac", @"aiff", @"wv" ]];
+    });
+
+    __block NSUInteger cueCount = 0;
+    __block NSUInteger audioCount = 0;
+    __block NSString* firstCuePath = nil;
+    [fileIndexes enumerateIndexesUsingBlock:^(NSUInteger idx, BOOL* stop) {
+        (void)stop;
+        auto const file = tr_torrentFile(self.fHandle, (tr_file_index_t)idx);
+        NSString* fileName = @(file.name);
+        NSString* ext = fileName.pathExtension.lowercaseString;
+        if ([ext isEqualToString:@"cue"])
+        {
+            cueCount++;
+            if (!firstCuePath)
+                firstCuePath = [self.currentDirectory stringByAppendingPathComponent:fileName];
+        }
+        else if ([audioExts containsObject:ext])
+        {
+            audioCount++;
+        }
+    }];
+
+    if (cueCount >= audioCount && firstCuePath)
+        return firstCuePath;
+    return [self.currentDirectory stringByAppendingPathComponent:folder];
+}
+
 - (NSString*)tooltipPathForItemPath:(NSString*)path type:(NSString*)type folder:(NSString*)folder
 {
     NSString* resultPath = path;
 
     if ([type isEqualToString:@"album"] && folder.length > 0)
     {
-        NSString* cuePath = [self cueFilePathForFolder:folder];
-        if (cuePath)
-        {
-            resultPath = cuePath;
-        }
+        NSString* pathToOpen = [self pathToOpenForFolder:folder];
+        if (pathToOpen)
+            resultPath = pathToOpen;
     }
 
     if (resultPath && resultPath.length > 0)

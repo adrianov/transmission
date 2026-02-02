@@ -10,19 +10,17 @@
 #import "Torrent.h"
 #import "TorrentPrivate.h"
 
+/// Tokenize into words: split on whitespace; treat balanced (...) as one token so e.g. "1 (stereo).mp3" → ["1", "(stereo)", ".mp3"].
+static NSArray<NSString*>* wordTokensFromString(NSString* s);
+/// Common suffix length in whole tokens (from end). All arrays must have same count.
+static NSUInteger commonSuffixTokenCount(NSArray<NSArray<NSString*>*>* tokenArrays);
+/// Common prefix length in whole tokens (from start). All arrays must have same count.
+static NSUInteger commonPrefixTokenCount(NSArray<NSArray<NSString*>*>* tokenArrays);
+/// Rejoin tokens with single spaces (tokens may be words or "(...)" groups).
+static NSString* stringFromWordTokens(NSArray<NSString*>* tokens);
+/// Trim trailing whitespace and extra trailing ')' so e.g. "I (2024) " → "I (2024)", "Album (2024))" → "Album (2024)".
+static NSString* trimTrailingParenAndSpace(NSString* s);
 static NSDictionary<NSString*, NSString*>* commonPrefixAndSuffixForStrings(NSArray<NSString*>* strings);
-
-static NSCharacterSet* titleTrimCharacterSet(void)
-{
-    static NSCharacterSet* set;
-    static dispatch_once_t once;
-    dispatch_once(&once, ^{
-        NSMutableCharacterSet* combined = [NSCharacterSet.whitespaceAndNewlineCharacterSet mutableCopy];
-        [combined addCharactersInString:@".-_"];
-        set = [combined copy];
-    });
-    return set;
-}
 
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wobjc-protocol-method-implementation"
@@ -283,96 +281,161 @@ static NSUInteger const kMinPathComponentsForCDParentInTitle = 2;
 #pragma mark - Individual file playables
 
 /// Returns stripped display titles for a group (2+ items). Single title returned as-is. Used by buttons and context menu.
-/// First strips common prefix and suffix on the original titles (e.g. "Michael Jackson - " and ".mp3"). Then strips
-/// leading digits and common prefix only on the remainders (no suffix on second pass), then prepends each title's digits back.
-/// Results are memoized by title set so repeated calls with the same titles are fast.
+/// Word-boundary stripping: tokenize (whitespace-split; balanced "(...)" as one token), remove common leading and
+/// trailing tokens, rejoin. Keeps "(stereo)" intact; gives "I"/"II" for "Disk I"/"Disk II".
 + (NSArray<NSString*>*)displayTitlesByStrippingCommonPrefixSuffix:(NSArray<NSString*>*)titles
 {
     if (titles.count < 2)
         return titles;
-    static NSCache<NSArray*, NSArray<NSString*>*>* cache;
-    static dispatch_once_t cacheOnce;
-    dispatch_once(&cacheOnce, ^{
-        cache = [[NSCache alloc] init];
-        cache.countLimit = 128;
-    });
-    NSArray* key = [titles copy];
-    NSArray<NSString*>* cached = [cache objectForKey:key];
-    if (cached)
-        return cached;
-    NSCharacterSet* trimSet = titleTrimCharacterSet();
-    NSDictionary<NSString*, NSString*>* initialPair = commonPrefixAndSuffixForStrings(titles);
-    NSString* initialPrefix = initialPair[@"prefix"] ?: @"";
-    NSString* initialSuffix = initialPair[@"suffix"] ?: @"";
-    NSMutableArray<NSString*>* working = [NSMutableArray arrayWithCapacity:titles.count];
-    for (NSString* raw in titles)
+    NSMutableArray<NSArray<NSString*>*>* tokenArrays = [NSMutableArray arrayWithCapacity:titles.count];
+    for (id raw in titles)
     {
-        if (![raw isKindOfClass:[NSString class]] || raw.length == 0)
-        {
-            [working addObject:raw ?: @""];
-            continue;
-        }
-        NSString* s = raw;
-        if (initialPrefix.length > 0 && [s hasPrefix:initialPrefix] && s.length > initialPrefix.length)
-            s = [s substringFromIndex:initialPrefix.length];
-        if (initialSuffix.length > 0 && [s hasSuffix:initialSuffix] && s.length > initialSuffix.length)
-            s = [s substringToIndex:s.length - initialSuffix.length];
-        s = [s stringByTrimmingCharactersInSet:trimSet];
-        [working addObject:s.length > 0 ? s : raw];
+        NSString* s = [raw isKindOfClass:[NSString class]] ? raw : nil;
+        NSArray<NSString*>* tokens = (s.length > 0) ? wordTokensFromString(s) : @[];
+        [tokenArrays addObject:tokens];
     }
-    static NSRegularExpression* leadingDigitsRegex;
-    static dispatch_once_t once;
-    dispatch_once(&once, ^{
-        leadingDigitsRegex = [NSRegularExpression regularExpressionWithPattern:@"^\\d+" options:0 error:nil];
-    });
-    NSMutableArray<NSString*>* leadingDigitsList = [NSMutableArray arrayWithCapacity:titles.count];
-    NSMutableArray<NSString*>* restList = [NSMutableArray arrayWithCapacity:titles.count];
-    for (NSString* raw in working)
-    {
-        if (![raw isKindOfClass:[NSString class]] || raw.length == 0)
-        {
-            [leadingDigitsList addObject:@""];
-            [restList addObject:raw ?: @""];
-            continue;
-        }
-        NSTextCheckingResult* match = [leadingDigitsRegex firstMatchInString:raw options:0 range:NSMakeRange(0, raw.length)];
-        if (match)
-        {
-            [leadingDigitsList addObject:[raw substringWithRange:match.range]];
-            [restList addObject:[raw substringFromIndex:NSMaxRange(match.range)]];
-        }
-        else
-        {
-            [leadingDigitsList addObject:@""];
-            [restList addObject:raw];
-        }
-    }
-    NSDictionary<NSString*, NSString*>* pair = commonPrefixAndSuffixForStrings(restList);
-    NSString* commonPrefix = pair[@"prefix"] ?: @"";
+    NSUInteger suffixDrop = commonSuffixTokenCount(tokenArrays);
+    NSUInteger prefixDrop = commonPrefixTokenCount(tokenArrays);
     NSMutableArray<NSString*>* result = [NSMutableArray arrayWithCapacity:titles.count];
     for (NSUInteger i = 0; i < titles.count; i++)
     {
         NSString* raw = titles[i];
-        NSString* leadingDigits = leadingDigitsList[i];
-        NSString* rest = restList[i];
         if (![raw isKindOfClass:[NSString class]] || raw.length == 0)
         {
             [result addObject:raw ?: @""];
             continue;
         }
-        NSString* stripped = rest;
-        if (commonPrefix.length > 0 && [stripped hasPrefix:commonPrefix] && stripped.length > commonPrefix.length)
-            stripped = [stripped substringFromIndex:commonPrefix.length];
-        stripped = [stripped stringByTrimmingCharactersInSet:trimSet];
-        NSString* final;
-        if (leadingDigits.length > 0)
-            final = stripped.length > 0 ? [NSString stringWithFormat:@"%@ %@", leadingDigits, stripped] : leadingDigits;
-        else
-            final = stripped.length > 0 ? stripped : raw;
-        [result addObject:final];
+        NSArray<NSString*>* tokens = tokenArrays[i];
+        NSUInteger n = tokens.count;
+        NSUInteger from = prefixDrop;
+        NSUInteger to = (n > suffixDrop) ? n - suffixDrop : from;
+        if (from >= to)
+        {
+            [result addObject:raw];
+            continue;
+        }
+        NSArray<NSString*>* kept = [tokens subarrayWithRange:NSMakeRange(from, to - from)];
+        NSString* joined = trimTrailingParenAndSpace(stringFromWordTokens(kept));
+        [result addObject:joined.length > 0 ? joined : raw];
     }
-    [cache setObject:result forKey:key];
     return result;
+}
+
+static NSArray<NSString*>* wordTokensFromString(NSString* s)
+{
+    NSUInteger len = s.length;
+    if (len == 0)
+        return @[];
+
+    NSMutableArray<NSString*>* tokens = [NSMutableArray arrayWithCapacity:(len / 3) + 1];
+    unichar* buf = (unichar*)malloc(len * sizeof(unichar));
+    [s getCharacters:buf range:NSMakeRange(0, len)];
+    NSCharacterSet* ws = NSCharacterSet.whitespaceAndNewlineCharacterSet;
+    NSUInteger i = 0;
+    while (i < len)
+    {
+        unichar c = buf[i];
+        if ([ws characterIsMember:c])
+        {
+            i++;
+            continue;
+        }
+        if (c == '(')
+        {
+            NSUInteger start = i;
+            NSUInteger depth = 1;
+            i++;
+            while (i < len && depth > 0)
+            {
+                if (buf[i] == '(')
+                    depth++;
+                else if (buf[i] == ')')
+                    depth--;
+                i++;
+            }
+            [tokens addObject:[s substringWithRange:NSMakeRange(start, i - start)]];
+            continue;
+        }
+        NSUInteger start = i;
+        while (i < len && ![ws characterIsMember:buf[i]] && buf[i] != '(')
+            i++;
+        if (i > start)
+            [tokens addObject:[s substringWithRange:NSMakeRange(start, i - start)]];
+    }
+    free(buf);
+    return [tokens copy];
+}
+
+static NSUInteger commonSuffixTokenCount(NSArray<NSArray<NSString*>*>* tokenArrays)
+{
+    if (tokenArrays.count < 2)
+        return 0;
+    NSUInteger minLen = NSUIntegerMax;
+    for (NSArray<NSString*>* arr in tokenArrays)
+    {
+        NSUInteger n = arr.count;
+        if (n < minLen)
+            minLen = n;
+    }
+    for (NSUInteger k = 0; k < minLen; k++)
+    {
+        NSString* last0 = tokenArrays[0][tokenArrays[0].count - 1 - k];
+        for (NSUInteger i = 1; i < tokenArrays.count; i++)
+        {
+            NSArray<NSString*>* arr = tokenArrays[i];
+            if (![arr[arr.count - 1 - k] isEqualToString:last0])
+                return k;
+        }
+    }
+    return minLen;
+}
+
+static NSUInteger commonPrefixTokenCount(NSArray<NSArray<NSString*>*>* tokenArrays)
+{
+    if (tokenArrays.count < 2)
+        return 0;
+    NSUInteger minLen = NSUIntegerMax;
+    for (NSArray<NSString*>* arr in tokenArrays)
+    {
+        if (arr.count < minLen)
+            minLen = arr.count;
+    }
+    for (NSUInteger k = 0; k < minLen; k++)
+    {
+        NSString* first0 = tokenArrays[0][k];
+        for (NSUInteger i = 1; i < tokenArrays.count; i++)
+        {
+            if (![tokenArrays[i][k] isEqualToString:first0])
+                return k;
+        }
+    }
+    return minLen;
+}
+
+static NSString* stringFromWordTokens(NSArray<NSString*>* tokens)
+{
+    return [tokens count] == 0 ? @"" : [tokens componentsJoinedByString:@" "];
+}
+
+static NSString* trimTrailingParenAndSpace(NSString* s)
+{
+    s = [s stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+    while (s.length > 0 && [s characterAtIndex:s.length - 1] == ')')
+    {
+        NSUInteger open = 0, close = 0;
+        for (NSUInteger j = 0; j < s.length; j++)
+        {
+            unichar c = [s characterAtIndex:j];
+            if (c == '(')
+                open++;
+            else if (c == ')')
+                close++;
+        }
+        if (close <= open)
+            break;
+        s = [s substringToIndex:s.length - 1];
+    }
+    return s;
 }
 
 /// Returns common prefix and suffix for an array of strings (e.g. sibling file paths or folder names).
@@ -795,9 +858,9 @@ static NSDictionary<NSString*, NSString*>* commonPrefixAndSuffixForStrings(NSArr
         NSString* folder = item[@"folder"];
         if (folder.length > 0)
         {
-            NSString* cuePath = [self cueFilePathForFolder:folder];
-            if (cuePath.length > 0)
-                return cuePath;
+            NSString* pathToOpen = [self pathToOpenForFolder:folder];
+            if (pathToOpen.length > 0)
+                return pathToOpen;
         }
     }
     NSString* pathToOpen = [self pathToOpenForPlayableItem:item];

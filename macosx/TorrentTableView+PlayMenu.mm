@@ -184,7 +184,8 @@
                     for (NSDictionary* track in tracks)
                         [rawBases addObject:[self menuTitleForPlayableItem:track torrent:torrent includeProgress:NO]];
                     NSArray<NSString*>* displayBases = (rawBases.count >= 2) ?
-                        [Torrent displayTitlesByStrippingCommonPrefixSuffix:rawBases] : rawBases;
+                        [Torrent displayTitlesByStrippingCommonPrefixSuffix:rawBases] :
+                        rawBases;
                     NSUInteger trackIdx = 0;
                     for (NSDictionary* track in tracks)
                     {
@@ -192,7 +193,8 @@
                         CGFloat progress = [track[@"progress"] doubleValue];
                         int pct = (int)floor(progress * 100);
                         NSString* trackTitle = (progress > 0 && progress < 1.0 && pct < 100) ?
-                            [NSString stringWithFormat:@"%@ (%d%%)", base, pct] : base;
+                            [NSString stringWithFormat:@"%@ (%d%%)", base, pct] :
+                            base;
                         NSMenuItem* trackItem = [[NSMenuItem alloc] initWithTitle:trackTitle action:@selector(playContextItem:)
                                                                     keyEquivalent:@""];
                         trackItem.target = self;

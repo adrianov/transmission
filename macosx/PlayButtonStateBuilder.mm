@@ -38,8 +38,8 @@ static NSDictionary* stateAndLayoutFromSnapshotImpl(NSArray<NSDictionary*>* snap
         for (NSUInteger i = 0; i < state.count; i++)
         {
             NSMutableDictionary* e = state[i];
-            if ([e[@"visible"] boolValue] && ![e[@"type"] hasPrefix:@"document"] &&
-                [e[@"progress"] doubleValue] < 1.0 && [e[@"progressPercent"] intValue] < 100)
+            if ([e[@"visible"] boolValue] && ![e[@"type"] hasPrefix:@"document"] && [e[@"progress"] doubleValue] < 1.0 &&
+                [e[@"progressPercent"] intValue] < 100)
                 e[@"title"] = [NSString stringWithFormat:@"%@ (%d%%)", e[@"title"], [e[@"progressPercent"] intValue]];
         }
     }
@@ -250,8 +250,8 @@ static NSDictionary* stateAndLayoutFromSnapshotImpl(NSArray<NSDictionary*>* snap
                 state[i][@"title"] = stripped[i];
             for (NSMutableDictionary* e in state)
             {
-                if ([e[@"visible"] boolValue] && ![e[@"type"] hasPrefix:@"document"] &&
-                    [e[@"progress"] doubleValue] < 1.0 && [e[@"progressPercent"] intValue] < 100)
+                if ([e[@"visible"] boolValue] && ![e[@"type"] hasPrefix:@"document"] && [e[@"progress"] doubleValue] < 1.0 &&
+                    [e[@"progressPercent"] intValue] < 100)
                     e[@"title"] = [NSString stringWithFormat:@"%@ (%d%%)", e[@"title"], [e[@"progressPercent"] intValue]];
             }
         }
@@ -310,8 +310,8 @@ static NSDictionary* stateAndLayoutFromSnapshotImpl(NSArray<NSDictionary*>* snap
             NSMutableDictionary* e = state[i];
             NSString* displayTitle = stripped[i];
             e[@"title"] = displayTitle;
-            if ([e[@"visible"] boolValue] && ![e[@"type"] hasPrefix:@"document"] &&
-                [e[@"progress"] doubleValue] < 1.0 && [e[@"progressPercent"] intValue] < 100)
+            if ([e[@"visible"] boolValue] && ![e[@"type"] hasPrefix:@"document"] && [e[@"progress"] doubleValue] < 1.0 &&
+                [e[@"progressPercent"] intValue] < 100)
                 e[@"title"] = [NSString stringWithFormat:@"%@ (%d%%)", displayTitle, [e[@"progressPercent"] intValue]];
         }
     }

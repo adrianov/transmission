@@ -72,7 +72,7 @@ static NSDateComponentsFormatter* etaFormatter()
                 if ([self.fDefaults boolForKey:@"DisplayStatusProgressSelected"])
                 {
                     downloadString = [NSString stringWithFormat:NSLocalizedString(@"%@ selected", "Torrent -> progress string"),
-                                                            [NSString stringForFileSize:self.haveTotal]];
+                                                                [NSString stringForFileSize:self.haveTotal]];
                 }
                 else
                 {
@@ -87,8 +87,8 @@ static NSDateComponentsFormatter* etaFormatter()
             }
 
             NSString* uploadString = [NSString stringWithFormat:NSLocalizedString(@"uploaded %@ (Ratio: %@)", "Torrent -> progress string"),
-                                                            [NSString stringForFileSize:self.uploadedTotal],
-                                                            [NSString stringForRatio:self.ratio]];
+                                                                [NSString stringForFileSize:self.uploadedTotal],
+                                                                [NSString stringForRatio:self.ratio]];
 
             string = [downloadString stringByAppendingFormat:@", %@", uploadString];
         }
@@ -230,8 +230,8 @@ static NSDateComponentsFormatter* etaFormatter()
 
         case TR_STATUS_CHECK:
             string = [NSString stringWithFormat:@"%@ (%@)",
-                                            NSLocalizedString(@"Checking existing data", "Torrent -> status string"),
-                                            [NSString percentString:self.checkingProgress longDecimals:YES]];
+                                                NSLocalizedString(@"Checking existing data", "Torrent -> status string"),
+                                                [NSString percentString:self.checkingProgress longDecimals:YES]];
             break;
 
         case TR_STATUS_DOWNLOAD:
@@ -246,7 +246,7 @@ static NSDateComponentsFormatter* etaFormatter()
                 else
                 {
                     string = [NSString stringWithFormat:NSLocalizedString(@"Downloading from %lu of 1 peer", "Torrent -> status string"),
-                                                    self.peersSendingToUs];
+                                                        self.peersSendingToUs];
                 }
             }
 

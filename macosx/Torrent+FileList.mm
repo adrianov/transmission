@@ -40,11 +40,7 @@
                 tempNode = [[FileListNode alloc] initWithFolderName:pathComponents[0] path:@"" torrent:self];
             }
 
-            [self insertPathForComponents:pathComponents
-                       withComponentIndex:1
-                                forParent:tempNode
-                                 fileSize:file.length
-                                    index:i
+            [self insertPathForComponents:pathComponents withComponentIndex:1 forParent:tempNode fileSize:file.length index:i
                                  flatList:flatFileList];
         }
 
@@ -108,11 +104,7 @@
     {
         [node insertIndex:index withSize:size];
 
-        [self insertPathForComponents:components
-                   withComponentIndex:componentIndex + 1
-                            forParent:node
-                             fileSize:size
-                                index:index
+        [self insertPathForComponents:components withComponentIndex:componentIndex + 1 forParent:node fileSize:size index:index
                              flatList:flatFileList];
     }
 }

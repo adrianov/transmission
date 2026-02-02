@@ -1231,6 +1231,18 @@
     return nil; // No season/episode pattern found
 }
 
+- (NSURL*)fileURLForOpening
+{
+    if (self.length == 0)
+        return [NSURL fileURLWithPath:@"/"];
+    NSMutableCharacterSet* allowed = [NSCharacterSet.URLPathAllowedCharacterSet mutableCopy];
+    [allowed removeCharactersInString:@";"];
+    NSString* encoded = [self stringByAddingPercentEncodingWithAllowedCharacters:allowed];
+    if (!encoded)
+        return [NSURL fileURLWithPath:self];
+    return [NSURL URLWithString:[@"file://" stringByAppendingString:encoded]];
+}
+
 @end
 
 @implementation NSString (PrivateHumanizedTitle)
