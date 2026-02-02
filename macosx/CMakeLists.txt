@@ -180,12 +180,18 @@ target_sources(${TR_NAME}-mac
         Toolbar.mm
         Torrent.h
         Torrent.mm
+        Torrent+Books.mm
+        Torrent+Category.mm
+        Torrent+CueTooltip.mm
+        Torrent+DiskSpace.mm
+        Torrent+FileList.mm
+        Torrent+Icon.mm
         Torrent+MediaType.mm
+        Torrent+OpenCount.mm
         Torrent+Playable.mm
         Torrent+Progress.mm
-        Torrent+StatusStrings.mm
-        Torrent+CueTooltip.mm
         Torrent+Search.mm
+        Torrent+StatusStrings.mm
         TorrentCell.h
         TorrentCell.mm
         PlayButton.h

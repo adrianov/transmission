@@ -6,6 +6,7 @@
 
 #import "PlayButtonStateBuilder.h"
 #import "Torrent.h"
+#import "TorrentPrivate.h"
 
 static NSDictionary* stateAndLayoutFromSnapshotImpl(NSArray<NSDictionary*>* snapshot)
 {
@@ -26,6 +27,21 @@ static NSDictionary* stateAndLayoutFromSnapshotImpl(NSArray<NSDictionary*>* snap
         if (visible && ![type hasPrefix:@"document"] && progress < 1.0 && progressPct < 100)
             entry[@"title"] = [NSString stringWithFormat:@"%@ (%d%%)", entry[@"baseTitle"], progressPct];
         [state addObject:entry];
+    }
+    // Strip common prefix/suffix for directory (folder) and episode (file) buttons; context menu uses same state titles.
+    if (state.count >= 2)
+    {
+        NSArray<NSString*>* titles = [state valueForKey:@"baseTitle"];
+        NSArray<NSString*>* stripped = [Torrent displayTitlesByStrippingCommonPrefixSuffix:titles];
+        for (NSUInteger i = 0; i < state.count; i++)
+            state[i][@"title"] = stripped[i];
+        for (NSUInteger i = 0; i < state.count; i++)
+        {
+            NSMutableDictionary* e = state[i];
+            if ([e[@"visible"] boolValue] && ![e[@"type"] hasPrefix:@"document"] &&
+                [e[@"progress"] doubleValue] < 1.0 && [e[@"progressPercent"] intValue] < 100)
+                e[@"title"] = [NSString stringWithFormat:@"%@ (%d%%)", e[@"title"], [e[@"progressPercent"] intValue]];
+        }
     }
     if (state.count == 0)
         return @{@"state" : state, @"layout" : @[]};
@@ -226,6 +242,19 @@ static NSDictionary* stateAndLayoutFromSnapshotImpl(NSArray<NSDictionary*>* snap
             }
             [state addObject:entry];
         }
+        if (state.count >= 2)
+        {
+            NSArray<NSString*>* titles = [state valueForKey:@"baseTitle"];
+            NSArray<NSString*>* stripped = [Torrent displayTitlesByStrippingCommonPrefixSuffix:titles];
+            for (NSUInteger i = 0; i < state.count; i++)
+                state[i][@"title"] = stripped[i];
+            for (NSMutableDictionary* e in state)
+            {
+                if ([e[@"visible"] boolValue] && ![e[@"type"] hasPrefix:@"document"] &&
+                    [e[@"progress"] doubleValue] < 1.0 && [e[@"progressPercent"] intValue] < 100)
+                    e[@"title"] = [NSString stringWithFormat:@"%@ (%d%%)", e[@"title"], [e[@"progressPercent"] intValue]];
+            }
+        }
         torrent.cachedPlayButtonState = state;
     }
 
@@ -270,6 +299,20 @@ static NSDictionary* stateAndLayoutFromSnapshotImpl(NSArray<NSDictionary*>* snap
             if (visible && ![type hasPrefix:@"document"] && progress < 1.0 && progressPct < 100)
                 title = [NSString stringWithFormat:@"%@ (%d%%)", baseTitle, progressPct];
             entry[@"title"] = title;
+        }
+    }
+    if (state.count >= 2)
+    {
+        NSArray<NSString*>* titles = [state valueForKey:@"baseTitle"];
+        NSArray<NSString*>* stripped = [Torrent displayTitlesByStrippingCommonPrefixSuffix:titles];
+        for (NSUInteger i = 0; i < state.count; i++)
+        {
+            NSMutableDictionary* e = state[i];
+            NSString* displayTitle = stripped[i];
+            e[@"title"] = displayTitle;
+            if ([e[@"visible"] boolValue] && ![e[@"type"] hasPrefix:@"document"] &&
+                [e[@"progress"] doubleValue] < 1.0 && [e[@"progressPercent"] intValue] < 100)
+                e[@"title"] = [NSString stringWithFormat:@"%@ (%d%%)", displayTitle, [e[@"progressPercent"] intValue]];
         }
     }
 

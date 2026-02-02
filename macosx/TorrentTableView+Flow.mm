@@ -222,19 +222,8 @@ static NSDictionary* computeStateAndLayoutFromSnapshot(NSArray<NSDictionary*>* s
     PlayButton* playButton = [self dequeuePlayButton];
     NSString* type = item[@"type"] ?: @"file";
     NSString* path = item[@"path"];
-    NSString* baseTitle = [torrent displayNameForPlayableItem:item];
     CGFloat progress = [item[@"progress"] doubleValue];
-
-    NSString* title = item[@"title"];
-    if (!title)
-    {
-        if ([type hasPrefix:@"document"])
-            title = baseTitle;
-        else if (progress > 0 && progress < 1.0)
-            title = [NSString stringWithFormat:@"%@ (%d%%)", baseTitle, (int)floor(progress * 100)];
-        else
-            title = baseTitle;
-    }
+    NSString* title = [self menuTitleForPlayableItem:item torrent:torrent includeProgress:YES];
     NSString* openLabel = [torrent openCountLabelForPlayableItem:item];
     playButton.title = title;
     playButton.identifier = path;

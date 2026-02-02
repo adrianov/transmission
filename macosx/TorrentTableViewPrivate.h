@@ -58,6 +58,7 @@
 
 @interface TorrentTableView (PlayMenu)
 - (NSImage*)iconForPlayableFileItem:(NSDictionary*)fileItem torrent:(Torrent*)torrent;
+- (NSString*)menuTitleForPlayableItem:(NSDictionary*)item torrent:(Torrent*)torrent includeProgress:(BOOL)includeProgress;
 - (NSMenu*)playMenuForTorrent:(Torrent*)torrent;
 - (void)updatePlayMenuForItem:(id)item;
 @end

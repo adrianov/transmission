@@ -7,6 +7,7 @@
 #import "CocoaCompatibility.h"
 #import "NSStringAdditions.h"
 #import "Torrent.h"
+#import "TorrentPrivate.h"
 #import "TorrentTableView.h"
 #import "TorrentTableViewPrivate.h"
 #include <libtransmission/transmission.h>
@@ -109,16 +110,19 @@
     return tracks.count > 0 ? tracks : nil;
 }
 
+/// Single source for playable item display title. Prefers state title (stripped when 2+ items); otherwise displayNameForPlayableItem. Used by content buttons and context menu.
 - (NSString*)menuTitleForPlayableItem:(NSDictionary*)item torrent:(Torrent*)torrent includeProgress:(BOOL)includeProgress
 {
-    NSString* baseName = [torrent displayNameForPlayableItem:item];
-    if (!includeProgress || baseName.length == 0)
-        return baseName;
+    NSString* base = (item[@"title"] && [item[@"title"] length] > 0) ? item[@"title"] : [torrent displayNameForPlayableItem:item];
+    if (!includeProgress || base.length == 0)
+        return base;
+    if (item[@"title"] && [item[@"title"] length] > 0)
+        return base; // state title already includes progress when needed
     CGFloat progress = [item[@"progress"] doubleValue];
     if (progress <= 0 || progress >= 1.0)
-        return baseName;
+        return base;
     int pct = (int)floor(progress * 100);
-    return pct < 100 ? [NSString stringWithFormat:@"%@ (%d%%)", baseName, pct] : baseName;
+    return pct < 100 ? [NSString stringWithFormat:@"%@ (%d%%)", base, pct] : base;
 }
 
 - (NSMenu*)playMenuForTorrent:(Torrent*)torrent
@@ -176,9 +180,19 @@
                     NSMenu* albumMenu = [[NSMenu alloc] initWithTitle:menuTitle];
                     albumMenu.delegate = self;
                     albumItem.submenu = albumMenu;
+                    NSMutableArray<NSString*>* rawBases = [NSMutableArray arrayWithCapacity:tracks.count];
+                    for (NSDictionary* track in tracks)
+                        [rawBases addObject:[self menuTitleForPlayableItem:track torrent:torrent includeProgress:NO]];
+                    NSArray<NSString*>* displayBases = (rawBases.count >= 2) ?
+                        [Torrent displayTitlesByStrippingCommonPrefixSuffix:rawBases] : rawBases;
+                    NSUInteger trackIdx = 0;
                     for (NSDictionary* track in tracks)
                     {
-                        NSString* trackTitle = [self menuTitleForPlayableItem:track torrent:torrent includeProgress:YES];
+                        NSString* base = displayBases[trackIdx++];
+                        CGFloat progress = [track[@"progress"] doubleValue];
+                        int pct = (int)floor(progress * 100);
+                        NSString* trackTitle = (progress > 0 && progress < 1.0 && pct < 100) ?
+                            [NSString stringWithFormat:@"%@ (%d%%)", base, pct] : base;
                         NSMenuItem* trackItem = [[NSMenuItem alloc] initWithTitle:trackTitle action:@selector(playContextItem:)
                                                                     keyEquivalent:@""];
                         trackItem.target = self;

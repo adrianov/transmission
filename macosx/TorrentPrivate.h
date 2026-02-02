@@ -6,15 +6,10 @@
 
 @class FileListNode;
 
-// Shared media extension sets and adult heuristics (used by Torrent+Playable and Torrent+MediaDetection).
-void initMediaExtensionSets(void);
 extern NSSet<NSString*>* sVideoExtensions;
 extern NSSet<NSString*>* sAudioExtensions;
 extern NSSet<NSString*>* sBookExtensions;
 extern NSSet<NSString*>* sSoftwareExtensions;
-BOOL containsAdultKeywords(NSString* text);
-BOOL hasAdultTracker(NSArray<NSString*>* trackerURLs);
-BOOL hasAdultSource(NSArray<NSString*>* trackerURLs, NSString* comment);
 
 /// Media type for folder torrents (used internally for playable and icon subtitle).
 typedef NS_ENUM(NSInteger, TorrentMediaType) {
@@ -88,4 +83,25 @@ typedef NS_ENUM(NSInteger, TorrentMediaType) {
 - (void)buildFolderToFilesCache:(NSSet<NSString*>*)folders;
 - (void)detectMediaType;
 
+/// Call once before using sVideoExtensions etc. (Torrent+MediaType, playable, media category).
++ (void)ensureMediaExtensionSets;
+/// Stripped display titles for a group (2+ items). Single title returned as-is.
++ (NSArray<NSString*>*)displayTitlesByStrippingCommonPrefixSuffix:(NSArray<NSString*>*)titles;
+
+@end
+
+@interface Torrent (Books)
+- (NSString*)preferredBookPathOutExt:(NSString**)outExt;
+- (NSImage*)iconForBookAtPath:(NSString*)path extension:(NSString*)ext isComplete:(BOOL)complete;
+@end
+
+@interface Torrent (FileList)
+- (void)createFileList;
+- (void)insertPathForComponents:(NSArray<NSString*>*)components
+             withComponentIndex:(NSUInteger)componentIndex
+                      forParent:(FileListNode*)parent
+                       fileSize:(uint64_t)size
+                          index:(NSInteger)index
+                       flatList:(NSMutableArray<FileListNode*>*)flatFileList;
+- (void)sortFileList:(NSMutableArray<FileListNode*>*)fileNodes;
 @end

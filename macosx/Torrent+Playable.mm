@@ -254,7 +254,6 @@ static NSUInteger const kMinPathComponentsForCDParentInTitle = 2;
             }];
         }
 
-        applyCommonPrefixSuffixStripToEntries(entries);
         self.fPlayableFiles = entries;
         return self.fPlayableFiles;
     }
@@ -283,38 +282,97 @@ static NSUInteger const kMinPathComponentsForCDParentInTitle = 2;
 
 #pragma mark - Individual file playables
 
-/// Removes common prefix/suffix from @"name" and @"baseTitle" of entries when all share the same prefix/suffix.
-/// Single place for button-title stripping; change here to adjust behavior for all playable entries.
-static void applyCommonPrefixSuffixStripToEntries(NSMutableArray<NSDictionary*>* entries)
+/// Returns stripped display titles for a group (2+ items). Single title returned as-is. Used by buttons and context menu.
+/// First strips common prefix and suffix on the original titles (e.g. "Michael Jackson - " and ".mp3"). Then strips
+/// leading digits and common prefix only on the remainders (no suffix on second pass), then prepends each title's digits back.
+/// Results are memoized by title set so repeated calls with the same titles are fast.
++ (NSArray<NSString*>*)displayTitlesByStrippingCommonPrefixSuffix:(NSArray<NSString*>*)titles
 {
-    if (entries.count < 2)
-        return;
-    NSArray<NSString*>* titles = [entries valueForKey:@"name"];
-    NSDictionary<NSString*, NSString*>* pair = commonPrefixAndSuffixForStrings(titles);
-    NSString* commonPrefix = pair[@"prefix"] ?: @"";
-    NSString* commonSuffix = pair[@"suffix"] ?: @"";
-    if (commonPrefix.length == 0 && commonSuffix.length == 0)
-        return;
-    for (NSUInteger i = 0; i < entries.count; i++)
+    if (titles.count < 2)
+        return titles;
+    static NSCache<NSArray*, NSArray<NSString*>*>* cache;
+    static dispatch_once_t cacheOnce;
+    dispatch_once(&cacheOnce, ^{
+        cache = [[NSCache alloc] init];
+        cache.countLimit = 128;
+    });
+    NSArray* key = [titles copy];
+    NSArray<NSString*>* cached = [cache objectForKey:key];
+    if (cached)
+        return cached;
+    NSCharacterSet* trimSet = titleTrimCharacterSet();
+    NSDictionary<NSString*, NSString*>* initialPair = commonPrefixAndSuffixForStrings(titles);
+    NSString* initialPrefix = initialPair[@"prefix"] ?: @"";
+    NSString* initialSuffix = initialPair[@"suffix"] ?: @"";
+    NSMutableArray<NSString*>* working = [NSMutableArray arrayWithCapacity:titles.count];
+    for (NSString* raw in titles)
     {
-        NSDictionary* entry = entries[i];
-        NSString* raw = entry[@"name"];
         if (![raw isKindOfClass:[NSString class]] || raw.length == 0)
-            continue;
-        NSString* stripped = raw;
-        if (commonPrefix.length > 0 && [stripped hasPrefix:commonPrefix] && stripped.length > commonPrefix.length)
-            stripped = [stripped substringFromIndex:commonPrefix.length];
-        if (commonSuffix.length > 0 && [stripped hasSuffix:commonSuffix] && stripped.length > commonSuffix.length)
-            stripped = [stripped substringToIndex:stripped.length - commonSuffix.length];
-        stripped = [stripped stringByTrimmingCharactersInSet:titleTrimCharacterSet()];
-        if (stripped.length > 0)
         {
-            NSMutableDictionary* m = [entry mutableCopy];
-            m[@"name"] = stripped;
-            m[@"baseTitle"] = stripped;
-            entries[i] = m;
+            [working addObject:raw ?: @""];
+            continue;
+        }
+        NSString* s = raw;
+        if (initialPrefix.length > 0 && [s hasPrefix:initialPrefix] && s.length > initialPrefix.length)
+            s = [s substringFromIndex:initialPrefix.length];
+        if (initialSuffix.length > 0 && [s hasSuffix:initialSuffix] && s.length > initialSuffix.length)
+            s = [s substringToIndex:s.length - initialSuffix.length];
+        s = [s stringByTrimmingCharactersInSet:trimSet];
+        [working addObject:s.length > 0 ? s : raw];
+    }
+    static NSRegularExpression* leadingDigitsRegex;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        leadingDigitsRegex = [NSRegularExpression regularExpressionWithPattern:@"^\\d+" options:0 error:nil];
+    });
+    NSMutableArray<NSString*>* leadingDigitsList = [NSMutableArray arrayWithCapacity:titles.count];
+    NSMutableArray<NSString*>* restList = [NSMutableArray arrayWithCapacity:titles.count];
+    for (NSString* raw in working)
+    {
+        if (![raw isKindOfClass:[NSString class]] || raw.length == 0)
+        {
+            [leadingDigitsList addObject:@""];
+            [restList addObject:raw ?: @""];
+            continue;
+        }
+        NSTextCheckingResult* match = [leadingDigitsRegex firstMatchInString:raw options:0 range:NSMakeRange(0, raw.length)];
+        if (match)
+        {
+            [leadingDigitsList addObject:[raw substringWithRange:match.range]];
+            [restList addObject:[raw substringFromIndex:NSMaxRange(match.range)]];
+        }
+        else
+        {
+            [leadingDigitsList addObject:@""];
+            [restList addObject:raw];
         }
     }
+    NSDictionary<NSString*, NSString*>* pair = commonPrefixAndSuffixForStrings(restList);
+    NSString* commonPrefix = pair[@"prefix"] ?: @"";
+    NSMutableArray<NSString*>* result = [NSMutableArray arrayWithCapacity:titles.count];
+    for (NSUInteger i = 0; i < titles.count; i++)
+    {
+        NSString* raw = titles[i];
+        NSString* leadingDigits = leadingDigitsList[i];
+        NSString* rest = restList[i];
+        if (![raw isKindOfClass:[NSString class]] || raw.length == 0)
+        {
+            [result addObject:raw ?: @""];
+            continue;
+        }
+        NSString* stripped = rest;
+        if (commonPrefix.length > 0 && [stripped hasPrefix:commonPrefix] && stripped.length > commonPrefix.length)
+            stripped = [stripped substringFromIndex:commonPrefix.length];
+        stripped = [stripped stringByTrimmingCharactersInSet:trimSet];
+        NSString* final;
+        if (leadingDigits.length > 0)
+            final = stripped.length > 0 ? [NSString stringWithFormat:@"%@ %@", leadingDigits, stripped] : leadingDigits;
+        else
+            final = stripped.length > 0 ? stripped : raw;
+        [result addObject:final];
+    }
+    [cache setObject:result forKey:key];
+    return result;
 }
 
 /// Returns common prefix and suffix for an array of strings (e.g. sibling file paths or folder names).
@@ -723,7 +781,6 @@ static NSDictionary<NSString*, NSString*>* commonPrefixAndSuffixForStrings(NSArr
         [result addObject:entry];
     }
 
-    applyCommonPrefixSuffixStripToEntries(result);
     return result;
 }
 
