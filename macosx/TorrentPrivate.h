@@ -6,6 +6,16 @@
 
 @class FileListNode;
 
+// Shared media extension sets and adult heuristics (used by Torrent+Playable and Torrent+MediaDetection).
+void initMediaExtensionSets(void);
+extern NSSet<NSString*>* sVideoExtensions;
+extern NSSet<NSString*>* sAudioExtensions;
+extern NSSet<NSString*>* sBookExtensions;
+extern NSSet<NSString*>* sSoftwareExtensions;
+BOOL containsAdultKeywords(NSString* text);
+BOOL hasAdultTracker(NSArray<NSString*>* trackerURLs);
+BOOL hasAdultSource(NSArray<NSString*>* trackerURLs, NSString* comment);
+
 /// Media type for folder torrents (used internally for playable and icon subtitle).
 typedef NS_ENUM(NSInteger, TorrentMediaType) {
     TorrentMediaTypeNone = 0,
@@ -74,5 +84,8 @@ typedef NS_ENUM(NSInteger, TorrentMediaType) {
 
 - (uint64_t)totalTorrentDiskUsage;
 - (uint64_t)totalTorrentDiskNeeded;
+
+- (void)buildFolderToFilesCache:(NSSet<NSString*>*)folders;
+- (void)detectMediaType;
 
 @end

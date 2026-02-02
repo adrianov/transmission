@@ -180,6 +180,12 @@ target_sources(${TR_NAME}-mac
         Toolbar.mm
         Torrent.h
         Torrent.mm
+        Torrent+MediaType.mm
+        Torrent+Playable.mm
+        Torrent+Progress.mm
+        Torrent+StatusStrings.mm
+        Torrent+CueTooltip.mm
+        Torrent+Search.mm
         TorrentCell.h
         TorrentCell.mm
         PlayButton.h

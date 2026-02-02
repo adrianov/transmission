@@ -272,7 +272,7 @@ Filenames are converted to readable episode names:
 The transformation is implemented in:
 
 - **macOS:** `NSStringAdditions.mm` - `humanReadableTitle`, `humanReadableFileName`, and `humanReadableEpisodeName` properties on `NSString`
-- **macOS:** `Torrent.mm` - `playableFiles` property for media file detection
+- **macOS:** `Torrent+Playable.mm` - `playableFiles`, folder-based and file-based playable names (including CD/Disc humanized titles via `humanizedTitleForFolderPlayableWithFolder:…` and `kMinPathComponentsForCDParentInTitle`). When a transfer has two or more playable entries, button titles strip a common prefix/suffix shared by all (e.g. "Album - CD1" → "CD1"; file-based entries likewise).
 - **macOS:** `TorrentTableView.mm` - Play button UI and dynamic row height
 - **Web UI:** `formatter.js` - `Formatter.humanTitle()` (torrent list) and `Formatter.humanFileName()` (file list)
 
