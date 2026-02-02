@@ -129,10 +129,12 @@ target_sources(${TR_NAME}
         timer-ev.cc
         timer-ev.h
         timer.h
+        torrent-announce.cc
         torrent-ctor.cc
         torrent-ctor.h
         torrent-files.cc
         torrent-files.h
+        torrent-location.cc
         torrent-magnet.cc
         torrent-magnet.h
         torrent-metainfo.cc
@@ -140,10 +142,16 @@ target_sources(${TR_NAME}
         torrent-error.cc
         torrent-piece-priority.cc
         torrent-consecutive-progress.cc
+        torrent-helpers.h
+        torrent-lifecycle.cc
         torrent-queue.cc
-        torrent-resume.cc
-        torrent-verify-mediator.cc
         torrent-queue.h
+        torrent-resume.cc
+        torrent-rename.cc
+        torrent-scripts.cc
+        torrent-scripts.h
+        torrent-stats.cc
+        torrent-verify-mediator.cc
         torrent.cc
         torrent.h
         torrents.cc
