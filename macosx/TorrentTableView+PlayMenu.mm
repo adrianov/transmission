@@ -180,7 +180,7 @@
                     {
                         NSString* trackTitle = [self menuTitleForPlayableItem:track torrent:torrent includeProgress:YES];
                         NSMenuItem* trackItem = [[NSMenuItem alloc] initWithTitle:trackTitle action:@selector(playContextItem:)
-                                                                  keyEquivalent:@""];
+                                                                    keyEquivalent:@""];
                         trackItem.target = self;
                         trackItem.representedObject = @{ @"torrent" : torrent, @"item" : track };
                         trackItem.image = [self iconForPlayableFileItem:track torrent:nil];

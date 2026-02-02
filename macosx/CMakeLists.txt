@@ -65,6 +65,8 @@ target_sources(${TR_NAME}-mac
         ColorTextField.mm
         Controller.h
         Controller.mm
+        Controller+Transfer.mm
+        ControllerPrivate.h
         CreatorWindowController.h
         CreatorWindowController.mm
         DefaultAppHelper.h

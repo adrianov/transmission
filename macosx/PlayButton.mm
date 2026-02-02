@@ -56,10 +56,8 @@
                          [NSColor colorWithCalibratedRed:0.16 green:0.44 blue:0.16 alpha:0.6];
     // Watched (played): theme-adaptive. Dark = dark gray; light = very light gray so buttons read clearly on white.
     if (NSApp.darkMode)
-        return hovered ? [NSColor colorWithCalibratedWhite:0.15 alpha:0.6] :
-                         [NSColor colorWithCalibratedWhite:0.1 alpha:0.5];
-    return hovered ? [NSColor colorWithCalibratedWhite:0.88 alpha:0.9] :
-                     [NSColor colorWithCalibratedWhite:0.82 alpha:0.85];
+        return hovered ? [NSColor colorWithCalibratedWhite:0.15 alpha:0.6] : [NSColor colorWithCalibratedWhite:0.1 alpha:0.5];
+    return hovered ? [NSColor colorWithCalibratedWhite:0.88 alpha:0.9] : [NSColor colorWithCalibratedWhite:0.82 alpha:0.85];
 }
 
 + (NSColor*)titleColorUnwatched:(BOOL)unwatched

@@ -615,8 +615,8 @@ extern char const kPlayButtonFolderKey = '\0';
     TorrentCell* cell = (TorrentCell*)cellView;
     [self applyDynamicContentToTorrentCell:cell torrent:torrent row:row];
     [self resetControlButtonForTorrentCell:cell];
-    if (cell.fPlayButtonsView)
-        [self updatePlayButtonProgressForCell:cell torrent:torrent];
+    [self refreshPlayButtonStateForCell:cell torrent:torrent];
+    [cell setNeedsDisplay:YES];
 }
 
 - (NSString*)outlineView:(NSOutlineView*)outlineView typeSelectStringForTableColumn:(NSTableColumn*)tableColumn item:(id)item

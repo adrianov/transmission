@@ -33,8 +33,7 @@ TEST_F(IINAWatchHelperTest, watchLaterBasenameFullPathProducesUppercaseMD5Hex)
     EXPECT_TRUE([result isEqualToString:@"2A9F23BA8B90EB3523245E86AD266928"])
         << "MD5(UTF-8 full path) must match IINA watch_later lookup; got " << result.UTF8String;
     for (NSUInteger i = 0; i < result.length; i++)
-        EXPECT_TRUE(
-            [@"0123456789ABCDEF" rangeOfString:[result substringWithRange:NSMakeRange(i, 1)]].location != NSNotFound)
+        EXPECT_TRUE([@"0123456789ABCDEF" rangeOfString:[result substringWithRange:NSMakeRange(i, 1)]].location != NSNotFound)
             << "must be uppercase hex";
 }
 
@@ -67,8 +66,7 @@ TEST_F(IINAWatchHelperTest, watchLaterBasenameStandardizedPath)
 {
     NSString* withDot = @"/tmp/./video.mkv";
     NSString* result = [IINAWatchHelper watchLaterBasenameForPath:withDot resolveSymlinks:NO];
-    EXPECT_TRUE([result isEqualToString:@"2A9F23BA8B90EB3523245E86AD266928"])
-        << "Standardized path must produce same MD5 as canonical path";
+    EXPECT_TRUE([result isEqualToString:@"2A9F23BA8B90EB3523245E86AD266928"]) << "Standardized path must produce same MD5 as canonical path";
 }
 
 // IINA watch_later uses MD5(full path) as filename (uppercase hex). Verify with real path from user check:

@@ -48,6 +48,7 @@
 @interface TorrentTableView (Flow)
 - (BOOL)cellNeedsContentButtonsConfigForCell:(TorrentCell*)cell torrent:(Torrent*)torrent;
 - (void)configurePlayButtonsForCell:(TorrentCell*)cell torrent:(Torrent*)torrent;
+- (void)refreshPlayButtonStateForCell:(TorrentCell*)cell torrent:(Torrent*)torrent;
 - (void)scheduleConfigurePlayButtonsForCell:(TorrentCell*)cell torrent:(Torrent*)torrent;
 - (void)recycleSubviewsFromFlowView:(FlowLayoutView*)flowView;
 - (void)updatePlayButtonProgressForCell:(TorrentCell*)cell torrent:(Torrent*)torrent;

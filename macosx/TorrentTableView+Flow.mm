@@ -506,6 +506,14 @@ static NSDictionary* computeStateAndLayoutFromSnapshot(NSArray<NSDictionary*>* s
     }
 }
 
+- (void)refreshPlayButtonStateForCell:(TorrentCell*)cell torrent:(Torrent*)torrent
+{
+    if (cell.fPlayButtonsView)
+        [self updatePlayButtonProgressForCell:cell torrent:torrent];
+    else if ([self showContentButtonsPref] && torrent.playableFiles.count > 0)
+        [self scheduleConfigurePlayButtonsForCell:cell torrent:torrent];
+}
+
 - (void)updatePlayButtonProgressForCell:(TorrentCell*)cell torrent:(Torrent*)torrent
 {
     [self updatePlayButtonProgressForCell:cell torrent:torrent forceLayout:NO];
@@ -528,6 +536,26 @@ static NSDictionary* computeStateAndLayoutFromSnapshot(NSArray<NSDictionary*>* s
             torrent.cachedPlayButtonsHeight = 0;
             [self queueHeightUpdateForRow:[self rowForItem:torrent]];
         }
+        return;
+    }
+    BOOL anyVisible = NO;
+    for (NSDictionary* e in state)
+    {
+        if ([e[@"visible"] boolValue])
+        {
+            anyVisible = YES;
+            break;
+        }
+    }
+    NSUInteger playButtonCount = 0;
+    for (NSView* v in [flowView arrangedSubviews])
+    {
+        if ([v isKindOfClass:[PlayButton class]])
+            playButtonCount++;
+    }
+    if (anyVisible && playButtonCount == 0)
+    {
+        [self scheduleConfigurePlayButtonsForCell:cell torrent:torrent];
         return;
     }
     NSInteger row = [self rowForItem:torrent];
@@ -607,7 +635,8 @@ static NSDictionary* computeStateAndLayoutFromSnapshot(NSArray<NSDictionary*>* s
                     NSString* currentTitle = button.title ?: @"";
                     NSMutableAttributedString* attr = [[NSMutableAttributedString alloc] initWithString:currentTitle];
                     [attr addAttribute:NSForegroundColorAttributeName value:titleColor range:NSMakeRange(0, currentTitle.length)];
-                    [attr addAttribute:NSFontAttributeName value:[NSFont systemFontOfSize:11] range:NSMakeRange(0, currentTitle.length)];
+                    [attr addAttribute:NSFontAttributeName value:[NSFont systemFontOfSize:11]
+                                 range:NSMakeRange(0, currentTitle.length)];
                     button.attributedTitle = attr;
                     [button setNeedsDisplay:YES];
                 }
