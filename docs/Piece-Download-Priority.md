@@ -69,7 +69,7 @@ Without sequential mode:
 
 The piece selection logic is implemented in:
 - `libtransmission/peer-mgr-wishlist.cc` - Wishlist candidate sorting
-- `libtransmission/torrent.cc` - File ordering and tail detection (`is_piece_in_file_tail()`)
+- `libtransmission/torrent-piece-priority.cc` - File ordering, priority/tail/cover detection (`recalculate_file_order`, `is_piece_in_priority_file`, `is_piece_in_file_tail`, `is_video_file`, `update_piece_priority_state`)
 
 ### Key Functions
 
@@ -96,14 +96,18 @@ std::tuple{ -priority, file_index, !is_in_priority_file, !is_in_file_tail, piece
 
 This creates the ordering: high priority → alphabetical file → priority files → tail pieces → sequential pieces.
 
-### Priority Files (Disc Index Files)
+### Priority Files
 
-For DVD and Blu-ray disc structures, index files are prioritized to enable proper playback:
+**Disc index files (DVD/Blu-ray):**
 
 - **DVD**: `.ifo` and `.bup` files (disc navigation and backup)
 - **Blu-ray**: `index.bdmv` and `movieobject.bdmv` (disc index and menu)
 
 These files are downloaded before the actual video content (VOB/M2TS) to ensure players can properly navigate the disc structure.
+
+**Audio torrents (album cover):**
+
+When a torrent contains both audio-like files (e.g. `.mp3`, `.flac`, `.cue`) and cover images (`.jpg`, `.jpeg`), the cover images are treated as priority files so album art downloads first.
 
 **Multi-disc torrents:**
 - Torrents may contain multiple disc folders (e.g., `Disk.1/VIDEO_TS/`, `Disk.2/VIDEO_TS/`)

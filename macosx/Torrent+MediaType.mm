@@ -19,17 +19,28 @@ static void initMediaExtensionSets(void)
 {
     dispatch_once(&sMediaExtensionsOnce, ^{
         sVideoExtensions = [NSSet setWithArray:@[
-            @"mkv", @"avi", @"mp4", @"mov", @"wmv", @"flv", @"webm", @"m4v",
-            @"mpg", @"mpeg", @"ts", @"m2ts", @"vob", @"3gp", @"ogv"
+            @"mkv",
+            @"avi",
+            @"mp4",
+            @"mov",
+            @"wmv",
+            @"flv",
+            @"webm",
+            @"m4v",
+            @"mpg",
+            @"mpeg",
+            @"ts",
+            @"m2ts",
+            @"vob",
+            @"3gp",
+            @"ogv"
         ]];
-        sAudioExtensions = [NSSet setWithArray:@[
-            @"mp3", @"flac", @"wav", @"aac", @"ogg", @"wma", @"m4a", @"ape",
-            @"alac", @"aiff", @"opus", @"wv"
-        ]];
+        sAudioExtensions = [NSSet
+            setWithArray:
+                @[ @"mp3", @"flac", @"wav", @"aac", @"ogg", @"wma", @"m4a", @"ape", @"alac", @"aiff", @"opus", @"wv" ]];
         sBookExtensions = [NSSet setWithArray:@[ @"pdf", @"epub", @"djv", @"djvu", @"fb2", @"mobi" ]];
-        sSoftwareExtensions = [NSSet setWithArray:@[
-            @"exe", @"msi", @"dmg", @"iso", @"pkg", @"deb", @"rpm", @"appimage", @"apk", @"run"
-        ]];
+        sSoftwareExtensions = [NSSet
+            setWithArray:@[ @"exe", @"msi", @"dmg", @"iso", @"pkg", @"deb", @"rpm", @"appimage", @"apk", @"run" ]];
     });
 }
 

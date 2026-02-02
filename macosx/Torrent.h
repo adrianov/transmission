@@ -187,6 +187,8 @@ extern NSString* const kTorrentDidChangeGroupNotification;
 
 // Returns .cue file path for a given folder, or nil if no .cue file found in the folder
 - (NSString*)cueFilePathForFolder:(NSString*)folder;
+/// Path to open for folder: .cue if .cue count >= audio count, else folder path. Implemented in Torrent+CueTooltip.mm.
+- (NSString*)pathToOpenForFolder:(NSString*)folder;
 
 // Returns the path to show in tooltip (prefers .cue file if available for audio files or album folders)
 - (NSString*)tooltipPathForItemPath:(NSString*)path type:(NSString*)type folder:(NSString*)folder;

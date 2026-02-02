@@ -905,8 +905,8 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
     if (node.isFolder)
     {
         NSString* basePath = node.path.length > 0 ? [node.path stringByAppendingPathComponent:node.name] : node.name;
-        NSString* cuePath = [self cueFilePathForFolder:basePath];
-        return cuePath ?: path;
+        NSString* pathToOpen = [self pathToOpenForFolder:basePath];
+        return pathToOpen ?: path;
     }
     return [self pathToOpenForAudioPath:path];
 }
@@ -920,9 +920,9 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
         NSString* folder = item[@"folder"];
         if (folder.length > 0)
         {
-            NSString* cuePath = [self cueFilePathForFolder:folder];
-            if (cuePath)
-                return cuePath;
+            NSString* pathToOpen = [self pathToOpenForFolder:folder];
+            if (pathToOpen)
+                return pathToOpen;
         }
     }
     else if (path.length > 0)
