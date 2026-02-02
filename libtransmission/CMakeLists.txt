@@ -137,7 +137,12 @@ target_sources(${TR_NAME}
         torrent-magnet.h
         torrent-metainfo.cc
         torrent-metainfo.h
+        torrent-error.cc
+        torrent-piece-priority.cc
+        torrent-consecutive-progress.cc
         torrent-queue.cc
+        torrent-resume.cc
+        torrent-verify-mediator.cc
         torrent-queue.h
         torrent.cc
         torrent.h

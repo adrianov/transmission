@@ -835,7 +835,7 @@ struct tr_torrent
     // Returns true if piece is in the tail portion (2% of file size, capped at 20 MB) of any video file it belongs to (for video playback priority)
     [[nodiscard]] bool is_piece_in_file_tail(tr_piece_index_t piece) const noexcept;
 
-    // Returns true if piece belongs to a priority index file (IFO/BUP for DVD, index.bdmv for Blu-ray)
+    // Returns true if piece belongs to a priority file (IFO/BUP for DVD, index.bdmv for Blu-ray, .jpg for audio)
     [[nodiscard]] bool is_piece_in_priority_file(tr_piece_index_t piece) const noexcept;
 
     [[nodiscard]] constexpr bool is_running() const noexcept
@@ -1365,6 +1365,7 @@ private:
     void init(tr_ctor const& ctor);
 
     void on_metainfo_updated();
+    void update_piece_priority_state();
     void on_metainfo_completed();
     void on_have_all_metainfo();
     void on_piece_completed(tr_piece_index_t piece);
@@ -1506,6 +1507,10 @@ private:
     // Cached consecutive progress per file (playable progress from start)
     // Updated when pieces complete, -1.0 means not yet calculated
     mutable std::vector<float> file_consecutive_progress_;
+
+    // True when torrent has both audio-like files and .jpg/.jpeg (album cover) for piece priority.
+    // Set in update_piece_priority_state() (torrent-piece-priority.cc).
+    bool has_audio_and_cover_ = false;
 
 public:
     // Get consecutive progress for a file (0.0-1.0)
