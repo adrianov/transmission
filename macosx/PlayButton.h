@@ -4,12 +4,14 @@
 
 #import <AppKit/AppKit.h>
 
-/// Custom button for play controls with darker hover background.
-/// Fill color: unwatched (IINA) = green, watched = gray; hover brightens.
+/// Custom button for play controls. Green fill (theme-friendly, slightly darker); hover brightens.
 @interface PlayButton : NSButton
 
-/// Fill color for bezel. Unwatched → green; watched → gray. Hovered variant is brighter.
+/// Fill color for bezel. Slightly darker green (theme-friendly); hovered variant is brighter.
 + (NSColor*)fillColorUnwatched:(BOOL)unwatched hovered:(BOOL)hovered;
+
+/// Title color for current state. Green (unwatched) = light on green; gray (watched) = theme-consistent (light text in dark, dark in light).
++ (NSColor*)titleColorUnwatched:(BOOL)unwatched;
 
 @property(nonatomic) BOOL isHovered;
 @property(nonatomic) BOOL iinaUnwatched;

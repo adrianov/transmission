@@ -105,22 +105,23 @@
 
     if (self.fPlayButtonsView)
     {
-        NSColor* buttonTextColor = NSColor.secondaryLabelColor;
+        NSColor* defaultButtonTextColor = NSColor.secondaryLabelColor;
         for (NSView* subview in self.fPlayButtonsView.subviews)
         {
             if ([subview isKindOfClass:[PlayButton class]])
             {
                 PlayButton* button = (PlayButton*)subview;
+                NSColor* buttonTextColor = [PlayButton titleColorUnwatched:button.iinaUnwatched];
                 NSString* title = button.title ?: @"";
                 NSMutableAttributedString* attrTitle = [[NSMutableAttributedString alloc] initWithString:title];
                 [attrTitle addAttribute:NSForegroundColorAttributeName value:buttonTextColor range:NSMakeRange(0, title.length)];
                 [attrTitle addAttribute:NSFontAttributeName value:[NSFont systemFontOfSize:11] range:NSMakeRange(0, title.length)];
                 button.attributedTitle = attrTitle;
                 if (button.cell)
-                    button.cell.backgroundStyle = NSBackgroundStyleNormal;
+                    button.cell.backgroundStyle = backgroundStyle;
             }
             else if ([subview isKindOfClass:[NSTextField class]])
-                ((NSTextField*)subview).textColor = buttonTextColor;
+                ((NSTextField*)subview).textColor = defaultButtonTextColor;
         }
     }
 }

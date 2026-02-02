@@ -603,6 +603,13 @@ static NSDictionary* computeStateAndLayoutFromSnapshot(NSArray<NSDictionary*>* s
                         button.iinaUnwatched = iinaUnwatched;
                         layoutNeeded = YES;
                     }
+                    NSColor* titleColor = [PlayButton titleColorUnwatched:button.iinaUnwatched];
+                    NSString* currentTitle = button.title ?: @"";
+                    NSMutableAttributedString* attr = [[NSMutableAttributedString alloc] initWithString:currentTitle];
+                    [attr addAttribute:NSForegroundColorAttributeName value:titleColor range:NSMakeRange(0, currentTitle.length)];
+                    [attr addAttribute:NSFontAttributeName value:[NSFont systemFontOfSize:11] range:NSMakeRange(0, currentTitle.length)];
+                    button.attributedTitle = attr;
+                    [button setNeedsDisplay:YES];
                 }
             }
             continue;

@@ -2,9 +2,13 @@
 // It may be used under the MIT (SPDX: MIT) license.
 // License text can be found in the licenses/ folder.
 
+#import "NSApplicationAdditions.h"
 #import "PlayButton.h"
 
-/// Bezel fill uses PlayButton.fillColorUnwatched:hovered:. No system bezel.
+// Regression: NSButtonCell can ignore attributed title color. We draw the title ourselves so
+// selected rows use white and watched/unwatched use theme-consistent colors in both light and dark.
+
+/// Bezel fill uses PlayButton.fillColorUnwatched:hovered:. Title uses PlayButton.titleColorUnwatched: (selected row = white).
 @interface PlayButtonCell : NSButtonCell
 @end
 
@@ -22,6 +26,25 @@
     [[NSBezierPath bezierPathWithRoundedRect:frame xRadius:4.0 yRadius:4.0] fill];
 }
 
+- (NSRect)drawTitle:(NSAttributedString*)title withFrame:(NSRect)frame inView:(NSView*)controlView
+{
+    PlayButton* button = [controlView isKindOfClass:[PlayButton class]] ? (PlayButton*)controlView : nil;
+    NSColor* color;
+    if (self.backgroundStyle == NSBackgroundStyleEmphasized)
+        color = NSColor.whiteColor;
+    else
+        color = button ? [PlayButton titleColorUnwatched:button.iinaUnwatched] : NSColor.controlTextColor;
+    NSString* str = title.string ?: @"";
+    if (str.length > 0)
+    {
+        NSMutableAttributedString* attr = [[NSMutableAttributedString alloc] initWithString:str];
+        [attr addAttribute:NSForegroundColorAttributeName value:color range:NSMakeRange(0, str.length)];
+        [attr addAttribute:NSFontAttributeName value:self.font ?: [NSFont systemFontOfSize:11] range:NSMakeRange(0, str.length)];
+        [attr drawInRect:frame];
+    }
+    return frame;
+}
+
 @end
 
 @implementation PlayButton
@@ -29,10 +52,24 @@
 + (NSColor*)fillColorUnwatched:(BOOL)unwatched hovered:(BOOL)hovered
 {
     if (unwatched)
-        return hovered ? [NSColor colorWithCalibratedRed:0.28 green:0.72 blue:0.28 alpha:0.65] :
-                         [NSColor colorWithCalibratedRed:0.22 green:0.62 blue:0.22 alpha:0.6];
-    return hovered ? [NSColor colorWithCalibratedWhite:0.15 alpha:0.6] :
-                     [NSColor colorWithCalibratedWhite:0.1 alpha:0.5];
+        return hovered ? [NSColor colorWithCalibratedRed:0.2 green:0.54 blue:0.2 alpha:0.65] :
+                         [NSColor colorWithCalibratedRed:0.16 green:0.44 blue:0.16 alpha:0.6];
+    // Watched (played): theme-adaptive. Dark = dark gray; light = very light gray so buttons read clearly on white.
+    if (NSApp.darkMode)
+        return hovered ? [NSColor colorWithCalibratedWhite:0.15 alpha:0.6] :
+                         [NSColor colorWithCalibratedWhite:0.1 alpha:0.5];
+    return hovered ? [NSColor colorWithCalibratedWhite:0.88 alpha:0.9] :
+                     [NSColor colorWithCalibratedWhite:0.82 alpha:0.85];
+}
+
++ (NSColor*)titleColorUnwatched:(BOOL)unwatched
+{
+    if (unwatched)
+        return [NSColor colorWithCalibratedWhite:1.0 alpha:0.95];
+    // Watched (gray button): explicit colors so text is consistent in light and dark themes.
+    if (NSApp.darkMode)
+        return [NSColor colorWithCalibratedWhite:0.92 alpha:1.0];
+    return [NSColor colorWithCalibratedWhite:0.15 alpha:1.0];
 }
 
 + (Class)cellClass
