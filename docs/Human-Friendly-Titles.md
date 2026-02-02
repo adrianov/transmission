@@ -185,7 +185,7 @@ Media torrents display Play buttons below the status line for quick access to do
 - **Hyphen preservation:** Hyphens in hyphenated words (e.g., `Full-Moon`) are preserved and not converted to spaces
 - **Dot-to-space conversion:** Dots between words in episode titles are converted to spaces (e.g., `Full-Moon.Party` → `Full-Moon Party`)
 - **Redundancy removal:** If the detected episode title is just a repeat of the series name, it is simplified to just the episode number
-- **Common lexeme removal:** If all episodes in a torrent share the same tag at the same position (start or end of the title), that tag is automatically removed as garbage.
+- **Common prefix/suffix removal:** When a transfer has two or more play buttons (or context menu items), a common prefix/suffix shared by all titles is removed for display only. Applies to both directory (folder) buttons (e.g. discs, albums) and episode (file) buttons; the same stripped titles are used for content buttons and the right-click Play menu (DRY). File names in the data model are not stripped.
 - **Season grouping:** Multiple seasons show headers (`Season 1:`, `Season 2:`) followed by episode buttons
 - **Single season:** No header shown, just episode buttons (`▶ E1`, `▶ E2`, ...)
 - **Non-episode files:** Show lightly humanized filename (separator cleanup) (e.g., `▶ Artist Track Name`)
@@ -272,7 +272,7 @@ Filenames are converted to readable episode names:
 The transformation is implemented in:
 
 - **macOS:** `NSStringAdditions.mm` - `humanReadableTitle`, `humanReadableFileName`, and `humanReadableEpisodeName` properties on `NSString`
-- **macOS:** `Torrent+Playable.mm` - `playableFiles`, folder-based and file-based playable names (including CD/Disc humanized titles via `humanizedTitleForFolderPlayableWithFolder:…` and `kMinPathComponentsForCDParentInTitle`). When a transfer has two or more playable entries, button titles strip a common prefix/suffix shared by all (e.g. "Album - CD1" → "CD1"; file-based entries likewise).
+- **macOS:** `Torrent+Playable.mm` - `playableFiles`, folder-based and file-based playable names (including CD/Disc humanized titles via `humanizedTitleForFolderPlayableWithFolder:…` and `kMinPathComponentsForCDParentInTitle`). Common prefix/suffix stripping is applied only at display time for button groups and the right-click menu via `[Torrent displayTitlesByStrippingCommonPrefixSuffix:]`: first common prefix/suffix is stripped from the original titles (e.g. "Michael Jackson - " and ".mp3"), then leading digits are stripped, then common prefix only on the remainders is stripped (no suffix on second pass), then each title’s digits are prepended back with a space (e.g. "Michael Jackson - 01 - Song Title.mp3", "Michael Jackson - 02 - Another Song.mp3" → "01 Song Title", "02 Another Song"). Results are memoized by title set (NSCache, count limit 128) so repeated calls with the same titles are fast. Playable entry names are not mutated. `PlayButtonStateBuilder` sets stripped titles on state for 2+ items (directory and episode buttons); `TorrentTableView+Flow` and `TorrentTableView+PlayMenu` use the same state via `menuTitleForPlayableItem:torrent:includeProgress:` so buttons and context menu share one display title source (DRY).
 - **macOS:** `TorrentTableView.mm` - Play button UI and dynamic row height
 - **Web UI:** `formatter.js` - `Formatter.humanTitle()` (torrent list) and `Formatter.humanFileName()` (file list)
 
