@@ -92,12 +92,20 @@
 {
     [super setBackgroundStyle:backgroundStyle];
 
-    // Update play button colors based on selection
+    BOOL emphasized = (backgroundStyle == NSBackgroundStyleEmphasized);
+    NSColor* primaryColor = emphasized ? NSColor.whiteColor : NSColor.labelColor;
+    NSColor* secondaryColor = emphasized ? NSColor.whiteColor : NSColor.secondaryLabelColor;
+
+    if (self.fTorrentTitleField)
+        self.fTorrentTitleField.textColor = primaryColor;
+    if (self.fTorrentProgressField)
+        self.fTorrentProgressField.textColor = secondaryColor;
+    if (self.fTorrentStatusField)
+        self.fTorrentStatusField.textColor = secondaryColor;
+
     if (self.fPlayButtonsView)
     {
-        BOOL isSelected = (backgroundStyle == NSBackgroundStyleEmphasized);
-        NSColor* textColor = isSelected ? NSColor.whiteColor : NSColor.secondaryLabelColor;
-
+        NSColor* buttonTextColor = NSColor.secondaryLabelColor;
         for (NSView* subview in self.fPlayButtonsView.subviews)
         {
             if ([subview isKindOfClass:[PlayButton class]])
@@ -105,18 +113,14 @@
                 PlayButton* button = (PlayButton*)subview;
                 NSString* title = button.title ?: @"";
                 NSMutableAttributedString* attrTitle = [[NSMutableAttributedString alloc] initWithString:title];
-                [attrTitle addAttribute:NSForegroundColorAttributeName value:textColor range:NSMakeRange(0, title.length)];
+                [attrTitle addAttribute:NSForegroundColorAttributeName value:buttonTextColor range:NSMakeRange(0, title.length)];
                 [attrTitle addAttribute:NSFontAttributeName value:[NSFont systemFontOfSize:11] range:NSMakeRange(0, title.length)];
                 button.attributedTitle = attrTitle;
                 if (button.cell)
-                {
                     button.cell.backgroundStyle = NSBackgroundStyleNormal;
-                }
             }
             else if ([subview isKindOfClass:[NSTextField class]])
-            {
-                ((NSTextField*)subview).textColor = textColor;
-            }
+                ((NSTextField*)subview).textColor = buttonTextColor;
         }
     }
 }

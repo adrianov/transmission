@@ -202,20 +202,21 @@ static CGFloat const kPaddingBetweenNameAndFolderStatus = 4.0;
 
 - (void)updateColors
 {
-    if (!self.node)
-    {
-        return;
-    }
-
-    FileListNode* node = self.node;
-    Torrent* torrent = node.torrent;
-
     if (self.backgroundStyle == NSBackgroundStyleEmphasized)
     {
         self.nameField.textColor = NSColor.whiteColor;
         self.statusField.textColor = NSColor.whiteColor;
+        return;
     }
-    else if ([torrent checkForFiles:node.indexes] == NSControlStateValueOff)
+    if (!self.node)
+    {
+        self.nameField.textColor = NSColor.controlTextColor;
+        self.statusField.textColor = NSColor.secondaryLabelColor;
+        return;
+    }
+    FileListNode* node = self.node;
+    Torrent* torrent = node.torrent;
+    if ([torrent checkForFiles:node.indexes] == NSControlStateValueOff)
     {
         self.nameField.textColor = NSColor.disabledControlTextColor;
         self.statusField.textColor = NSColor.disabledControlTextColor;
