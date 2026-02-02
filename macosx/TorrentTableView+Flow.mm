@@ -164,6 +164,10 @@ static NSDictionary* computeStateAndLayoutFromSnapshot(NSArray<NSDictionary*>* s
     ]];
     cached.hidden = NO;
     [self updatePlayButtonProgressForCell:cell torrent:torrent forceLayout:YES];
+    [cell layoutSubtreeIfNeeded];
+    [cell setBackgroundStyle:cell.backgroundStyle];
+    [cached setNeedsDisplay:YES];
+    [cell setNeedsDisplay:YES];
 }
 
 - (FlowLayoutView*)newFlowViewAddedToCell:(TorrentCell*)cell
@@ -203,15 +207,11 @@ static NSDictionary* computeStateAndLayoutFromSnapshot(NSArray<NSDictionary*>* s
 {
     NSTextField* field = self.fHeaderPool.lastObject;
     if (field)
-    {
         [self.fHeaderPool removeLastObject];
-        field.textColor = NSColor.secondaryLabelColor;
-    }
     else
     {
         field = [NSTextField labelWithString:@""];
         field.font = [NSFont boldSystemFontOfSize:11];
-        field.textColor = NSColor.secondaryLabelColor;
         field.wantsLayer = YES;
     }
     return field;
@@ -402,6 +402,11 @@ static NSDictionary* computeStateAndLayoutFromSnapshot(NSArray<NSDictionary*>* s
     if (layout.count > 0)
         [self.fFlowViewCache setObject:flowView forKey:currentHash];
     [self updatePlayButtonProgressForCell:cell torrent:torrent forceLayout:YES];
+    // Force layout so flow view gets bounds and sets button frames before draw (avoids empty button area).
+    [cell layoutSubtreeIfNeeded];
+    [cell setBackgroundStyle:cell.backgroundStyle];
+    [flowView setNeedsDisplay:YES];
+    [cell setNeedsDisplay:YES];
 }
 
 - (void)configurePlayButtonsForCell:(TorrentCell*)cell torrent:(Torrent*)torrent
@@ -634,6 +639,7 @@ static NSDictionary* computeStateAndLayoutFromSnapshot(NSArray<NSDictionary*>* s
             if (buttonHeight > 0)
                 [self noteHeightOfRowsWithIndexesChanged:[NSIndexSet indexSetWithIndex:(NSUInteger)row]];
         }
+        [flowView setNeedsDisplay:YES];
     }
 }
 

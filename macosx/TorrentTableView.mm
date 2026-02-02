@@ -133,12 +133,11 @@ extern char const kPlayButtonFolderKey = '\0';
         [self.fPlayButtonPool addObject:button];
     }
 
-    // Pre-warm header pool too
+    // Pre-warm header pool too (text color set by TorrentCell.setBackgroundStyle)
     for (NSUInteger i = 0; i < 20; i++)
     {
         NSTextField* field = [NSTextField labelWithString:@""];
         field.font = [NSFont boldSystemFontOfSize:11];
-        field.textColor = NSColor.secondaryLabelColor;
         field.wantsLayer = YES;
         [self.fHeaderPool addObject:field];
     }
