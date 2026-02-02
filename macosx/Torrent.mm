@@ -24,6 +24,7 @@
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 
 #import "Torrent.h"
+#import "TorrentPrivate.h"
 #import "IINAWatchHelper.h"
 #import "GroupsController.h"
 #import "FileListNode.h"
@@ -124,77 +125,6 @@ static BOOL hasAdultSource(NSArray<NSString*>* trackerURLs, NSString* comment)
         return YES;
     return NO;
 }
-
-/// Media type for folder torrents
-typedef NS_ENUM(NSInteger, TorrentMediaType) {
-    TorrentMediaTypeNone = 0,
-    TorrentMediaTypeVideo,
-    TorrentMediaTypeAudio,
-    TorrentMediaTypeBooks,
-    TorrentMediaTypeSoftware
-};
-
-@interface Torrent ()
-
-@property(nonatomic, readonly) tr_torrent* fHandle;
-@property(nonatomic) tr_stat const* fStat;
-@property(nonatomic, readonly) tr_session* fSession;
-
-@property(nonatomic, readonly) NSUserDefaults* fDefaults;
-
-@property(nonatomic) NSImage* fIcon;
-@property(nonatomic, copy) NSString* fDisplayName;
-@property(nonatomic) TorrentMediaType fMediaType;
-@property(nonatomic) NSUInteger fMediaFileCount;
-@property(nonatomic, copy) NSString* fMediaExtension;
-@property(nonatomic) BOOL fMediaTypeDetected;
-@property(nonatomic) BOOL fIsDVD;
-@property(nonatomic) BOOL fIsBluRay;
-@property(nonatomic) BOOL fIsAlbumCollection; // Multiple audio albums in subfolders
-@property(nonatomic, copy) NSArray<NSString*>* fFolderItems; // Disc or album folders (relative paths)
-@property(nonatomic, copy) NSArray<NSDictionary*>* fPlayableFiles;
-@property(nonatomic, copy) NSDictionary<NSString*, NSArray<NSNumber*>*>* fFolderToFiles; // Cache: folder -> file indices
-@property(nonatomic) NSUInteger fStatsGeneration;
-@property(nonatomic) NSUInteger fProgressCacheGeneration;
-@property(nonatomic) NSMutableDictionary<NSNumber*, NSNumber*>* fFileProgressCache;
-@property(nonatomic) NSMutableDictionary<NSString*, NSNumber*>* fFolderProgressCache;
-@property(nonatomic) NSMutableDictionary<NSString*, NSNumber*>* fFolderFirstMediaProgressCache;
-
-@property(nonatomic, copy) NSArray<FileListNode*>* fileList;
-@property(nonatomic, copy) NSArray<FileListNode*>* flatFileList;
-
-@property(nonatomic, copy) NSIndexSet* fPreviousFinishedIndexes;
-@property(nonatomic) NSDate* fPreviousFinishedIndexesDate;
-
-@property(nonatomic) NSInteger groupValue;
-@property(nonatomic) TorrentDeterminationType fGroupValueDetermination;
-
-@property(nonatomic) TorrentDeterminationType fDownloadFolderDetermination;
-
-@property(nonatomic) BOOL fResumeOnWake;
-@property(nonatomic) BOOL fPausedForDiskSpace;
-@property(nonatomic) uint64_t fDiskSpaceNeeded;
-@property(nonatomic) uint64_t fDiskSpaceAvailable;
-@property(nonatomic) uint64_t fDiskSpaceTotal;
-@property(nonatomic) uint64_t fDiskSpaceUsedByTorrents;
-@property(nonatomic) NSTimeInterval fLastDiskSpaceCheckTime;
-@property(nonatomic) BOOL diskSpaceDialogShown;
-
-@property(nonatomic) NSMutableIndexSet* playedFiles;
-
-- (void)renameFinished:(BOOL)success
-                 nodes:(NSArray<FileListNode*>*)nodes
-     completionHandler:(void (^)(BOOL))completionHandler
-               oldPath:(NSString*)oldPath
-               newName:(NSString*)newName;
-
-@property(nonatomic, readonly) BOOL shouldShowEta;
-@property(nonatomic, readonly) NSString* etaString;
-
-- (uint64_t)totalTorrentDiskUsage;
-- (uint64_t)totalTorrentDiskNeeded;
-
-@end
 
 static NSImage* pdfTypeIcon()
 {
@@ -1542,6 +1472,54 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
     return playableFiles.firstObject;
 }
 
+/// Returns common prefix and suffix for an array of strings (e.g. sibling file paths or folder names).
+/// Only meaningful when strings.count >= 2. Applies "reasonable separator" rule so cut-off aligns to word boundaries.
+static NSDictionary<NSString*, NSString*>* commonPrefixAndSuffixForStrings(NSArray<NSString*>* strings)
+{
+    static NSCharacterSet* separators;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        separators = [NSCharacterSet characterSetWithCharactersInString:@".-_ "];
+    });
+    NSString* prefix = @"";
+    NSString* suffix = @"";
+    if (strings.count < 2)
+        return @{ @"prefix" : prefix, @"suffix" : suffix };
+    for (NSString* s in strings)
+    {
+        if (prefix.length == 0)
+            prefix = s;
+        else
+        {
+            NSUInteger j = 0;
+            while (j < prefix.length && j < s.length && [prefix characterAtIndex:j] == [s characterAtIndex:j])
+                j++;
+            prefix = [prefix substringToIndex:j];
+        }
+        if (suffix.length == 0)
+            suffix = s;
+        else
+        {
+            NSUInteger j = 0;
+            while (j < suffix.length && j < s.length &&
+                   [suffix characterAtIndex:suffix.length - 1 - j] == [s characterAtIndex:s.length - 1 - j])
+                j++;
+            suffix = [suffix substringFromIndex:suffix.length - j];
+        }
+    }
+    if (prefix.length > 0)
+    {
+        NSUInteger lastSep = [prefix rangeOfCharacterFromSet:separators options:NSBackwardsSearch].location;
+        prefix = (lastSep != NSNotFound) ? [prefix substringToIndex:lastSep + 1] : @"";
+    }
+    if (suffix.length > 0)
+    {
+        NSUInteger firstSep = [suffix rangeOfCharacterFromSet:separators].location;
+        suffix = (firstSep != NSNotFound) ? [suffix substringFromIndex:firstSep] : @"";
+    }
+    return @{ @"prefix" : prefix ?: @"", @"suffix" : suffix ?: @"" };
+}
+
 /// Builds playable entries for individual media files
 - (NSArray<NSDictionary*>*)buildIndividualFilePlayables
 {
@@ -1681,81 +1659,31 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
         }
     }
 
-    // Third pass: collect playable files
+    // Third pass: collect playable files and group by parent dir (sibling files only for common prefix/suffix)
     NSMutableDictionary<NSString*, NSNumber*>* cueProgress = [NSMutableDictionary dictionary];
-    NSMutableArray<NSString*>* fileNamesForLexemeAnalysis = [NSMutableArray arrayWithCapacity:count];
+    NSMutableDictionary<NSString*, NSMutableArray<NSString*>*>* siblingFilesByParent = [NSMutableDictionary dictionary];
     for (NSUInteger i = 0; i < count; i++)
     {
         auto const file = tr_torrentFile(self.fHandle, i);
-        [fileNamesForLexemeAnalysis addObject:@(file.name)];
+        NSString* path = @(file.name);
+        NSString* parent = path.stringByDeletingLastPathComponent;
+        NSMutableArray<NSString*>* siblings = siblingFilesByParent[parent];
+        if (!siblings)
+        {
+            siblings = [NSMutableArray array];
+            siblingFilesByParent[parent] = siblings;
+        }
+        [siblings addObject:path];
     }
 
-    // Find common prefix and suffix across all files in the torrent
-    NSString* commonPrefix = nil;
-    NSString* commonSuffix = nil;
-    if (count > 1)
+    NSMutableDictionary<NSString*, NSString*>* commonPrefixByParent = [NSMutableDictionary dictionary];
+    NSMutableDictionary<NSString*, NSString*>* commonSuffixByParent = [NSMutableDictionary dictionary];
+    for (NSString* parent in siblingFilesByParent)
     {
-        for (NSString* fileName in fileNamesForLexemeAnalysis)
-        {
-            if (commonPrefix == nil)
-            {
-                commonPrefix = fileName;
-            }
-            else
-            {
-                NSUInteger j = 0;
-                while (j < commonPrefix.length && j < fileName.length && [commonPrefix characterAtIndex:j] == [fileName characterAtIndex:j])
-                {
-                    j++;
-                }
-                commonPrefix = [commonPrefix substringToIndex:j];
-            }
-
-            if (commonSuffix == nil)
-            {
-                commonSuffix = fileName;
-            }
-            else
-            {
-                NSUInteger j = 0;
-                while (j < commonSuffix.length && j < fileName.length &&
-                       [commonSuffix
-                           characterAtIndex:commonSuffix.length - 1 - j] == [fileName characterAtIndex:fileName.length - 1 - j])
-                {
-                    j++;
-                }
-                commonSuffix = [commonSuffix substringFromIndex:commonSuffix.length - j];
-            }
-        }
-    }
-
-    // Only use common prefix/suffix if they are "reasonable" (e.g. end/start with a separator or space)
-    // and don't consume the entire filename
-    if (commonPrefix.length > 0)
-    {
-        NSCharacterSet* separators = [NSCharacterSet characterSetWithCharactersInString:@".-_ "];
-        NSUInteger lastSep = [commonPrefix rangeOfCharacterFromSet:separators options:NSBackwardsSearch].location;
-        if (lastSep != NSNotFound)
-        {
-            commonPrefix = [commonPrefix substringToIndex:lastSep + 1];
-        }
-        else
-        {
-            commonPrefix = @"";
-        }
-    }
-    if (commonSuffix.length > 0)
-    {
-        NSCharacterSet* separators = [NSCharacterSet characterSetWithCharactersInString:@".-_ "];
-        NSUInteger firstSep = [commonSuffix rangeOfCharacterFromSet:separators].location;
-        if (firstSep != NSNotFound)
-        {
-            commonSuffix = [commonSuffix substringFromIndex:firstSep];
-        }
-        else
-        {
-            commonSuffix = @"";
-        }
+        NSArray<NSString*>* paths = siblingFilesByParent[parent];
+        NSDictionary* pair = commonPrefixAndSuffixForStrings(paths);
+        commonPrefixByParent[parent] = pair[@"prefix"] ?: @"";
+        commonSuffixByParent[parent] = pair[@"suffix"] ?: @"";
     }
 
     for (NSUInteger i = 0; i < count; i++)
@@ -1763,16 +1691,15 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
         auto const file = tr_torrentFile(self.fHandle, i);
         NSString* fileName = @(file.name);
         NSString* originalFileName = fileName;
+        NSString* parent = fileName.stringByDeletingLastPathComponent;
+        NSString* commonPrefix = commonPrefixByParent[parent] ?: @"";
+        NSString* commonSuffix = commonSuffixByParent[parent] ?: @"";
 
-        // Strip common prefix/suffix from the filename before further processing
+        // Strip common prefix/suffix (computed from sibling files in same directory only)
         if (commonPrefix.length > 0 && [fileName hasPrefix:commonPrefix] && fileName.length > commonPrefix.length)
-        {
             fileName = [fileName substringFromIndex:commonPrefix.length];
-        }
         if (commonSuffix.length > 0 && [fileName hasSuffix:commonSuffix] && fileName.length > commonSuffix.length)
-        {
             fileName = [fileName substringToIndex:fileName.length - commonSuffix.length];
-        }
 
         NSString* ext = originalFileName.pathExtension.lowercaseString;
 
