@@ -65,7 +65,11 @@ target_sources(${TR_NAME}-mac
         ColorTextField.mm
         Controller.h
         Controller.mm
+        Controller+Notifications.mm
+        Controller+RPC.mm
+        Controller+TorrentEvents.mm
         Controller+Transfer.mm
+        Controller+UpdateUI.mm
         ControllerPrivate.h
         CreatorWindowController.h
         CreatorWindowController.mm

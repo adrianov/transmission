@@ -97,4 +97,9 @@
 @property(nonatomic) BOOL fUsingBackgroundPriority;
 @property(nonatomic) BOOL fUpdatingUI;
 
+- (void)insertTorrentAtTop:(Torrent*)torrent;
+- (void)refreshVisibleTransferRows;
+- (void)selectAndScrollToTorrent:(Torrent*)torrent;
+- (void)updateSearchPlaceholder;
+
 @end
