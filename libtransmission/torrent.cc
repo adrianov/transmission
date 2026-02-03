@@ -84,12 +84,18 @@ tr_torrent* tr_torrentFindFromMetainfo(tr_session* session, tr_torrent_metainfo 
         return nullptr;
     }
 
-    return session->torrents().get(metainfo->info_hash());
+    auto* const tor = session->torrents().get(metainfo->info_hash());
+    return (tor != nullptr && tor->is_deleting()) ? nullptr : tor;
 }
 
 tr_torrent* tr_torrentFindFromMagnetLink(tr_session* session, char const* magnet_link)
 {
-    return magnet_link == nullptr ? nullptr : session->torrents().get(magnet_link);
+    if (magnet_link == nullptr)
+    {
+        return nullptr;
+    }
+    auto* const tor = session->torrents().get(magnet_link);
+    return (tor != nullptr && tor->is_deleting()) ? nullptr : tor;
 }
 
 bool tr_torrentSetMetainfoFromFile(tr_torrent* tor, tr_torrent_metainfo const* metainfo, char const* filename)
@@ -523,8 +529,9 @@ tr_torrent* tr_torrentNew(tr_ctor* ctor, tr_torrent** setme_duplicate_of)
         return nullptr;
     }
 
-    // is it a duplicate?
-    if (auto* const duplicate_of = session->torrents().get(metainfo.info_hash()); duplicate_of != nullptr)
+    // is it a duplicate? (ignore torrents that are being removed so user can re-add immediately)
+    auto* duplicate_of = session->torrents().get(metainfo.info_hash());
+    if (duplicate_of != nullptr && !duplicate_of->is_deleting())
     {
         if (setme_duplicate_of != nullptr)
         {
