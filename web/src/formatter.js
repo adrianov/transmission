@@ -492,28 +492,52 @@ export const Formatter = {
 
   /**
    * Detects episode title from a torrent name.
+   * When SxxExx or 1x05 is present, displays both season and episode; title after the marker is shown only then (e.g. S1 E5 - Title).
+   * Standalone E05 shows as E5 only, no title.
    *
    * Examples:
-   *   Ponies.S01E01.The.Beginning.1080p -> E1 - The Beginning
-   *   Ponies.S01E01.1080p -> E1
+   *   Ponies.S01E01.The.Beginning.1080p -> S1 E1 - The Beginning
+   *   Ponies.S01E01.1080p -> S1 E1
+   *   Show.E05.standalone.mkv -> E5
    */
   episodeTitle(name, torrentName) {
     if (!name) {
       return '';
     }
 
-    // Match SxxExx or Exx pattern
-    const episodeMatch = name.match(/\b(?:S?\d{1,2})?E(\d{1,3})\b/i);
-    if (!episodeMatch) {
-      return '';
+    let episodePrefix = '';
+    let matchEnd = 0;
+
+    // Prefer SxxExx or 1x05: display both season and episode
+    const seMatch = name.match(/\bS(\d{1,2})[.\s]?E(\d{1,3})\b/i);
+    if (seMatch) {
+      const season = Number.parseInt(seMatch[1], 10);
+      const episode = Number.parseInt(seMatch[2], 10);
+      episodePrefix = `S${season} E${episode}`;
+      matchEnd = seMatch.index + seMatch[0].length;
+    }
+    if (!episodePrefix) {
+      const altMatch = name.match(/\b(\d{1,2})x(\d{1,3})\b/i);
+      if (altMatch) {
+        const season = Number.parseInt(altMatch[1], 10);
+        const episode = Number.parseInt(altMatch[2], 10);
+        episodePrefix = `S${season} E${episode}`;
+        matchEnd = altMatch.index + altMatch[0].length;
+      }
+    }
+    if (!episodePrefix) {
+      const episodeMatch = name.match(/\b(?:S?\d{1,2})?E(\d{1,3})\b/i);
+      if (!episodeMatch) {
+        return '';
+      }
+      const episodeNum = Number.parseInt(episodeMatch[1], 10);
+      episodePrefix = `E${episodeNum}`;
+      // Standalone episode only: do not extract title; show prefix only.
+      return episodePrefix;
     }
 
-    const episodeNum = Number.parseInt(episodeMatch[1], 10);
-    const episodePrefix = `E${episodeNum}`;
-
-    // Try to extract title after the episode marker
-    // Remove everything before and including the episode marker
-    let remaining = name.slice(episodeMatch.index + episodeMatch[0].length);
+    // Extract title from text after the episode marker (only when both season and episode were found)
+    let remaining = name.slice(matchEnd);
 
     // If there's a dot or hyphen immediately after, skip it
     remaining = remaining.replace(/^[.\-\s]+/, '');
