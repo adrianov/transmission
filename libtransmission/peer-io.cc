@@ -574,6 +574,13 @@ void tr_peerIo::write_bytes(void const* bytes, size_t n_bytes, bool is_piece_dat
         return;
     }
 
+    // Avoid use-after-close: if the IO was closed (e.g. peer disconnected), do not touch
+    // outbuf_/filter_/session_. Use socket_.is_valid() so UTP (which has no event_write_) still writes.
+    if (bytes == nullptr || !socket_.is_valid())
+    {
+        return;
+    }
+
     outbuf_info_.emplace_back(n_bytes, is_piece_data);
 
     auto [resbuf, reslen] = outbuf_.reserve_space(n_bytes);
