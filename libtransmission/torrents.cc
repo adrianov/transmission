@@ -84,7 +84,11 @@ void tr_torrents::remove(tr_torrent const* tor, time_t current_time)
 
     by_id_[tor->id()] = nullptr;
     auto const [begin, end] = std::equal_range(std::begin(by_hash_), std::end(by_hash_), tor, CompareTorrentByHash);
-    by_hash_.erase(begin, end);
+    auto const it = std::find(begin, end, tor);
+    if (it != end)
+    {
+        by_hash_.erase(it);
+    }
     removed_.emplace_back(tor->id(), current_time);
 }
 
