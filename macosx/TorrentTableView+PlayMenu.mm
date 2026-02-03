@@ -14,15 +14,23 @@
 
 @implementation TorrentTableView (PlayMenu)
 
+- (BOOL)isCueAlbumFileItem:(NSDictionary*)fileItem torrent:(Torrent*)torrent
+{
+    NSString* path = torrent ? [torrent pathToOpenForPlayableItem:fileItem] : (fileItem[@"path"] ?: @"");
+    NSString* rawPath = fileItem[@"path"];
+    BOOL const pathIsCue = path.length > 0 && [path.pathExtension.lowercaseString isEqualToString:@"cue"];
+    BOOL const rawPathIsCue = rawPath.length > 0 && [rawPath.pathExtension.lowercaseString isEqualToString:@"cue"];
+    NSString* origExt = [fileItem[@"originalExt"] isKindOfClass:[NSString class]] ? [fileItem[@"originalExt"] lowercaseString] : nil;
+    return pathIsCue || rawPathIsCue || [origExt isEqualToString:@"cue"];
+}
+
 - (NSImage*)iconForPlayableFileItem:(NSDictionary*)fileItem torrent:(Torrent*)torrent
 {
     if (@available(macOS 11.0, *))
     {
         NSString* type = fileItem[@"type"] ?: @"file";
         NSString* category = fileItem[@"category"];
-        NSString* path = torrent ? [torrent pathToOpenForPlayableItem:fileItem] : (fileItem[@"path"] ?: @"");
-
-        BOOL const isCueFile = path.length > 0 && [path.pathExtension.lowercaseString isEqualToString:@"cue"];
+        BOOL const isCueFile = [self isCueAlbumFileItem:fileItem torrent:torrent];
         NSString* cacheKey = [NSString stringWithFormat:@"%@:%@:%@", type, category ?: @"", isCueFile ? @"cue" : @""];
         NSImage* cached = [self.fIconCache objectForKey:cacheKey];
         if (cached)
@@ -252,8 +260,7 @@
             if ([itemInfo isKindOfClass:[NSDictionary class]])
             {
                 NSDictionary* firstFileItem = itemInfo[@"item"];
-                NSString* pathToOpen = firstFileItem ? [torrent pathToOpenForPlayableItem:firstFileItem] : nil;
-                leadsToCue = pathToOpen.length > 0 && [pathToOpen.pathExtension.lowercaseString isEqualToString:@"cue"];
+                leadsToCue = firstFileItem ? [self isCueAlbumFileItem:firstFileItem torrent:torrent] : NO;
             }
         }
         NSString* symbol = isBooks ? @"book" : (isSoftware ? @"gearshape" : ((isAudio || leadsToCue) ? @"music.note.list" : @"play"));

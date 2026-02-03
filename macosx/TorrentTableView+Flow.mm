@@ -217,22 +217,32 @@ static NSDictionary* computeStateAndLayoutFromSnapshot(NSArray<NSDictionary*>* s
     return field;
 }
 
+/// Applies path-derived UI (identifier, tooltip, icon, type/folder) so button stays correct after progress/visibility updates (e.g. .cue+.flac when download completes).
+- (void)applyPathDerivedUIToPlayButton:(PlayButton*)playButton forEntry:(NSDictionary*)entry torrent:(Torrent*)torrent
+{
+    NSString* type = entry[@"type"] ?: @"file";
+    NSString* path = entry[@"path"];
+    NSString* folder = entry[@"folder"] ?: @"";
+    if (path.length > 0)
+        playButton.identifier = path;
+    NSString* tooltipPath = [torrent tooltipPathForItemPath:path ?: @"" type:type folder:folder];
+    NSString* openLabel = [torrent openCountLabelForPlayableItem:entry];
+    playButton.toolTip = openLabel.length > 0 ? [NSString stringWithFormat:@"%@\n%@", tooltipPath, openLabel] : tooltipPath;
+    objc_setAssociatedObject(playButton, &kPlayButtonTypeKey, type, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    objc_setAssociatedObject(playButton, &kPlayButtonFolderKey, folder.length > 0 ? folder : nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    NSImage* icon = [self iconForPlayableFileItem:entry torrent:torrent];
+    playButton.image = icon;
+    playButton.imagePosition = icon ? NSImageLeft : NSNoImage;
+}
+
 - (PlayButton*)setupPlayButtonWithItem:(NSDictionary*)item torrent:(Torrent*)torrent
 {
     PlayButton* playButton = [self dequeuePlayButton];
     NSString* type = item[@"type"] ?: @"file";
-    NSString* path = item[@"path"];
     CGFloat progress = [item[@"progress"] doubleValue];
-    NSString* title = [self menuTitleForPlayableItem:item torrent:torrent includeProgress:YES];
-    NSString* openLabel = [torrent openCountLabelForPlayableItem:item];
-    playButton.title = title;
-    playButton.identifier = path;
-    NSString* folder = item[@"folder"];
-    NSString* tooltipPath = [torrent tooltipPathForItemPath:path type:type folder:folder ?: @""];
-    playButton.toolTip = openLabel.length > 0 ? [NSString stringWithFormat:@"%@\n%@", tooltipPath, openLabel] : tooltipPath;
+    playButton.title = [self menuTitleForPlayableItem:item torrent:torrent includeProgress:YES];
     playButton.tag = [item[@"index"] integerValue];
-    objc_setAssociatedObject(playButton, &kPlayButtonTypeKey, type, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    objc_setAssociatedObject(playButton, &kPlayButtonFolderKey, folder.length > 0 ? folder : nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    [self applyPathDerivedUIToPlayButton:playButton forEntry:item torrent:torrent];
 
     NSNumber* visible = item[@"visible"];
     if (visible != nil)
@@ -242,24 +252,6 @@ static NSDictionary* computeStateAndLayoutFromSnapshot(NSArray<NSDictionary*>* s
     else
         playButton.hidden = (progress <= 0);
 
-    NSString* pathToOpen = [torrent pathToOpenForPlayableItem:item];
-    BOOL const leadsToCue = pathToOpen.length > 0 && [pathToOpen.pathExtension.lowercaseString isEqualToString:@"cue"];
-    NSImage* icon = nil;
-    if (@available(macOS 11.0, *))
-    {
-        if (leadsToCue)
-        {
-            icon = [NSImage imageWithSystemSymbolName:@"music.note.list" accessibilityDescription:nil];
-            NSImageSymbolConfiguration* config = [NSImageSymbolConfiguration configurationWithPointSize:11 weight:NSFontWeightMedium
-                                                                                                  scale:NSImageSymbolScaleSmall];
-            icon = [icon imageWithSymbolConfiguration:config];
-            [icon setTemplate:YES];
-        }
-    }
-    if (!icon)
-        icon = [self iconForPlayableFileItem:item torrent:torrent];
-    playButton.image = icon;
-    playButton.imagePosition = icon ? NSImageLeft : NSNoImage;
     NSNumber* iinaUnwatchedNum = item[@"iinaUnwatched"];
     playButton.iinaUnwatched = iinaUnwatchedNum ? iinaUnwatchedNum.boolValue : NO;
     return playButton;
@@ -594,6 +586,7 @@ static NSDictionary* computeStateAndLayoutFromSnapshot(NSArray<NSDictionary*>* s
                                                                (stateMap[[self folderForPlayButton:button torrent:torrent]] ?: nil);
             if (entry)
             {
+                [self applyPathDerivedUIToPlayButton:button forEntry:entry torrent:torrent];
                 NSNumber* visibleNum = entry[@"visible"];
                 NSString* title = entry[@"title"];
                 if (visibleNum && title)

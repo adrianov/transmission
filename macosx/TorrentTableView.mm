@@ -1377,9 +1377,21 @@ static void setPlayButtonFolderCache(NSButton* sender, id value)
     [self setHighPriorityForItem:item forTorrent:torrent];
 }
 
+- (NSInteger)rowForViewOrAncestor:(NSView*)view
+{
+    for (NSView* v = view; v != nil; v = v.superview)
+    {
+        NSInteger row = [self rowForView:v];
+        if (row >= 0)
+            return row;
+    }
+    return -1;
+}
+
 - (IBAction)playMediaFile:(NSButton*)sender
 {
-    Torrent* torrent = [self itemAtRow:[self rowForView:[sender superview]]];
+    NSInteger row = [self rowForViewOrAncestor:sender];
+    Torrent* torrent = (row >= 0) ? [self itemAtRow:row] : nil;
     if (!torrent)
         return;
 
