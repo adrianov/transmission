@@ -36,6 +36,8 @@ static BOOL allRemaindersAreSingleEpisodeOnlyToken(NSArray<NSArray<NSString*>*>*
                                                    NSUInteger suffixDrop);
 /// YES if token is E or e followed only by digits (e.g. E126).
 static BOOL isEpisodeOnlyToken(NSString* token);
+/// YES if token is digits optionally followed by period (e.g. 01., 02., 1) — leading track number for strip.
+static BOOL isLeadingTrackNumberToken(NSString* token);
 
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wobjc-protocol-method-implementation"
@@ -272,9 +274,10 @@ static BOOL isEpisodeOnlyToken(NSString* token);
 #pragma mark - Individual file playables
 
 /// Returns stripped display titles for a group (2+ items). Single title returned as-is. Used by buttons and context menu.
-/// Word-boundary stripping: tokenize (whitespace-split; balanced "(...)" as one token), remove common leading and
-/// trailing tokens, rejoin. Season token (e.g. S1) is stripped only when 2+ titles share that season; single-episode
-/// seasons keep the season part. Keeps "(stereo)" intact; gives "I"/"II" for "Disk I"/"Disk II".
+/// When all titles start with a track-number token (e.g. 01., 02.), that token is kept and common prefix/suffix is
+/// computed on the remainder so e.g. "01. Artist - Song (Digitally Restored)" → "01. Song". Word-boundary stripping:
+/// tokenize (whitespace-split; balanced "(...)" as one token), remove common leading and trailing tokens, rejoin.
+/// Season token (e.g. S1) is stripped only when 2+ titles share that season. Keeps "(stereo)" intact.
 + (NSArray<NSString*>*)displayTitlesByStrippingCommonPrefixSuffix:(NSArray<NSString*>*)titles
 {
     return [self displayTitlesByStrippingCommonPrefixSuffix:titles seasons:nil];
@@ -295,17 +298,37 @@ static BOOL isEpisodeOnlyToken(NSString* token);
         NSArray<NSString*>* tokens = (s.length > 0) ? wordTokensFromString(s) : @[];
         [tokenArrays addObject:tokens];
     }
-    NSUInteger suffixDrop = commonSuffixTokenCount(tokenArrays);
-    NSUInteger prefixDrop = commonPrefixTokenCount(tokenArrays);
+    NSMutableArray<NSString*>* leadingTokens = nil;
+    NSMutableArray<NSArray<NSString*>*>* workArrays = [NSMutableArray arrayWithArray:tokenArrays];
+    BOOL allHaveLeadingTrackNum = YES;
+    for (NSArray<NSString*>* arr in tokenArrays)
+    {
+        if (arr.count == 0 || !isLeadingTrackNumberToken(arr[0]))
+        {
+            allHaveLeadingTrackNum = NO;
+            break;
+        }
+    }
+    if (allHaveLeadingTrackNum)
+    {
+        leadingTokens = [NSMutableArray arrayWithCapacity:titles.count];
+        workArrays = [NSMutableArray arrayWithCapacity:titles.count];
+        for (NSArray<NSString*>* arr in tokenArrays)
+        {
+            [leadingTokens addObject:arr[0]];
+            [workArrays addObject:[arr subarrayWithRange:NSMakeRange(1, arr.count - 1)]];
+        }
+    }
+    NSUInteger suffixDrop = commonSuffixTokenCount(workArrays);
+    NSUInteger prefixDrop = commonPrefixTokenCount(workArrays);
     // Allow prefix strip when: season token (S1, S01), or remainder is disc marker (CD1, Disc 1), or "Artist - " pattern.
-    if (prefixDrop > 0 && !commonPrefixContainsSeasonToken(tokenArrays, prefixDrop) &&
-        !allTitlesHaveDiscMarkerAt(tokenArrays, prefixDrop) &&
-        !commonPrefixEndsWithArtistSeparator(tokenArrays, prefixDrop))
+    if (prefixDrop > 0 && !commonPrefixContainsSeasonToken(workArrays, prefixDrop) &&
+        !allTitlesHaveDiscMarkerAt(workArrays, prefixDrop) &&
+        !commonPrefixEndsWithArtistSeparator(workArrays, prefixDrop))
         prefixDrop = 0;
     // Do not strip when the remainder would be only an episode-only token (e.g. E126); keep full title.
-    // Exception: when common prefix is a season token (S1 E1 -> E1), allow stripping.
-    if (prefixDrop > 0 && allRemaindersAreSingleEpisodeOnlyToken(tokenArrays, prefixDrop, suffixDrop) &&
-        !commonPrefixContainsSeasonToken(tokenArrays, prefixDrop))
+    if (prefixDrop > 0 && allRemaindersAreSingleEpisodeOnlyToken(workArrays, prefixDrop, suffixDrop) &&
+        !commonPrefixContainsSeasonToken(workArrays, prefixDrop))
         prefixDrop = 0;
     BOOL stripSeasonOnlyWhenMultiple = (seasons != nil && seasons.count == titles.count && prefixDrop > 0);
     NSMutableArray<NSNumber*>* effectivePrefixDrop = nil;
@@ -332,18 +355,24 @@ static BOOL isEpisodeOnlyToken(NSString* token);
             [result addObject:raw ?: @""];
             continue;
         }
-        NSArray<NSString*>* tokens = tokenArrays[i];
+        NSArray<NSString*>* tokens = workArrays[i];
         NSUInteger n = tokens.count;
         NSUInteger from = effectivePrefixDrop ? [effectivePrefixDrop[i] unsignedIntegerValue] : prefixDrop;
         NSUInteger to = (n > suffixDrop) ? n - suffixDrop : from;
+        NSString* joined;
         if (from >= to)
+            joined = nil;
+        else
         {
-            [result addObject:raw];
-            continue;
+            NSArray<NSString*>* kept = [tokens subarrayWithRange:NSMakeRange(from, to - from)];
+            joined = trimTrailingParenAndSpace(stringFromWordTokens(kept));
         }
-        NSArray<NSString*>* kept = [tokens subarrayWithRange:NSMakeRange(from, to - from)];
-        NSString* joined = trimTrailingParenAndSpace(stringFromWordTokens(kept));
-        [result addObject:joined.length > 0 ? joined : raw];
+        if (joined.length == 0)
+            [result addObject:raw];
+        else if (leadingTokens)
+            [result addObject:[[leadingTokens[i] stringByAppendingString:@" "] stringByAppendingString:joined]];
+        else
+            [result addObject:joined];
     }
     return result;
 }
@@ -460,6 +489,21 @@ static BOOL allRemaindersAreSingleEpisodeOnlyToken(NSArray<NSArray<NSString*>*>*
             return NO;
     }
     return YES;
+}
+
+static BOOL isLeadingTrackNumberToken(NSString* token)
+{
+    if (token.length == 0)
+        return NO;
+    NSUInteger i = 0;
+    NSCharacterSet* digits = [NSCharacterSet decimalDigitCharacterSet];
+    while (i < token.length && [digits characterIsMember:[token characterAtIndex:i]])
+        i++;
+    if (i == 0)
+        return NO;
+    if (i < token.length && [token characterAtIndex:i] == '.')
+        i++;
+    return i == token.length;
 }
 
 static NSArray<NSString*>* wordTokensFromString(NSString* s)
