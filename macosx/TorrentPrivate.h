@@ -85,8 +85,9 @@ typedef NS_ENUM(NSInteger, TorrentMediaType) {
 
 /// Call once before using sVideoExtensions etc. (Torrent+MediaType, playable, media category).
 + (void)ensureMediaExtensionSets;
-/// Stripped display titles for a group (2+ items). Single title returned as-is.
+/// Stripped display titles for a group (2+ items). Single title returned as-is. Pass seasons to strip season token only when 2+ titles share that season.
 + (NSArray<NSString*>*)displayTitlesByStrippingCommonPrefixSuffix:(NSArray<NSString*>*)titles;
++ (NSArray<NSString*>*)displayTitlesByStrippingCommonPrefixSuffix:(NSArray<NSString*>*)titles seasons:(NSArray<NSNumber*>*)seasons;
 
 @end
 

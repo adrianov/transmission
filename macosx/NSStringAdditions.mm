@@ -934,18 +934,31 @@
 {
     NSString* filename = self.lastPathComponent;
 
-    // Try S01E05 or S1E5 pattern (most common for TV shows)
+    // Try S01E05 or S1E5 pattern (display both season and episode)
     NSRegularExpression* seasonEpisodeRegex = [NSRegularExpression regularExpressionWithPattern:@"\\bS(\\d{1,2})[.\\s]?E(\\d{1,3})\\b"
                                                                                         options:NSRegularExpressionCaseInsensitive
                                                                                           error:nil];
     NSTextCheckingResult* seMatch = [seasonEpisodeRegex firstMatchInString:filename options:0 range:NSMakeRange(0, filename.length)];
     if (seMatch && seMatch.numberOfRanges >= 3)
     {
+        NSInteger season = [[filename substringWithRange:[seMatch rangeAtIndex:1]] integerValue];
         NSInteger episode = [[filename substringWithRange:[seMatch rangeAtIndex:2]] integerValue];
-        return [NSString stringWithFormat:@"E%ld", (long)episode];
+        return [NSString stringWithFormat:@"S%ld E%ld", (long)season, (long)episode];
     }
 
-    // Try E05 or E12 pattern (standalone episode)
+    // Try 1x05 pattern (display both season and episode)
+    NSRegularExpression* altSeasonRegex = [NSRegularExpression regularExpressionWithPattern:@"\\b(\\d{1,2})x(\\d{1,3})\\b"
+                                                                                    options:NSRegularExpressionCaseInsensitive
+                                                                                      error:nil];
+    NSTextCheckingResult* altMatch = [altSeasonRegex firstMatchInString:filename options:0 range:NSMakeRange(0, filename.length)];
+    if (altMatch && altMatch.numberOfRanges >= 3)
+    {
+        NSInteger season = [[filename substringWithRange:[altMatch rangeAtIndex:1]] integerValue];
+        NSInteger episode = [[filename substringWithRange:[altMatch rangeAtIndex:2]] integerValue];
+        return [NSString stringWithFormat:@"S%ld E%ld", (long)season, (long)episode];
+    }
+
+    // Try E05 or E12 pattern (standalone episode, no season)
     NSRegularExpression* standaloneEpisodeRegex = [NSRegularExpression regularExpressionWithPattern:@"\\bE(\\d{1,3})\\b"
                                                                                             options:NSRegularExpressionCaseInsensitive
                                                                                               error:nil];
@@ -954,17 +967,6 @@
     if (standaloneMatch && standaloneMatch.numberOfRanges >= 2)
     {
         NSInteger episode = [[filename substringWithRange:[standaloneMatch rangeAtIndex:1]] integerValue];
-        return [NSString stringWithFormat:@"E%ld", (long)episode];
-    }
-
-    // Try 1x05 pattern (alternative TV format)
-    NSRegularExpression* altSeasonRegex = [NSRegularExpression regularExpressionWithPattern:@"\\b(\\d{1,2})x(\\d{1,3})\\b"
-                                                                                    options:NSRegularExpressionCaseInsensitive
-                                                                                      error:nil];
-    NSTextCheckingResult* altMatch = [altSeasonRegex firstMatchInString:filename options:0 range:NSMakeRange(0, filename.length)];
-    if (altMatch && altMatch.numberOfRanges >= 3)
-    {
-        NSInteger episode = [[filename substringWithRange:[altMatch rangeAtIndex:2]] integerValue];
         return [NSString stringWithFormat:@"E%ld", (long)episode];
     }
 
@@ -980,27 +982,54 @@
 - (NSString*)humanReadableEpisodeTitleWithTorrentName:(NSString*)torrentName
 {
     NSString* filename = self.lastPathComponent;
+    NSString* episodePrefix = nil;
+    NSRange episodeMatchRange = NSMakeRange(NSNotFound, 0);
 
-    // Match SxxExx or Exx pattern
-    NSRegularExpression* episodeRegex = [NSRegularExpression regularExpressionWithPattern:@"\\b(?:S?\\d{1,2})?E(\\d{1,3})\\b"
-                                                                                  options:NSRegularExpressionCaseInsensitive
-                                                                                    error:nil];
-    if (episodeRegex == nil)
+    // Prefer SxxExx or 1x05: display both season and episode
+    NSRegularExpression* seasonEpisodeRegex = [NSRegularExpression regularExpressionWithPattern:@"\\bS(\\d{1,2})[.\\s]?E(\\d{1,3})\\b"
+                                                                                        options:NSRegularExpressionCaseInsensitive
+                                                                                          error:nil];
+    NSTextCheckingResult* seMatch = [seasonEpisodeRegex firstMatchInString:filename options:0 range:NSMakeRange(0, filename.length)];
+    if (seMatch && seMatch.numberOfRanges >= 3)
     {
-        return nil;
+        NSInteger season = [[filename substringWithRange:[seMatch rangeAtIndex:1]] integerValue];
+        NSInteger episode = [[filename substringWithRange:[seMatch rangeAtIndex:2]] integerValue];
+        episodePrefix = [NSString stringWithFormat:@"S%ld E%ld", (long)season, (long)episode];
+        episodeMatchRange = NSMakeRange(seMatch.range.location + seMatch.range.length, 0);
     }
-    NSTextCheckingResult* episodeMatch = [episodeRegex firstMatchInString:filename options:0 range:NSMakeRange(0, filename.length)];
-    if (!episodeMatch)
+    if (!episodePrefix)
     {
-        return nil;
+        NSRegularExpression* altSeasonRegex = [NSRegularExpression regularExpressionWithPattern:@"\\b(\\d{1,2})x(\\d{1,3})\\b"
+                                                                                        options:NSRegularExpressionCaseInsensitive
+                                                                                          error:nil];
+        NSTextCheckingResult* altMatch = [altSeasonRegex firstMatchInString:filename options:0 range:NSMakeRange(0, filename.length)];
+        if (altMatch && altMatch.numberOfRanges >= 3)
+        {
+            NSInteger season = [[filename substringWithRange:[altMatch rangeAtIndex:1]] integerValue];
+            NSInteger episode = [[filename substringWithRange:[altMatch rangeAtIndex:2]] integerValue];
+            episodePrefix = [NSString stringWithFormat:@"S%ld E%ld", (long)season, (long)episode];
+            episodeMatchRange = NSMakeRange(altMatch.range.location + altMatch.range.length, 0);
+        }
+    }
+    if (!episodePrefix)
+    {
+        NSRegularExpression* episodeRegex = [NSRegularExpression regularExpressionWithPattern:@"\\b(?:S?\\d{1,2})?E(\\d{1,3})\\b"
+                                                                                      options:NSRegularExpressionCaseInsensitive
+                                                                                        error:nil];
+        if (episodeRegex == nil)
+            return nil;
+        NSTextCheckingResult* episodeMatch = [episodeRegex firstMatchInString:filename options:0 range:NSMakeRange(0, filename.length)];
+        if (!episodeMatch)
+            return nil;
+        // Standalone E## only: show full humanized filename so button title is meaningful (e.g. "CzechStreets - 2020.06.30 E126 Bald Rebel 2160p").
+        NSString* base = filename.stringByDeletingPathExtension;
+        return base.length > 0 ? base.humanReadableFileName : nil;
     }
 
-    NSInteger episodeNum = [[filename substringWithRange:[episodeMatch rangeAtIndex:1]] integerValue];
-    NSString* episodePrefix = [NSString stringWithFormat:@"E%ld", (long)episodeNum];
-
-    // Try to extract title after the episode marker
-    // Remove everything before and including the episode marker
-    NSString* remaining = [filename substringFromIndex:episodeMatch.range.location + episodeMatch.range.length];
+    // Extract title from text after the episode marker (only when both season and episode were found)
+    NSString* remaining = episodeMatchRange.location != NSNotFound
+        ? [filename substringFromIndex:episodeMatchRange.location]
+        : @"";
 
     // If there's a dot or hyphen immediately after, skip it
     NSRegularExpression* separatorRegex = [NSRegularExpression regularExpressionWithPattern:@"^[.\\s]+" options:0 error:nil];

@@ -54,11 +54,13 @@ NS_ASSUME_NONNULL_BEGIN
 
 /**
  * Converts a filename to a human-readable episode name.
+ * When SxxExx or 1x05 is present, returns both season and episode (e.g. S1 E5).
  *
  * Examples:
- *   Show.S01E05.720p.mkv -> E5
- *   Show.S1.E12.HDTV.mp4 -> E12
- *   Show.1x05.720p.mkv -> E5
+ *   Show.S01E05.720p.mkv -> S1 E5
+ *   Show.S1.E12.HDTV.mp4 -> S1 E12
+ *   Show.1x05.720p.mkv -> S1 E5
+ *   Show.E05.standalone.mkv -> E5
  *
  * Returns nil if no episode pattern found.
  */
@@ -66,10 +68,13 @@ NS_ASSUME_NONNULL_BEGIN
 
 /**
  * Converts a filename to a human-readable episode title.
+ * When SxxExx or 1x05 is present, displays both season and episode; title after the marker is shown only then (e.g. S1 E1 - The Beginning).
+ * Standalone E05 shows as E5 only, no title.
  *
  * Examples:
- *   Ponies.S01E01.The.Beginning.1080p -> E1 - The Beginning
- *   Ponies.S01E01.1080p -> E1
+ *   Ponies.S01E01.The.Beginning.1080p -> S1 E1 - The Beginning
+ *   Ponies.S01E01.1080p -> S1 E1
+ *   Show.E05.standalone.mkv -> E5
  *
  * Returns nil if no episode pattern found.
  */

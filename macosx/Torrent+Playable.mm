@@ -21,6 +21,21 @@ static NSString* stringFromWordTokens(NSArray<NSString*>* tokens);
 /// Trim trailing whitespace and extra trailing ')' so e.g. "I (2024) " → "I (2024)", "Album (2024))" → "Album (2024)".
 static NSString* trimTrailingParenAndSpace(NSString* s);
 static NSDictionary<NSString*, NSString*>* commonPrefixAndSuffixForStrings(NSArray<NSString*>* strings);
+/// YES if token looks like a season marker (e.g. S1, S01).
+static BOOL isSeasonToken(NSString* token);
+/// YES if tokens from given index form a disc marker (CD1, Disc 1, CD 2, etc.).
+static BOOL isDiscMarkerFromTokenIndex(NSArray<NSString*>* tokens, NSUInteger from);
+/// YES if every token array has a disc marker at the common prefix boundary (prefixDrop).
+static BOOL allTitlesHaveDiscMarkerAt(NSArray<NSArray<NSString*>*>* tokenArrays, NSUInteger prefixDrop);
+/// YES if the common prefix (0..prefixDrop-1) of the first title contains a season token (S1, S01, etc.).
+static BOOL commonPrefixContainsSeasonToken(NSArray<NSArray<NSString*>*>* tokenArrays, NSUInteger prefixDrop);
+/// YES if the common prefix ends with "-" (Artist - Title pattern); allows stripping "Artist - " for album buttons.
+static BOOL commonPrefixEndsWithArtistSeparator(NSArray<NSArray<NSString*>*>* tokenArrays, NSUInteger prefixDrop);
+/// YES if every title's remainder (prefixDrop..n-suffixDrop) is a single token matching E + digits (episode-only); do not strip then.
+static BOOL allRemaindersAreSingleEpisodeOnlyToken(NSArray<NSArray<NSString*>*>* tokenArrays, NSUInteger prefixDrop,
+                                                   NSUInteger suffixDrop);
+/// YES if token is E or e followed only by digits (e.g. E126).
+static BOOL isEpisodeOnlyToken(NSString* token);
 
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wobjc-protocol-method-implementation"
@@ -111,11 +126,7 @@ static NSDictionary<NSString*, NSString*>* commonPrefixAndSuffixForStrings(NSArr
 
 #pragma mark - Humanized title for folder playables (content buttons)
 
-/// Minimum path components required to add parent dir to CD/Disc button title.
-/// E.g. 2 = add parent for "Album/CD1" (-> "Album - CD1"); 3 = add only for "Artist/Album/CD1", not for top-level "TorrentName/CD1".
-static NSUInteger const kMinPathComponentsForCDParentInTitle = 2;
-
-/// Humanized display name for a folder-based playable (disc or album). Single place for CD/Disc parent rule.
+/// Humanized display name for a folder-based playable (disc or album). Uses only the folder name; no parent path.
 - (NSString*)humanizedTitleForFolderPlayableWithFolder:(NSString*)folder
                                         pathComponents:(NSArray<NSString*>*)parts
                                                 isDisc:(BOOL)isDisc
@@ -141,29 +152,9 @@ static NSUInteger const kMinPathComponentsForCDParentInTitle = 2;
     {
         name = [NSString stringWithFormat:@"%@ %lu", (isDisc ? @"Disc" : @"Album"), (unsigned long)(index + 1)];
     }
-    else
+    else if (!isDisc)
     {
-        BOOL addParentToCD = (parts.count >= kMinPathComponentsForCDParentInTitle);
-        if (addParentToCD)
-        {
-            NSRegularExpression* cdRegex = [NSRegularExpression regularExpressionWithPattern:@"^(CD|Disc)\\s*\\d+$"
-                                                                                     options:NSRegularExpressionCaseInsensitive
-                                                                                       error:nil];
-            NSRange nameRange = NSMakeRange(0, name.length);
-            if ([cdRegex firstMatchInString:name options:0 range:nameRange])
-            {
-                NSString* parent = parts[parts.count - 2];
-                if (parent.length > 0)
-                {
-                    name = [NSString stringWithFormat:@"%@ - %@", parent, name];
-                }
-            }
-        }
-
-        if (!isDisc)
-        {
-            name = name.humanReadableFileName;
-        }
+        name = name.humanReadableFileName;
     }
     return name;
 }
@@ -282,20 +273,56 @@ static NSUInteger const kMinPathComponentsForCDParentInTitle = 2;
 
 /// Returns stripped display titles for a group (2+ items). Single title returned as-is. Used by buttons and context menu.
 /// Word-boundary stripping: tokenize (whitespace-split; balanced "(...)" as one token), remove common leading and
-/// trailing tokens, rejoin. Keeps "(stereo)" intact; gives "I"/"II" for "Disk I"/"Disk II".
+/// trailing tokens, rejoin. Season token (e.g. S1) is stripped only when 2+ titles share that season; single-episode
+/// seasons keep the season part. Keeps "(stereo)" intact; gives "I"/"II" for "Disk I"/"Disk II".
 + (NSArray<NSString*>*)displayTitlesByStrippingCommonPrefixSuffix:(NSArray<NSString*>*)titles
+{
+    return [self displayTitlesByStrippingCommonPrefixSuffix:titles seasons:nil];
+}
+
++ (NSArray<NSString*>*)displayTitlesByStrippingCommonPrefixSuffix:(NSArray<NSString*>*)titles
+                                                         seasons:(NSArray<NSNumber*>*)seasons
 {
     if (titles.count < 2)
         return titles;
     NSMutableArray<NSArray<NSString*>*>* tokenArrays = [NSMutableArray arrayWithCapacity:titles.count];
+    NSCharacterSet* ws = NSCharacterSet.whitespaceAndNewlineCharacterSet;
     for (id raw in titles)
     {
         NSString* s = [raw isKindOfClass:[NSString class]] ? raw : nil;
+        if (s.length > 0)
+            s = [s stringByTrimmingCharactersInSet:ws];
         NSArray<NSString*>* tokens = (s.length > 0) ? wordTokensFromString(s) : @[];
         [tokenArrays addObject:tokens];
     }
     NSUInteger suffixDrop = commonSuffixTokenCount(tokenArrays);
     NSUInteger prefixDrop = commonPrefixTokenCount(tokenArrays);
+    // Allow prefix strip when: season token (S1, S01), or remainder is disc marker (CD1, Disc 1), or "Artist - " pattern.
+    if (prefixDrop > 0 && !commonPrefixContainsSeasonToken(tokenArrays, prefixDrop) &&
+        !allTitlesHaveDiscMarkerAt(tokenArrays, prefixDrop) &&
+        !commonPrefixEndsWithArtistSeparator(tokenArrays, prefixDrop))
+        prefixDrop = 0;
+    // Do not strip when the remainder would be only an episode-only token (e.g. E126); keep full title.
+    // Exception: when common prefix is a season token (S1 E1 -> E1), allow stripping.
+    if (prefixDrop > 0 && allRemaindersAreSingleEpisodeOnlyToken(tokenArrays, prefixDrop, suffixDrop) &&
+        !commonPrefixContainsSeasonToken(tokenArrays, prefixDrop))
+        prefixDrop = 0;
+    BOOL stripSeasonOnlyWhenMultiple = (seasons != nil && seasons.count == titles.count && prefixDrop > 0);
+    NSMutableArray<NSNumber*>* effectivePrefixDrop = nil;
+    if (stripSeasonOnlyWhenMultiple)
+    {
+        effectivePrefixDrop = [NSMutableArray arrayWithCapacity:titles.count];
+        for (NSUInteger i = 0; i < titles.count; i++)
+        {
+            NSInteger seasonVal = [seasons[i] integerValue];
+            NSUInteger count = 0;
+            for (NSUInteger j = 0; j < titles.count; j++)
+                if ([seasons[j] integerValue] == seasonVal)
+                    count++;
+            NSUInteger drop = (count >= 2) ? prefixDrop : (prefixDrop > 0 ? prefixDrop - 1 : 0);
+            [effectivePrefixDrop addObject:@(drop)];
+        }
+    }
     NSMutableArray<NSString*>* result = [NSMutableArray arrayWithCapacity:titles.count];
     for (NSUInteger i = 0; i < titles.count; i++)
     {
@@ -307,7 +334,7 @@ static NSUInteger const kMinPathComponentsForCDParentInTitle = 2;
         }
         NSArray<NSString*>* tokens = tokenArrays[i];
         NSUInteger n = tokens.count;
-        NSUInteger from = prefixDrop;
+        NSUInteger from = effectivePrefixDrop ? [effectivePrefixDrop[i] unsignedIntegerValue] : prefixDrop;
         NSUInteger to = (n > suffixDrop) ? n - suffixDrop : from;
         if (from >= to)
         {
@@ -319,6 +346,120 @@ static NSUInteger const kMinPathComponentsForCDParentInTitle = 2;
         [result addObject:joined.length > 0 ? joined : raw];
     }
     return result;
+}
+
+static BOOL isSeasonToken(NSString* token)
+{
+    if (token.length < 2)
+        return NO;
+    unichar c = [token characterAtIndex:0];
+    if (c != 'S' && c != 's')
+        return NO;
+    for (NSUInteger i = 1; i < token.length; i++)
+        if (![[NSCharacterSet decimalDigitCharacterSet] characterIsMember:[token characterAtIndex:i]])
+            return NO;
+    return YES;
+}
+
+static BOOL isDiscMarkerFromTokenIndex(NSArray<NSString*>* tokens, NSUInteger from)
+{
+    if (from >= tokens.count)
+        return NO;
+    NSString* t0 = [tokens[from] lowercaseString];
+    if (t0.length == 0)
+        return NO;
+    NSCharacterSet* digits = [NSCharacterSet decimalDigitCharacterSet];
+    if (from >= 1)
+    {
+        NSString* prev = [tokens[from - 1] lowercaseString];
+        if (([prev isEqualToString:@"disc"] || [prev isEqualToString:@"disk"] || [prev isEqualToString:@"cd"]) &&
+            [t0 stringByTrimmingCharactersInSet:digits].length == 0)
+            return YES; // "Disc 1", "Disk 1", "CD 1" etc. with marker word in common prefix
+    }
+    if ([t0 isEqualToString:@"cd"] || [t0 isEqualToString:@"disc"] || [t0 isEqualToString:@"disk"])
+    {
+        if (from + 1 < tokens.count)
+        {
+            NSString* t1 = tokens[from + 1];
+            if (t1.length > 0 && [t1 stringByTrimmingCharactersInSet:digits].length == 0)
+                return YES;
+        }
+        return NO;
+    }
+    if (t0.length >= 3 && [t0 hasPrefix:@"cd"])
+    {
+        NSString* rest = [t0 substringFromIndex:2];
+        return rest.length > 0 && [rest stringByTrimmingCharactersInSet:digits].length == 0;
+    }
+    if (t0.length >= 4 && [t0 hasPrefix:@"disc"])
+    {
+        NSString* rest = [t0 substringFromIndex:4];
+        return rest.length > 0 && [rest stringByTrimmingCharactersInSet:digits].length == 0;
+    }
+    if (t0.length >= 5 && [t0 hasPrefix:@"disk"])
+    {
+        NSString* rest = [t0 substringFromIndex:4];
+        return rest.length > 0 && [rest stringByTrimmingCharactersInSet:digits].length == 0;
+    }
+    return NO;
+}
+
+static BOOL allTitlesHaveDiscMarkerAt(NSArray<NSArray<NSString*>*>* tokenArrays, NSUInteger prefixDrop)
+{
+    for (NSArray<NSString*>* tokens in tokenArrays)
+    {
+        if (!isDiscMarkerFromTokenIndex(tokens, prefixDrop))
+            return NO;
+    }
+    return YES;
+}
+
+static BOOL commonPrefixContainsSeasonToken(NSArray<NSArray<NSString*>*>* tokenArrays, NSUInteger prefixDrop)
+{
+    if (prefixDrop == 0 || tokenArrays.count == 0)
+        return NO;
+    NSArray<NSString*>* first = tokenArrays[0];
+    for (NSUInteger k = 0; k < prefixDrop && k < first.count; k++)
+    {
+        if (isSeasonToken(first[k]))
+            return YES;
+    }
+    return NO;
+}
+
+static BOOL commonPrefixEndsWithArtistSeparator(NSArray<NSArray<NSString*>*>* tokenArrays, NSUInteger prefixDrop)
+{
+    if (prefixDrop == 0 || tokenArrays.count == 0)
+        return NO;
+    return [tokenArrays[0][prefixDrop - 1] isEqualToString:@"-"];
+}
+
+static BOOL isEpisodeOnlyToken(NSString* token)
+{
+    if (token.length < 2)
+        return NO;
+    unichar c = [token characterAtIndex:0];
+    if (c != 'E' && c != 'e')
+        return NO;
+    for (NSUInteger i = 1; i < token.length; i++)
+        if (![[NSCharacterSet decimalDigitCharacterSet] characterIsMember:[token characterAtIndex:i]])
+            return NO;
+    return YES;
+}
+
+static BOOL allRemaindersAreSingleEpisodeOnlyToken(NSArray<NSArray<NSString*>*>* tokenArrays, NSUInteger prefixDrop,
+                                                  NSUInteger suffixDrop)
+{
+    for (NSArray<NSString*>* tokens in tokenArrays)
+    {
+        NSUInteger n = tokens.count;
+        NSUInteger to = (n > suffixDrop) ? n - suffixDrop : prefixDrop;
+        if (to <= prefixDrop || to - prefixDrop != 1)
+            return NO;
+        if (!isEpisodeOnlyToken(tokens[prefixDrop]))
+            return NO;
+    }
+    return YES;
 }
 
 static NSArray<NSString*>* wordTokensFromString(NSString* s)
@@ -859,8 +1000,11 @@ static NSDictionary<NSString*, NSString*>* commonPrefixAndSuffixForStrings(NSArr
         if (folder.length > 0)
         {
             NSString* pathToOpen = [self pathToOpenForFolder:folder];
-            if (pathToOpen.length > 0)
+            if (pathToOpen.length > 0 && [pathToOpen.pathExtension.lowercaseString isEqualToString:@"cue"])
                 return pathToOpen;
+            NSString* trackPath = item[@"path"];
+            if (trackPath.length > 0)
+                return trackPath;
         }
     }
     NSString* pathToOpen = [self pathToOpenForPlayableItem:item];
