@@ -282,7 +282,7 @@ size_t tr_peerIo::try_write(size_t max)
 {
     static auto constexpr Dir = TR_UP;
 
-    if (max == 0U)
+    if (max == 0U || !socket_.is_valid())
     {
         return {};
     }
