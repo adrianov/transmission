@@ -288,7 +288,7 @@ TEST_F(NSStringAdditionsTest, HumanReadableEpisodeTitle_FullMoonParty)
     NSString* input = @"The.White.Lotus.S03E05.Full-Moon.Party.1080p.AMZN.WEB-DL.H.264-EniaHD.mkv";
     NSString* result = [input.lastPathComponent humanReadableEpisodeTitleWithTorrentName:@"The White Lotus - Season 3"];
     EXPECT_TRUE([result containsString:@"Full-Moon Party"]) << "Should contain 'Full-Moon Party', got: " << [result UTF8String];
-    EXPECT_TRUE([result hasPrefix:@"E5"]) << "Should start with episode number, got: " << [result UTF8String];
+    EXPECT_TRUE([result hasPrefix:@"S3 E5"]) << "Should start with season and episode, got: " << [result UTF8String];
     EXPECT_FALSE([result containsString:@"1080p"]) << "Should not contain technical tags, got: " << [result UTF8String];
     EXPECT_FALSE([result containsString:@"AMZN"]) << "Should not contain technical tags, got: " << [result UTF8String];
     EXPECT_FALSE([result containsString:@"EniaHD"]) << "Should not contain technical tags, got: " << [result UTF8String];
@@ -301,5 +301,15 @@ TEST_F(NSStringAdditionsTest, HumanReadableEpisodeTitle_ComplexEpisodeName)
     NSString* input = @"Show.S01E10.The.Final.Battle.1080p.mkv";
     NSString* result = [input.lastPathComponent humanReadableEpisodeTitleWithTorrentName:@"Show - Season 1"];
     EXPECT_TRUE([result containsString:@"The Final Battle"]) << "Should contain full episode name, got: " << [result UTF8String];
-    EXPECT_TRUE([result hasPrefix:@"E10"]) << "Should start with episode number, got: " << [result UTF8String];
+    EXPECT_TRUE([result hasPrefix:@"S1 E10"]) << "Should start with season and episode, got: " << [result UTF8String];
+}
+
+TEST_F(NSStringAdditionsTest, HumanReadableEpisodeTitle_StandaloneE05_FullFilename)
+{
+    // Standalone E##: show full humanized filename so button title is meaningful (not just E5).
+    NSString* input = @"Show.E05.Something.720p.mkv";
+    NSString* result = [input.lastPathComponent humanReadableEpisodeTitleWithTorrentName:nil];
+    EXPECT_TRUE([result containsString:@"E05"] || [result containsString:@"E5"]) << "Should contain episode, got: " << [result UTF8String];
+    EXPECT_TRUE([result containsString:@"Show"]) << "Should contain full title, got: " << [result UTF8String];
+    EXPECT_GT(result.length, (NSUInteger)3) << "Should be full filename, got: " << [result UTF8String];
 }
