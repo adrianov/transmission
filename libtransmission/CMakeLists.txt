@@ -140,6 +140,7 @@ target_sources(${TR_NAME}
         torrent-metainfo.cc
         torrent-metainfo.h
         torrent-error.cc
+        torrent-error.h
         torrent-piece-priority.cc
         torrent-consecutive-progress.cc
         torrent-helpers.h
@@ -148,6 +149,7 @@ target_sources(${TR_NAME}
         torrent-queue.h
         torrent-resume.cc
         torrent-rename.cc
+        torrent-smoothed-speed.h
         torrent-scripts.cc
         torrent-scripts.h
         torrent-stats.cc
