@@ -160,7 +160,7 @@ Parts are assembled with specific formatting:
 | `Golden Disco Hits - 2000 - 2003` | `Golden Disco Hits (2000-2003)` |
 | `Artist - Album Name (2020) [FLAC]` | `Artist - Album Name (2020) #flac` |
 | `Artist.Album.2019.MP3` | `Artist Album (2019) #mp3` |
-| `The.White.Lotus.S03E05.Full-Moon.Party.1080p.AMZN.WEB-DL.H.264-EniaHD.mkv` | Episode button: `▶ E5 - Full-Moon Party` |
+| `The.White.Lotus.S03E05.Full-Moon.Party.1080p.AMZN.WEB-DL.H.264-EniaHD.mkv` | Episode button: `▶ S3 E5 - Full-Moon Party` |
 | `Beavis.and.Butt-Head.Do` | `Beavis and Butt-Head Do` |
 | `NaughtyAmerica(NaughtyBookworms)` | `NaughtyAmerica (NaughtyBookworms)` |
 
@@ -179,13 +179,13 @@ Media torrents display Play buttons below the status line for quick access to do
 - **DJVU/DJV:** Read button appears only when a default app is registered; opens in that app
 - **Single document:** The button label is `Read`
 - **Document readiness:** Read buttons appear only when the file is 100% downloaded
-- **Episode detection:** Files with `S01E05` or `1x05` patterns show as `▶ E1`, `▶ E2`, etc.
-- **Episode title detection:** If a title follows the episode marker, it is extracted and cleaned (e.g., `▶ E1 - The Beginning`, `▶ E5 - Full-Moon Party`)
+- **Episode detection:** Files with `S01E05` or `1x05` patterns show both season and episode (e.g. `▶ S1 E5`). Standalone E## shows the full humanized filename (e.g. `CzechStreets - 2020.06.30 E126 Bald Rebel 2160p`).
+- **Episode title detection:** When both season and episode are present, a title following the episode marker is extracted and cleaned (e.g., `▶ S1 E1 - The Beginning`, `▶ S3 E5 - Full-Moon Party`). Standalone E## (no season) shows the full humanized filename (e.g. `CzechStreets - 2020.06.30 E126 Bald Rebel 2160p`) so the button title is meaningful; common prefix/suffix stripping does not reduce it to just the episode code.
 - **Technical tag removal:** Titles are aggressively cleaned of technical tags like `1080p`, `WEB-DL`, `H264`, `AMZN`, `EniaHD`, etc. before title extraction
 - **Hyphen preservation:** Hyphens in hyphenated words (e.g., `Full-Moon`) are preserved and not converted to spaces
 - **Dot-to-space conversion:** Dots between words in episode titles are converted to spaces (e.g., `Full-Moon.Party` → `Full-Moon Party`)
 - **Redundancy removal:** If the detected episode title is just a repeat of the series name, it is simplified to just the episode number
-- **Common prefix/suffix removal:** When a transfer has two or more play buttons (or context menu items), a common prefix/suffix shared by all titles is removed for display only. Stripping is done at **word boundaries**: tokenize by whitespace and treat balanced `(...)` as one token (e.g. `(stereo)` stays intact); remove common leading and trailing tokens. Examples: `Disk I` / `Disk II` → `I` and `II`; `file 1 (stereo).mp3` / `file 2 (mono).mp3` → `1 (stereo)` and `2 (mono)`. Applies to directory (folder) and episode (file) buttons and the right-click Play menu (DRY). File names in the data model are not stripped.
+- **Common prefix/suffix removal:** When a transfer has two or more play buttons (or context menu items), a common prefix/suffix shared by all titles is removed for display only. Stripping uses only the button titles (no directory structure). **Prefix** is stripped when (1) the common prefix contains a **season token** (e.g. `S1`, `S01`), or (2) the part after the common prefix is a **disc marker** (e.g. `CD1`, `CD 1`, `Disc 1`, `Disk 1`, `Disk.1`), or (3) the common prefix ends with **` - `** (Artist - Title pattern, e.g. `Victor Choi - Black Album.cue` and `Victor Choi - Golden Album.cue` → `Black`, `Golden`). Prefix is **not** stripped when the remainder would be only an **episode-only token** (e.g. `E126`); full title is kept (e.g. `CzechStreets - 2020.06.30 E126 Bald Rebel 2160p`). Exception: when the common prefix contains a season token, prefix is stripped (e.g. `S1 E1`, `S1 E2` → `E1`, `E2`). Other common prefixes (e.g. series names without season, dates) are not stripped. The season token is stripped only when there are two or more titles in that season; a single title in a season keeps the season part. **Suffix** stripping uses word boundaries (tokenize by whitespace; treat balanced `(...)` as one token). Folder playable titles are the folder name only (no parent path). Applies to directory (folder) and episode (file) buttons and the right-click Play menu (DRY). File names in the data model are not stripped.
 - **Season grouping:** Multiple seasons show headers (`Season 1:`, `Season 2:`) followed by episode buttons
 - **Single season:** No header shown, just episode buttons (`▶ E1`, `▶ E2`, ...)
 - **Non-episode files:** Show lightly humanized filename (separator cleanup) (e.g., `▶ Artist Track Name`)
@@ -199,8 +199,8 @@ Media torrents display Play buttons below the status line for quick access to do
 
 Button titles for individual files follow these rules:
 
-1. **Episode files** (`S01E05`, `1x05` patterns): Show as `▶ E5`, `▶ E12`, etc.
-   - If a title is detected after the marker, it shows as `▶ E5 - Title`.
+1. **Episode files** (`S01E05`, `1x05` patterns): When season and episode are present, show both (e.g. `▶ S1 E5`, `▶ S1 E12`). Standalone `E05` shows as `▶ E5`.
+   - Title after the marker is shown only when both season and episode are found (e.g. `▶ S1 E5 - Title`). Standalone E## shows the full humanized filename.
    - Technical tags (`1080p`, `HEVC`, etc.) and redundant series names are stripped.
 2. **Non-episode files**: Show filename with lightweight separator normalization
    - If the name is separator-heavy (lots of `.` / `-` / `_` and few/no spaces), separators are replaced with spaces
@@ -252,15 +252,17 @@ Filenames are converted to readable episode names:
 
 | Filename Pattern | Button Title |
 |-----------------|--------------|
-| `Show.S01E05.720p.mkv` | `▶ E5` |
-| `Show.S1.E12.HDTV.mp4` | `▶ E12` |
-| `Show.1x05.720p.mkv` | `▶ E5` |
-| `Show.S03E05.Full-Moon.Party.1080p.AMZN.WEB-DL.H.264-EniaHD.mkv` | `▶ E5 - Full-Moon Party` |
+| `Show.S01E05.720p.mkv` | `▶ S1 E5` |
+| `Show.S1.E12.HDTV.mp4` | `▶ S1 E12` |
+| `Show.1x05.720p.mkv` | `▶ S1 E5` |
+| `Show.S03E05.Full-Moon.Party.1080p.AMZN.WEB-DL.H.264-EniaHD.mkv` | `▶ S3 E5 - Full-Moon Party` |
+| `Show.E05.standalone.mkv` | `▶ E5` |
 | `Artist.Track.Name.mp3` | `▶ Artist Track Name` |
 | `Concert.2160p.FLAC.flac` | `▶ Concert 2160p FLAC` |
 
 **Episode Title Extraction Rules:**
-- Episode titles are extracted from text following the episode marker (e.g., `S03E05` or `E05`)
+- When the filename matches SxxExx or 1x05, both season and episode are shown (e.g. S1 E5 or S1 E5 - Title).
+- Episode titles are extracted from text following the episode marker only when both season and episode are present (SxxExx or 1x05). Standalone E## shows the full humanized filename.
 - Dots (`.`) between words are converted to spaces (e.g., `Full-Moon.Party` → `Full-Moon Party`)
 - Hyphens in hyphenated words are preserved (e.g., `Full-Moon` stays as `Full-Moon`, not `Full Moon`)
 - Technical tags (resolutions, codecs, release info) are stripped before title processing
@@ -272,7 +274,7 @@ Filenames are converted to readable episode names:
 The transformation is implemented in:
 
 - **macOS:** `NSStringAdditions.mm` - `humanReadableTitle`, `humanReadableFileName`, and `humanReadableEpisodeName` properties on `NSString`
-- **macOS:** `Torrent+Playable.mm` - `playableFiles`, folder-based and file-based playable names (including CD/Disc humanized titles via `humanizedTitleForFolderPlayableWithFolder:…` and `kMinPathComponentsForCDParentInTitle`). Common prefix/suffix stripping at display time via `[Torrent displayTitlesByStrippingCommonPrefixSuffix:]`: tokenize by whitespace with balanced `(...)` as one token (e.g. `1 (stereo).mp3` → `["1", "(stereo)", ".mp3"]`), drop common leading/trailing tokens, rejoin; then trim trailing space and strip extra trailing `)` (e.g. `Album (2024))` → `Album (2024)`). `PlayButtonStateBuilder` sets stripped titles for 2+ items; `TorrentTableView+Flow` and `TorrentTableView+PlayMenu` use the same state (DRY).
+- **macOS:** `Torrent+Playable.mm` - `playableFiles`, folder-based and file-based playable names (folder title = folder name only via `humanizedTitleForFolderPlayableWithFolder:…`). Common prefix/suffix stripping at display time via `[Torrent displayTitlesByStrippingCommonPrefixSuffix:seasons:]`: uses only title strings; tokenize by whitespace with balanced `(...)` as one token; drop common **leading** tokens when the common prefix contains a season token (S1/S01) or when the remainder after the common prefix is a disc marker (CD1, Disc 1, etc.); for season-only stripping when 2+ titles share that season; drop common trailing tokens; rejoin; then trim trailing space and strip extra trailing `)`. `PlayButtonStateBuilder` sets stripped titles for 2+ items; `TorrentTableView+Flow` and `TorrentTableView+PlayMenu` use the same state (DRY).
 - **macOS:** `TorrentTableView.mm` - Play button UI and dynamic row height
 - **Web UI:** `formatter.js` - `Formatter.humanTitle()` (torrent list) and `Formatter.humanFileName()` (file list)
 
