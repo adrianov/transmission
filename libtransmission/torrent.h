@@ -35,7 +35,9 @@
 #include "libtransmission/session.h"
 #include "libtransmission/torrent-files.h"
 #include "libtransmission/torrent-magnet.h"
+#include "libtransmission/torrent-error.h"
 #include "libtransmission/torrent-metainfo.h"
+#include "libtransmission/torrent-smoothed-speed.h"
 #include "libtransmission/tr-assert.h"
 #include "libtransmission/tr-macros.h"
 #include "libtransmission/verify.h"
@@ -838,6 +840,11 @@ struct tr_torrent
     // Returns true if piece belongs to a priority file (IFO/BUP for DVD, index.bdmv for Blu-ray, .jpg for audio)
     [[nodiscard]] bool is_piece_in_priority_file(tr_piece_index_t piece) const noexcept;
 
+    [[nodiscard]] constexpr bool is_deleting() const noexcept
+    {
+        return is_deleting_;
+    }
+
     [[nodiscard]] constexpr bool is_running() const noexcept
     {
         return is_running_;
@@ -1010,12 +1017,12 @@ struct tr_torrent
 
     void on_block_received(tr_block_index_t block);
 
-    [[nodiscard]] constexpr auto& error() noexcept
+    [[nodiscard]] constexpr tr_torrent_error& error() noexcept
     {
         return error_;
     }
 
-    [[nodiscard]] constexpr auto const& error() const noexcept
+    [[nodiscard]] constexpr tr_torrent_error const& error() const noexcept
     {
         return error_;
     }
@@ -1109,77 +1116,6 @@ private:
         None,
         Queued,
         Active
-    };
-
-    // Tracks a torrent's error state, either local (e.g. file IO errors)
-    // or tracker errors (e.g. warnings returned by a tracker).
-    class Error
-    {
-    public:
-        [[nodiscard]] constexpr auto empty() const noexcept
-        {
-            return error_type_ == TR_STAT_OK;
-        }
-
-        [[nodiscard]] constexpr auto error_type() const noexcept
-        {
-            return error_type_;
-        }
-
-        [[nodiscard]] constexpr auto const& announce_url() const noexcept
-        {
-            return announce_url_;
-        }
-
-        [[nodiscard]] constexpr auto const& errmsg() const noexcept
-        {
-            return errmsg_;
-        }
-
-        void set_tracker_warning(tr_interned_string announce_url, std::string_view errmsg);
-        void set_tracker_error(tr_interned_string announce_url, std::string_view errmsg);
-        void set_local_error(std::string_view errmsg);
-
-        void clear() noexcept;
-        void clear_if_tracker() noexcept;
-
-    private:
-        tr_interned_string announce_url_; // the source for tracker errors/warnings
-        std::string errmsg_;
-        tr_stat_errtype error_type_ = TR_STAT_OK;
-    };
-
-    // Helper class to smooth out speed estimates.
-    // Used to prevent temporary speed changes from skewing the ETA too much.
-    class SimpleSmoothedSpeed
-    {
-    public:
-        constexpr auto update(uint64_t time_msec, Speed speed)
-        {
-            // If the old speed is too old, just replace it
-            if (timestamp_msec_ + MaxAgeMSec <= time_msec)
-            {
-                timestamp_msec_ = time_msec;
-                speed_ = speed;
-            }
-
-            // To prevent the smoothing from being overwhelmed by frequent calls
-            // to update(), do nothing if not enough time elapsed since last update.
-            else if (timestamp_msec_ + MinUpdateMSec <= time_msec)
-            {
-                timestamp_msec_ = time_msec;
-                speed_ = (speed_ * 4U + speed) / 5U;
-            }
-
-            return speed_;
-        }
-
-    private:
-        static auto constexpr MaxAgeMSec = 4000U;
-        static auto constexpr MinUpdateMSec = 800U;
-
-        uint64_t timestamp_msec_ = {};
-        Speed speed_;
     };
 
     [[nodiscard]] constexpr auto seconds_downloading(time_t now) const noexcept
@@ -1396,7 +1332,7 @@ private:
 
     tr_stat stats_ = {};
 
-    Error error_;
+    tr_torrent_error error_;
 
     VerifyDoneCallback verify_done_callback_;
 
@@ -1438,7 +1374,7 @@ private:
 
     tr_sha1_digest_t obfuscated_hash_ = {};
 
-    mutable SimpleSmoothedSpeed eta_speed_;
+    mutable tr_smoothed_speed eta_speed_;
 
     tr_files_wanted files_wanted_{ &fpm_ };
     tr_file_priorities file_priorities_{ &fpm_ };
