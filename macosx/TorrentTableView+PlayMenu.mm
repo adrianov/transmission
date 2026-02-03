@@ -83,10 +83,8 @@
         CGFloat progress = (CGFloat)tr_torrentFileConsecutiveProgress(torrent.torrentStruct, (tr_file_index_t)idx);
         if (progress < 0)
             progress = 0;
-        if (progress <= 0 && file.wanted)
-            return;
         if (!file.wanted && progress < 1.0)
-            return;
+            return; // hide unwanted incomplete files; show all wanted tracks so menu lists every .m4a with its title
 
         NSString* displayName = fileName.lastPathComponent.stringByDeletingPathExtension.humanReadableFileName;
         if (!displayName || displayName.length == 0)
@@ -173,7 +171,13 @@
             if ([type isEqualToString:@"album"])
             {
                 NSArray<NSDictionary*>* tracks = [self tracksForAlbumItem:fileItem torrent:torrent];
-                if (tracks && tracks.count > 1)
+                if (tracks && tracks.count == 1)
+                {
+                    NSDictionary* track = tracks.firstObject;
+                    menuTitle = [self menuTitleForPlayableItem:track torrent:torrent includeProgress:YES];
+                    fileItem = track; // play the track, not the folder
+                }
+                else if (tracks && tracks.count > 1)
                 {
                     NSMenuItem* albumItem = [[NSMenuItem alloc] initWithTitle:menuTitle action:nil keyEquivalent:@""];
                     albumItem.image = [self iconForPlayableFileItem:fileItem torrent:torrent];

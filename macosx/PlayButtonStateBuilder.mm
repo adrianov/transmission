@@ -32,7 +32,13 @@ static NSDictionary* stateAndLayoutFromSnapshotImpl(NSArray<NSDictionary*>* snap
     if (state.count >= 2)
     {
         NSArray<NSString*>* titles = [state valueForKey:@"baseTitle"];
-        NSArray<NSString*>* stripped = [Torrent displayTitlesByStrippingCommonPrefixSuffix:titles];
+        NSMutableArray<NSNumber*>* seasons = [NSMutableArray arrayWithCapacity:state.count];
+        for (NSDictionary* e in state)
+        {
+            id s = e[@"season"];
+            [seasons addObject:(s && s != [NSNull null]) ? s : @0];
+        }
+        NSArray<NSString*>* stripped = [Torrent displayTitlesByStrippingCommonPrefixSuffix:titles seasons:seasons];
         for (NSUInteger i = 0; i < state.count; i++)
             state[i][@"title"] = stripped[i];
         for (NSUInteger i = 0; i < state.count; i++)
@@ -233,7 +239,7 @@ static NSDictionary* stateAndLayoutFromSnapshotImpl(NSArray<NSDictionary*>* snap
             entry[@"visible"] = @(visible);
             if (visible && ![type hasPrefix:@"document"] && progress < 1.0 && progressPct < 100)
                 entry[@"title"] = [NSString stringWithFormat:@"%@ (%d%%)", entry[@"baseTitle"], progressPct];
-            // IINA watch-later: iinaUnwatched → green button; watched or no path → gray. Needs read access to IINA watch_later folder.
+            // IINA watch_later + playback history: existence-only check (no parsing). iinaUnwatched → green; watched (file or in history) or no path → gray.
             if ([category isEqualToString:@"video"] || [category isEqualToString:@"adult"])
             {
                 NSString* pathToOpen = [torrent pathToOpenForPlayableItem:entry];
@@ -245,7 +251,13 @@ static NSDictionary* stateAndLayoutFromSnapshotImpl(NSArray<NSDictionary*>* snap
         if (state.count >= 2)
         {
             NSArray<NSString*>* titles = [state valueForKey:@"baseTitle"];
-            NSArray<NSString*>* stripped = [Torrent displayTitlesByStrippingCommonPrefixSuffix:titles];
+            NSMutableArray<NSNumber*>* seasons = [NSMutableArray arrayWithCapacity:state.count];
+            for (NSDictionary* e in state)
+            {
+                id s = e[@"season"];
+                [seasons addObject:(s && s != [NSNull null]) ? s : @0];
+            }
+            NSArray<NSString*>* stripped = [Torrent displayTitlesByStrippingCommonPrefixSuffix:titles seasons:seasons];
             for (NSUInteger i = 0; i < state.count; i++)
                 state[i][@"title"] = stripped[i];
             for (NSMutableDictionary* e in state)
@@ -304,7 +316,13 @@ static NSDictionary* stateAndLayoutFromSnapshotImpl(NSArray<NSDictionary*>* snap
     if (state.count >= 2)
     {
         NSArray<NSString*>* titles = [state valueForKey:@"baseTitle"];
-        NSArray<NSString*>* stripped = [Torrent displayTitlesByStrippingCommonPrefixSuffix:titles];
+        NSMutableArray<NSNumber*>* seasons = [NSMutableArray arrayWithCapacity:state.count];
+        for (NSDictionary* e in state)
+        {
+            id s = e[@"season"];
+            [seasons addObject:(s && s != [NSNull null]) ? s : @0];
+        }
+        NSArray<NSString*>* stripped = [Torrent displayTitlesByStrippingCommonPrefixSuffix:titles seasons:seasons];
         for (NSUInteger i = 0; i < state.count; i++)
         {
             NSMutableDictionary* e = state[i];

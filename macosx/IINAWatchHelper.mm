@@ -2,7 +2,6 @@
 // It may be used under the MIT (SPDX: MIT) license.
 // License text can be found in the licenses/ folder.
 
-#import <AVFoundation/AVFoundation.h>
 #import <CommonCrypto/CommonDigest.h>
 
 #import "IINAWatchHelper.h"
@@ -17,6 +16,15 @@ static NSString* iinaWatchLaterDir(void)
     if (dirs.count == 0)
         return nil;
     return [dirs.firstObject stringByAppendingPathComponent:@"com.colliderli.iina/watch_later"];
+}
+
+/// ~/Library/Application Support/com.colliderli.iina/history.plist — IINA playback history (NSKeyedArchiver; keys IINAPHUrl, IINAPHMpvmd5).
+static NSString* iinaPlaybackHistoryPath(void)
+{
+    NSArray<NSString*>* dirs = NSSearchPathForDirectoriesInDomains(NSApplicationSupportDirectory, NSUserDomainMask, YES);
+    if (dirs.count == 0)
+        return nil;
+    return [dirs.firstObject stringByAppendingPathComponent:@"com.colliderli.iina/history.plist"];
 }
 
 /// Normalize to absolute path and standardize; optionally resolve symlinks if file exists.
@@ -79,41 +87,151 @@ static NSString* existingWatchLaterPath(NSString* dir, NSString* pathKey)
     return nil;
 }
 
-static double parseIINAStartFromFile(NSString* filePath)
+/// Resolves NSKeyedArchiver reference: if obj is a dict with CF$UID, returns objects[uid]; else returns obj.
+static id resolveKeyedArchiveRef(NSArray* objects, id obj)
 {
-    NSString* content = [NSString stringWithContentsOfFile:filePath encoding:NSUTF8StringEncoding error:nil];
-    if (!content)
-        return -1;
-    NSRange startRange = [content rangeOfString:@"start="];
-    if (startRange.location == NSNotFound)
-        return -1;
-    NSUInteger from = startRange.location + startRange.length;
-    NSScanner* scanner = [NSScanner scannerWithString:[content substringFromIndex:from]];
-    double start = 0;
-    if (![scanner scanDouble:&start])
-        return -1;
-    return start >= 0 ? start : -1;
+    if (![objects isKindOfClass:[NSArray class]] || objects.count == 0)
+        return obj;
+    NSDictionary* ref = [obj isKindOfClass:[NSDictionary class]] ? (NSDictionary*)obj : nil;
+    NSNumber* uid = ref ? ref[@"CF$UID"] : nil;
+    if (!uid)
+        return obj;
+    NSInteger i = uid.integerValue;
+    if (i < 0 || (NSUInteger)i >= objects.count)
+        return obj;
+    return objects[i];
 }
 
-static NSTimeInterval durationForVideoPath(NSString* path)
+/// Extracts filesystem path from archived URL (raw plist: NSURL is stored as dict with NS.relative / NS.base, or as string).
+static NSString* pathFromArchivedURL(id urlObj, NSArray* objects)
 {
-    NSURL* url = [NSURL fileURLWithPath:path];
-    AVURLAsset* asset = [AVURLAsset URLAssetWithURL:url options:nil];
-    __block NSTimeInterval duration = 0;
-    dispatch_semaphore_t sem = dispatch_semaphore_create(0);
-    [asset loadValuesAsynchronouslyForKeys:@[ @"duration" ] completionHandler:^{
-        NSError* err = nil;
-        if ([asset statusOfValueForKey:@"duration" error:&err] == AVKeyValueStatusLoaded)
+    if ([urlObj isKindOfClass:[NSURL class]])
+        return [(NSURL*)urlObj path];
+    if ([urlObj isKindOfClass:[NSString class]])
+    {
+        NSString* s = (NSString*)urlObj;
+        if ([s hasPrefix:@"file://"])
+            return [s substringFromIndex:7];
+        return s;
+    }
+    if (![urlObj isKindOfClass:[NSDictionary class]])
+        return nil;
+    NSDictionary* d = (NSDictionary*)urlObj;
+    id relRef = d[@"NS.relative"];
+    NSString* relative = nil;
+    if ([relRef isKindOfClass:[NSString class]])
+        relative = (NSString*)relRef;
+    else if (relRef != nil)
+    {
+        id resolved = resolveKeyedArchiveRef(objects, relRef);
+        relative = [resolved isKindOfClass:[NSString class]] ? (NSString*)resolved : nil;
+    }
+    if (relative.length == 0)
+        return nil;
+    if ([relative hasPrefix:@"file://"])
+        relative = [relative substringFromIndex:7];
+    if ([relative hasPrefix:@"/"])
+        return relative;
+    id baseRef = d[@"NS.base"];
+    if (baseRef == nil || baseRef == [NSNull null])
+        return relative.length > 0 ? relative : nil;
+    id baseObj = resolveKeyedArchiveRef(objects, baseRef);
+    NSString* basePath = pathFromArchivedURL(baseObj, objects);
+    if (basePath.length == 0)
+        return relative;
+    return [basePath stringByAppendingPathComponent:relative];
+}
+
+static BOOL pathsMatchForHistory(NSString* entryNorm, NSString* pathKey, NSString* pathKeyUnresolved)
+{
+    if (entryNorm.length == 0)
+        return NO;
+    if ([entryNorm isEqualToString:pathKey] || (pathKeyUnresolved.length > 0 && [entryNorm isEqualToString:pathKeyUnresolved]))
+        return YES;
+    if ([entryNorm compare:pathKey options:NSCaseInsensitiveSearch] == NSOrderedSame)
+        return YES;
+    if (pathKeyUnresolved.length > 0 && [entryNorm compare:pathKeyUnresolved options:NSCaseInsensitiveSearch] == NSOrderedSame)
+        return YES;
+    NSString* entryLast = entryNorm.lastPathComponent;
+    if (entryLast.length > 0 && [entryLast isEqualToString:pathKey.lastPathComponent])
+    {
+        NSString* pathKeyWithSep = [pathKey stringByAppendingString:@"/"];
+        NSString* entryWithSep = [entryNorm stringByAppendingString:@"/"];
+        if ([entryWithSep hasSuffix:pathKeyWithSep] || [pathKeyWithSep hasSuffix:entryWithSep])
+            return YES;
+    }
+    return NO;
+}
+
+/// Returns YES if path appears in IINA playback history (history.plist). Uses IINAPHMpvmd5 (MD5 of path) and IINAPHUrl; same MD5 formula as watch_later.
+static BOOL pathInIINAPlaybackHistory(NSString* pathKey, NSString* pathKeyUnresolved)
+{
+    if (!pathKey || pathKey.length == 0)
+        return NO;
+    NSString* historyPath = iinaPlaybackHistoryPath();
+    if (!historyPath || ![NSFileManager.defaultManager fileExistsAtPath:historyPath])
+        return NO;
+    NSDictionary* root = [NSDictionary dictionaryWithContentsOfFile:historyPath];
+    if (!root)
+        return NO;
+    NSArray* objects = root[@"$objects"];
+    NSDictionary* top = root[@"$top"];
+    if (![objects isKindOfClass:[NSArray class]] || objects.count == 0 || ![top isKindOfClass:[NSDictionary class]])
+        return NO;
+    id rootArray = nil;
+    id rootRef = top[@"root"];
+    if (rootRef != nil)
+        rootArray = resolveKeyedArchiveRef(objects, rootRef);
+    if (![rootArray isKindOfClass:[NSArray class]])
+    {
+        for (NSString* key in top)
         {
-            CMTime t = asset.duration;
-            if (CMTIME_IS_NUMERIC(t))
-                duration = CMTimeGetSeconds(t);
+            id val = resolveKeyedArchiveRef(objects, top[key]);
+            if ([val isKindOfClass:[NSArray class]])
+            {
+                rootArray = val;
+                break;
+            }
         }
-        dispatch_semaphore_signal(sem);
-    }];
-    long result = dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)));
-    (void)result;
-    return duration > 0 ? duration : 0;
+    }
+    if (![rootArray isKindOfClass:[NSArray class]])
+        return NO;
+    NSMutableString* pathKeyUpper = [NSMutableString stringWithCapacity:CC_MD5_DIGEST_LENGTH * 2];
+    NSMutableString* pathKeyLower = [NSMutableString stringWithCapacity:CC_MD5_DIGEST_LENGTH * 2];
+    md5HexForPath(pathKey, pathKeyUpper, pathKeyLower);
+    for (id itemRef in (NSArray*)rootArray)
+    {
+        id entry = resolveKeyedArchiveRef(objects, itemRef);
+        if (![entry isKindOfClass:[NSDictionary class]])
+            continue;
+        NSDictionary* entryDict = (NSDictionary*)entry;
+        id md5Ref = entryDict[@"IINAPHMpvmd5"];
+        if (md5Ref)
+        {
+            id md5Obj = resolveKeyedArchiveRef(objects, md5Ref);
+            if ([md5Obj isKindOfClass:[NSString class]])
+            {
+                NSString* entryMd5 = (NSString*)md5Obj;
+                if (entryMd5.length > 0 && ([entryMd5 isEqualToString:pathKeyUpper] || [entryMd5 isEqualToString:pathKeyLower]))
+                    return YES;
+            }
+        }
+        id urlRef = entryDict[@"IINAPHUrl"];
+        if (urlRef)
+        {
+            id urlObj = resolveKeyedArchiveRef(objects, urlRef);
+            NSString* entryPath = pathFromArchivedURL(urlObj, objects);
+            if (entryPath.length > 0)
+            {
+                NSString* entryNorm = normalizedPathForIINALookup(entryPath, YES);
+                if (entryNorm.length == 0)
+                    entryNorm = normalizedPathForIINALookup(entryPath, NO);
+                if (entryNorm.length > 0 && pathsMatchForHistory(entryNorm, pathKey, pathKeyUnresolved ?: @""))
+                    return YES;
+            }
+        }
+    }
+    return NO;
 }
 
 NSString* const kIINAWatchCacheDidUpdateNotification = @"IINAWatchCacheDidUpdate";
@@ -122,6 +240,7 @@ NSString* const kIINAWatchCacheDidUpdateNotification = @"IINAWatchCacheDidUpdate
 
 + (BOOL)unwatchedForVideoPath:(NSString*)path completionObject:(id)completionObject
 {
+    (void)completionObject;
     if (!path || path.length == 0)
         return NO;
     dispatch_once(&sIINAUnwatchedCacheOnce, ^{
@@ -140,38 +259,17 @@ NSString* const kIINAWatchCacheDidUpdateNotification = @"IINAWatchCacheDidUpdate
         return NO;
     }
     NSString* watchFile = existingWatchLaterPath(dir, key);
+    NSString* keyNoResolve = nil;
     if (!watchFile)
     {
-        NSString* keyNoResolve = normalizedPathForIINALookup(path, NO);
+        keyNoResolve = normalizedPathForIINALookup(path, NO);
         if (keyNoResolve && keyNoResolve != key)
             watchFile = existingWatchLaterPath(dir, keyNoResolve);
     }
-    if (!watchFile)
-    {
-        sIINAUnwatchedCache[key] = @YES;
-        return YES;
-    }
-    double start = parseIINAStartFromFile(watchFile);
-    if (start < 0)
-    {
-        sIINAUnwatchedCache[key] = @NO;
-        return NO;
-    }
-    // Assume watched until async confirms start/duration; avoids showing unwatched for watched files.
-    sIINAUnwatchedCache[key] = @NO;
-    __weak id weakObj = completionObject;
-    NSString* pathForDuration = [path copy];
-    NSString* keyCopy = [key copy];
-    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-        NSTimeInterval duration = durationForVideoPath(pathForDuration);
-        // When duration unknown (path unreadable, timeout, unsupported), default to gray.
-        BOOL unwatched = (duration > 0) && ((start / duration) < 0.9);
-        dispatch_async(dispatch_get_main_queue(), ^{
-            sIINAUnwatchedCache[keyCopy] = @(unwatched);
-            [NSNotificationCenter.defaultCenter postNotificationName:kIINAWatchCacheDidUpdateNotification object:weakObj];
-        });
-    });
-    return NO;
+    // When playback finishes IINA may remove the watch_later file; treat as watched if path is in IINA playback history.
+    BOOL unwatched = (watchFile == nil) && !pathInIINAPlaybackHistory(key, keyNoResolve ?: @"");
+    sIINAUnwatchedCache[key] = @(unwatched);
+    return unwatched;
 }
 
 + (void)invalidateCacheForPath:(NSString*)path
