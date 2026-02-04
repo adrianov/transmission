@@ -115,6 +115,13 @@ target_sources(${TR_NAME}
         serializer.h
         session-alt-speeds.cc
         session-alt-speeds.h
+        session-api.cc
+        session-bandwidth-groups.cc
+        session-bandwidth-groups.h
+        session-disk-space.cc
+        session-disk-space.h
+        session-load.cc
+        session-mediators.h
         session-id.cc
         session-id.h
         session-thread.cc
