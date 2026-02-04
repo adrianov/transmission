@@ -21,7 +21,16 @@
     BOOL const pathIsCue = path.length > 0 && [path.pathExtension.lowercaseString isEqualToString:@"cue"];
     BOOL const rawPathIsCue = rawPath.length > 0 && [rawPath.pathExtension.lowercaseString isEqualToString:@"cue"];
     NSString* origExt = [fileItem[@"originalExt"] isKindOfClass:[NSString class]] ? [fileItem[@"originalExt"] lowercaseString] : nil;
-    return pathIsCue || rawPathIsCue || [origExt isEqualToString:@"cue"];
+    if (pathIsCue || rawPathIsCue || [origExt isEqualToString:@"cue"])
+        return YES;
+    // Audio file in same folder as a .cue (e.g. different base names) → album icon
+    if (torrent && [fileItem[@"category"] isEqualToString:@"audio"])
+    {
+        NSString* pathToCheck = path.length > 0 ? path : rawPath;
+        if (pathToCheck.length > 0 && [torrent hasCueInSameDirectoryAsPath:pathToCheck])
+            return YES;
+    }
+    return NO;
 }
 
 - (NSImage*)iconForPlayableFileItem:(NSDictionary*)fileItem torrent:(Torrent*)torrent
