@@ -1234,7 +1234,7 @@ private:
     // depends-on: torrents_
     std::unique_ptr<libtransmission::Timer> save_timer_;
 
-    std::unique_ptr<libtransmission::Timer> disk_space_timer_;
+    std::unique_ptr<libtransmission::Timer> disk_space_timer_{};
 
     std::unique_ptr<tr_verify_worker> verifier_ = std::make_unique<tr_verify_worker>();
 
