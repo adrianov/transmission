@@ -39,6 +39,14 @@
     return progress;
 }
 
+- (void)invalidateFileProgressCache
+{
+    self.fProgressCacheGeneration = 0;
+    self.fFileProgressCache = nil;
+    self.fFolderProgressCache = nil;
+    self.fFolderFirstMediaProgressCache = nil;
+}
+
 /// Builds cache mapping folders to their file indices (for fast progress lookups)
 - (void)buildFolderToFilesCache:(NSSet<NSString*>*)folders
 {

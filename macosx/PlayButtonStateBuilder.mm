@@ -8,6 +8,8 @@
 #import "Torrent.h"
 #import "TorrentPrivate.h"
 
+static CGFloat const kMinProgressToShowPlayButton = 0.01;
+
 static NSDictionary* stateAndLayoutFromSnapshotImpl(NSArray<NSDictionary*>* snapshot)
 {
     if (snapshot.count == 0)
@@ -21,7 +23,7 @@ static NSDictionary* stateAndLayoutFromSnapshotImpl(NSArray<NSDictionary*>* snap
         BOOL wanted = [entry[@"wanted"] boolValue];
         int progressPct = (int)floor(progress * 100);
         entry[@"progressPercent"] = @(progressPct);
-        BOOL visible = [type hasPrefix:@"document"] ? (progress >= 1.0) : (progress > 0.000001 && (wanted || progress >= 1.0));
+        BOOL visible = [type hasPrefix:@"document"] ? (progress >= 1.0) : (progress >= kMinProgressToShowPlayButton && (wanted || progress >= 1.0));
         entry[@"visible"] = @(visible);
         entry[@"title"] = entry[@"baseTitle"] ?: @"";
         if (visible && ![type hasPrefix:@"document"] && progress < 1.0 && progressPct < 100)
@@ -235,7 +237,7 @@ static NSDictionary* stateAndLayoutFromSnapshotImpl(NSArray<NSDictionary*>* snap
             BOOL wanted = indexNum ?
                 ([torrent checkForFiles:[NSIndexSet indexSetWithIndex:indexNum.unsignedIntegerValue]] == NSControlStateValueOn) :
                 YES;
-            BOOL visible = [type hasPrefix:@"document"] ? (progress >= 1.0) : (progress > 0.000001 && (wanted || progress >= 1.0));
+            BOOL visible = [type hasPrefix:@"document"] ? (progress >= 1.0) : (progress >= kMinProgressToShowPlayButton && (wanted || progress >= 1.0));
             entry[@"visible"] = @(visible);
             if (visible && ![type hasPrefix:@"document"] && progress < 1.0 && progressPct < 100)
                 entry[@"title"] = [NSString stringWithFormat:@"%@ (%d%%)", entry[@"baseTitle"], progressPct];
@@ -271,11 +273,9 @@ static NSDictionary* stateAndLayoutFromSnapshotImpl(NSArray<NSDictionary*>* snap
     }
 
     NSUInteger statsGeneration = torrent.statsGeneration;
+    // When UI refresh runs without updateTorrents (e.g. fUpdatingUI skip), progress cache is stale; invalidate so we show current progress.
     if (torrent.cachedPlayButtonProgressGeneration == statsGeneration)
-    {
-        [self enrichStateWithIinaUnwatched:state forTorrent:torrent];
-        return state;
-    }
+        [torrent invalidateFileProgressCache];
 
     BOOL visibilityChanged = NO;
     for (NSMutableDictionary* entry in state)
@@ -302,7 +302,7 @@ static NSDictionary* stateAndLayoutFromSnapshotImpl(NSArray<NSDictionary*>* snap
             BOOL wanted = indexNum ?
                 ([torrent checkForFiles:[NSIndexSet indexSetWithIndex:indexNum.unsignedIntegerValue]] == NSControlStateValueOn) :
                 YES;
-            BOOL visible = [type hasPrefix:@"document"] ? (progress >= 1.0) : (progress > 0.000001 && (wanted || progress >= 1.0));
+            BOOL visible = [type hasPrefix:@"document"] ? (progress >= 1.0) : (progress >= kMinProgressToShowPlayButton && (wanted || progress >= 1.0));
             entry[@"visible"] = @(visible);
             if (visible != wasVisible)
                 visibilityChanged = YES;

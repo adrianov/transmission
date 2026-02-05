@@ -143,6 +143,8 @@ extern NSString* const kTorrentDidChangeGroupNotification;
 - (CGFloat)folderConsecutiveProgress:(NSString*)folder;
 /// Returns consecutive progress for the first media file in a folder.
 - (CGFloat)folderFirstMediaProgress:(NSString*)folder;
+/// Invalidates file/folder progress caches so next progress read fetches from libtransmission (e.g. when UI refresh runs without updateTorrents).
+- (void)invalidateFileProgressCache;
 /// Returns file indexes for a folder if cached.
 - (NSIndexSet*)fileIndexesForFolder:(NSString*)folder;
 
