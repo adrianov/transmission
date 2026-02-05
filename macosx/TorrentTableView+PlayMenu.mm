@@ -40,7 +40,10 @@
         NSString* type = fileItem[@"type"] ?: @"file";
         NSString* category = fileItem[@"category"];
         BOOL const isCueFile = [self isCueAlbumFileItem:fileItem torrent:torrent];
-        NSString* cacheKey = [NSString stringWithFormat:@"%@:%@:%@", type, category ?: @"", isCueFile ? @"cue" : @""];
+        BOOL singleTrackAlbum = ([type isEqualToString:@"album"] && !isCueFile && torrent &&
+                                 [self tracksForAlbumItem:fileItem torrent:torrent].count == 1);
+        NSString* cacheKey = [NSString stringWithFormat:@"%@:%@:%@:%d", type, category ?: @"", isCueFile ? @"cue" : @"",
+                                 singleTrackAlbum ? 1 : 0];
         NSImage* cached = [self.fIconCache objectForKey:cacheKey];
         if (cached)
             return cached;
@@ -48,6 +51,8 @@
         NSString* symbolName = @"play";
         if ([type isEqualToString:@"document-books"] || [category isEqualToString:@"books"])
             symbolName = @"book";
+        else if (singleTrackAlbum)
+            symbolName = @"music.note";
         else if ([type isEqualToString:@"album"] || isCueFile)
             symbolName = @"music.note.list";
         else if ([type isEqualToString:@"track"] || [category isEqualToString:@"audio"])
