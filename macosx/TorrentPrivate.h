@@ -96,10 +96,6 @@ typedef NS_ENUM(NSInteger, TorrentMediaType) {
 - (NSImage*)iconForBookAtPath:(NSString*)path extension:(NSString*)ext isComplete:(BOOL)complete;
 @end
 
-@interface Torrent (CueTooltip)
-- (BOOL)hasCueInSameDirectoryAsPath:(NSString*)path;
-@end
-
 @interface Torrent (FileList)
 - (void)createFileList;
 - (void)insertPathForComponents:(NSArray<NSString*>*)components

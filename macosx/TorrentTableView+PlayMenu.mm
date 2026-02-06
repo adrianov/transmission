@@ -23,11 +23,11 @@
     NSString* origExt = [fileItem[@"originalExt"] isKindOfClass:[NSString class]] ? [fileItem[@"originalExt"] lowercaseString] : nil;
     if (pathIsCue || rawPathIsCue || [origExt isEqualToString:@"cue"])
         return YES;
-    // Audio file in same folder as a .cue (e.g. different base names) → album icon
+    // Audio file that is the companion to a CUE (same base name) → album icon; many tracks + one CUE → track icon
     if (torrent && [fileItem[@"category"] isEqualToString:@"audio"])
     {
         NSString* pathToCheck = path.length > 0 ? path : rawPath;
-        if (pathToCheck.length > 0 && [torrent hasCueInSameDirectoryAsPath:pathToCheck])
+        if (pathToCheck.length > 0 && [torrent cueFilePathForAudioPath:pathToCheck] != nil)
             return YES;
     }
     return NO;

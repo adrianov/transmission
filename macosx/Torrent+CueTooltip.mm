@@ -132,41 +132,6 @@
     return nil;
 }
 
-/// YES if the torrent has a .cue file in the same directory as the given path (full or relative). Used for album icon when .cue and audio have different base names.
-- (BOOL)hasCueInSameDirectoryAsPath:(NSString*)path
-{
-    if (!path || path.length == 0)
-        return NO;
-    NSString* dir = nil;
-    NSString* torrentDir = self.currentDirectory;
-    if (torrentDir.length > 0 && [path hasPrefix:torrentDir])
-    {
-        NSString* rel = [path substringFromIndex:torrentDir.length];
-        if ([rel hasPrefix:@"/"])
-            rel = [rel substringFromIndex:1];
-        dir = rel.stringByDeletingLastPathComponent;
-    }
-    else
-        dir = path.stringByDeletingLastPathComponent;
-    if (dir.length == 0 || [dir isEqualToString:@"."] || [dir isEqualToString:@"/"])
-        dir = @"";
-    NSUInteger const count = self.fileCount;
-    for (NSUInteger i = 0; i < count; i++)
-    {
-        auto const file = tr_torrentFile(self.fHandle, (tr_file_index_t)i);
-        NSString* fileName = @(file.name);
-        if ([fileName.pathExtension.lowercaseString isEqualToString:@"cue"])
-        {
-            NSString* fileDir = fileName.stringByDeletingLastPathComponent;
-            if (fileDir.length == 0 || [fileDir isEqualToString:@"."] || [fileDir isEqualToString:@"/"])
-                fileDir = @"";
-            if ([fileDir isEqualToString:dir])
-                return YES;
-        }
-    }
-    return NO;
-}
-
 - (NSString*)cueFilePathForFolder:(NSString*)folder
 {
     if (folder.length == 0)
