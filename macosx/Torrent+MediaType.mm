@@ -128,7 +128,7 @@ static void initMediaExtensionSets(void)
             softwareExtCounts[ext] = @(softwareExtCounts[ext].unsignedIntegerValue + 1);
     }
 
-    NSMutableSet<NSString*>* albumFolders = [NSMutableSet set];
+    NSMutableDictionary<NSString*, NSNumber*>* audioCountPerFolder = [NSMutableDictionary dictionary];
     for (NSUInteger i = 0; i < count; i++)
     {
         auto const file = tr_torrentFile(self.fHandle, i);
@@ -138,8 +138,17 @@ static void initMediaExtensionSets(void)
         {
             NSString* parentFolder = fileName.stringByDeletingLastPathComponent;
             if (parentFolder.length > 0)
-                [albumFolders addObject:parentFolder];
+            {
+                NSUInteger n = audioCountPerFolder[parentFolder].unsignedIntegerValue + 1;
+                audioCountPerFolder[parentFolder] = @(n);
+            }
         }
+    }
+    NSMutableSet<NSString*>* albumFolders = [NSMutableSet set];
+    for (NSString* folder in audioCountPerFolder)
+    {
+        if (audioCountPerFolder[folder].unsignedIntegerValue >= 2)
+            [albumFolders addObject:folder];
     }
 
     if (dvdDiscFolders.count > 0)
