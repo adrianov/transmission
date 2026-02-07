@@ -10,6 +10,16 @@
 
 static CGFloat const kMinProgressToShowPlayButton = 0.01;
 
+/// Determines if a playable item should be visible based on type, progress, and wanted state.
+static BOOL isPlayableItemVisible(NSString* type, CGFloat progress, BOOL wanted)
+{
+    if ([type isEqualToString:@"album"])
+        return YES;
+    if ([type hasPrefix:@"document"])
+        return progress >= 1.0;
+    return progress >= kMinProgressToShowPlayButton && (wanted || progress >= 1.0);
+}
+
 static NSDictionary* stateAndLayoutFromSnapshotImpl(NSArray<NSDictionary*>* snapshot)
 {
     if (snapshot.count == 0)
@@ -23,7 +33,7 @@ static NSDictionary* stateAndLayoutFromSnapshotImpl(NSArray<NSDictionary*>* snap
         BOOL wanted = [entry[@"wanted"] boolValue];
         int progressPct = (int)floor(progress * 100);
         entry[@"progressPercent"] = @(progressPct);
-        BOOL visible = [type hasPrefix:@"document"] ? (progress >= 1.0) : (progress >= kMinProgressToShowPlayButton && (wanted || progress >= 1.0));
+        BOOL visible = isPlayableItemVisible(type, progress, wanted);
         entry[@"visible"] = @(visible);
         entry[@"title"] = entry[@"baseTitle"] ?: @"";
         if (visible && ![type hasPrefix:@"document"] && progress < 1.0 && progressPct < 100)
@@ -237,7 +247,7 @@ static NSDictionary* stateAndLayoutFromSnapshotImpl(NSArray<NSDictionary*>* snap
             BOOL wanted = indexNum ?
                 ([torrent checkForFiles:[NSIndexSet indexSetWithIndex:indexNum.unsignedIntegerValue]] == NSControlStateValueOn) :
                 YES;
-            BOOL visible = [type hasPrefix:@"document"] ? (progress >= 1.0) : (progress >= kMinProgressToShowPlayButton && (wanted || progress >= 1.0));
+            BOOL visible = isPlayableItemVisible(type, progress, wanted);
             entry[@"visible"] = @(visible);
             if (visible && ![type hasPrefix:@"document"] && progress < 1.0 && progressPct < 100)
                 entry[@"title"] = [NSString stringWithFormat:@"%@ (%d%%)", entry[@"baseTitle"], progressPct];
@@ -302,7 +312,7 @@ static NSDictionary* stateAndLayoutFromSnapshotImpl(NSArray<NSDictionary*>* snap
             BOOL wanted = indexNum ?
                 ([torrent checkForFiles:[NSIndexSet indexSetWithIndex:indexNum.unsignedIntegerValue]] == NSControlStateValueOn) :
                 YES;
-            BOOL visible = [type hasPrefix:@"document"] ? (progress >= 1.0) : (progress >= kMinProgressToShowPlayButton && (wanted || progress >= 1.0));
+            BOOL visible = isPlayableItemVisible(type, progress, wanted);
             entry[@"visible"] = @(visible);
             if (visible != wasVisible)
                 visibilityChanged = YES;

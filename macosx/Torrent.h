@@ -108,6 +108,8 @@ extern NSString* const kTorrentDidChangeGroupNotification;
 
 /// Returns YES if torrent has any playable media files on disk.
 @property(nonatomic, readonly) BOOL hasPlayableMedia;
+/// YES when file-based audio is represented entirely by .cue+companion pairs (one playable entry per pair).
+- (BOOL)isFileBasedAudioCueBased;
 
 /// Returns detected media category: "video", "audio", "books", "software", "adult" (video with adult heuristic), or nil if none detected.
 /// Used for auto-assigning torrents to groups based on content type.
@@ -189,7 +191,7 @@ extern NSString* const kTorrentDidChangeGroupNotification;
 
 // Returns .cue file path for a given folder, or nil if no .cue file found in the folder
 - (NSString*)cueFilePathForFolder:(NSString*)folder;
-/// Path to open for folder: .cue if .cue count >= audio count, else folder path. Implemented in Torrent+CueTooltip.mm.
+/// Path to open for folder: .cue if .cue count >= audio count, else folder path. Implemented in Torrent+PathResolution.mm.
 - (NSString*)pathToOpenForFolder:(NSString*)folder;
 
 // Returns the path to show in tooltip (prefers .cue file if available for audio files or album folders)

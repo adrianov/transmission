@@ -186,12 +186,12 @@ target_sources(${TR_NAME}-mac
         Torrent.mm
         Torrent+Books.mm
         Torrent+Category.mm
-        Torrent+CueTooltip.mm
         Torrent+DiskSpace.mm
         Torrent+FileList.mm
         Torrent+Icon.mm
         Torrent+MediaType.mm
         Torrent+OpenCount.mm
+        Torrent+PathResolution.mm
         Torrent+Playable.mm
         Torrent+Progress.mm
         Torrent+Search.mm

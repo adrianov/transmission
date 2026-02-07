@@ -59,14 +59,26 @@
                 }
                 else
                 {
-                    UTType* contentType = [UTType typeWithFilenameExtension:self.fMediaExtension];
-                    baseIcon = contentType ? [NSWorkspace.sharedWorkspace iconForContentType:contentType] : nil;
+                    if (self.fMediaType == TorrentMediaTypeAudio && [self isFileBasedAudioCueBased])
+                    {
+                        if (@available(macOS 11.0, *))
+                        {
+                            baseIcon = [NSImage imageWithSystemSymbolName:@"music.note.list" accessibilityDescription:nil];
+                            if (baseIcon)
+                                [baseIcon setTemplate:YES];
+                        }
+                    }
                     if (!baseIcon)
                     {
+                        UTType* contentType = [UTType typeWithFilenameExtension:self.fMediaExtension];
+                        baseIcon = contentType ? [NSWorkspace.sharedWorkspace iconForContentType:contentType] : nil;
+                        if (!baseIcon)
+                        {
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
-                        baseIcon = [NSWorkspace.sharedWorkspace iconForFileType:self.fMediaExtension];
+                            baseIcon = [NSWorkspace.sharedWorkspace iconForFileType:self.fMediaExtension];
 #pragma clang diagnostic pop
+                        }
                     }
                 }
             }

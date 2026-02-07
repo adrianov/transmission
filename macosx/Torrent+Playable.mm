@@ -204,24 +204,25 @@ static BOOL isLeadingTrackNumberToken(NSString* token);
 
             CGFloat progress = [self folderConsecutiveProgress:folder];
 
-            NSArray<NSNumber*>* fileIndices = self.fFolderToFiles[folder];
-            BOOL anyFileWanted = NO;
-            if (fileIndices)
+            // For discs, hide folder button when nothing wanted and not complete. For albums, always show so all albums get a button.
+            if (isDisc)
             {
-                for (NSNumber* fileIndex in fileIndices)
+                NSArray<NSNumber*>* fileIndices = self.fFolderToFiles[folder];
+                BOOL anyFileWanted = NO;
+                if (fileIndices)
                 {
-                    auto const file = tr_torrentFile(self.fHandle, (tr_file_index_t)fileIndex.unsignedIntegerValue);
-                    if (file.wanted)
+                    for (NSNumber* fileIndex in fileIndices)
                     {
-                        anyFileWanted = YES;
-                        break;
+                        auto const file = tr_torrentFile(self.fHandle, (tr_file_index_t)fileIndex.unsignedIntegerValue);
+                        if (file.wanted)
+                        {
+                            anyFileWanted = YES;
+                            break;
+                        }
                     }
                 }
-            }
-
-            if (!anyFileWanted && progress < 1.0)
-            {
-                continue;
+                if (!anyFileWanted && progress < 1.0)
+                    continue;
             }
 
             NSString* name;
@@ -762,7 +763,7 @@ static NSDictionary<NSString*, NSString*>* commonPrefixAndSuffixForStrings(NSArr
     for (NSUInteger i = 0; i < count; i++)
     {
         auto const file = tr_torrentFile(self.fHandle, i);
-        NSString* fileName = @(file.name);
+        NSString* fileName = [NSString convertedStringFromCString:file.name];
         if ([fileName.pathExtension.lowercaseString isEqualToString:@"cue"])
         {
             NSString* baseName = fileName.stringByDeletingPathExtension;
@@ -794,7 +795,7 @@ static NSDictionary<NSString*, NSString*>* commonPrefixAndSuffixForStrings(NSArr
     for (NSUInteger i = 0; i < count; i++)
     {
         auto const file = tr_torrentFile(self.fHandle, i);
-        NSString* fileName = @(file.name);
+        NSString* fileName = [NSString convertedStringFromCString:file.name];
         NSString* ext = fileName.pathExtension.lowercaseString;
         if ([ext isEqualToString:@"pdf"])
         {
@@ -811,7 +812,7 @@ static NSDictionary<NSString*, NSString*>* commonPrefixAndSuffixForStrings(NSArr
     for (NSUInteger i = 0; i < count; i++)
     {
         auto const file = tr_torrentFile(self.fHandle, i);
-        NSString* path = @(file.name);
+        NSString* path = [NSString convertedStringFromCString:file.name];
         NSString* parent = path.stringByDeletingLastPathComponent;
         NSMutableArray<NSString*>* siblings = siblingFilesByParent[parent];
         if (!siblings)
@@ -835,7 +836,7 @@ static NSDictionary<NSString*, NSString*>* commonPrefixAndSuffixForStrings(NSArr
     for (NSUInteger i = 0; i < count; i++)
     {
         auto const file = tr_torrentFile(self.fHandle, i);
-        NSString* fileName = @(file.name);
+        NSString* fileName = [NSString convertedStringFromCString:file.name];
         NSString* originalFileName = fileName;
         NSString* parent = fileName.stringByDeletingLastPathComponent;
         NSString* commonPrefix = commonPrefixByParent[parent] ?: @"";
@@ -992,7 +993,7 @@ static NSDictionary<NSString*, NSString*>* commonPrefixAndSuffixForStrings(NSArr
             NSString* displayName = cueBaseName.humanReadableFileName;
 
             [playable addObject:@{
-                @"type" : @"file",
+                @"type" : @"album",
                 @"category" : @"audio",
                 @"index" : cueIndex,
                 @"name" : displayName,

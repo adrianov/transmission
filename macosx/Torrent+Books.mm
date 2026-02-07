@@ -6,6 +6,7 @@
 
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 
+#import "NSStringAdditions.h"
 #import "Torrent.h"
 #import "TorrentPrivate.h"
 
@@ -86,7 +87,7 @@ static NSString* bookPathWithExtension(Torrent* torrent, NSString* wantedExt)
     for (NSUInteger i = 0; i < count; i++)
     {
         auto const file = tr_torrentFile(torrent.fHandle, i);
-        NSString* fileName = @(file.name);
+        NSString* fileName = [NSString convertedStringFromCString:file.name];
         if (![fileName.pathExtension.lowercaseString isEqualToString:wantedExt])
             continue;
 
@@ -128,7 +129,7 @@ static NSString* preferredBookPath(Torrent* torrent, NSString** outExt)
     for (NSUInteger i = 0; i < count; i++)
     {
         auto const file = tr_torrentFile(torrent.fHandle, i);
-        NSString* fileName = @(file.name);
+        NSString* fileName = [NSString convertedStringFromCString:file.name];
         NSString* fileExt = fileName.pathExtension.lowercaseString;
         if (![bookExtensions containsObject:fileExt])
             continue;

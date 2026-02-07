@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+root_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+build_dir="${root_dir}/build"
+
+if cmake -B "${build_dir}" -G Ninja -DCMAKE_BUILD_TYPE=Release 2>&1 | grep -q "generator.*does not match"; then
+    rm -rf "${build_dir}"
+    cmake -B "${build_dir}" -G Ninja -DCMAKE_BUILD_TYPE=Release
+fi
+cmake --build "${build_dir}" -t transmission-mac -j"$(sysctl -n hw.ncpu)"
+
+echo "Release build finished: ${build_dir}/macosx/Transmission.app"
+open -R "${build_dir}/macosx/Transmission.app"

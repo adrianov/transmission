@@ -6,6 +6,7 @@
 
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 
+#import "NSStringAdditions.h"
 #import "Torrent.h"
 #import "TorrentPrivate.h"
 
@@ -76,7 +77,9 @@ static void initMediaExtensionSets(void)
     for (NSUInteger i = 0; i < count; i++)
     {
         auto const file = tr_torrentFile(self.fHandle, i);
-        NSString* fileName = @(file.name);
+        NSString* fileName = [NSString convertedStringFromCString:file.name];
+        if (!fileName)
+            continue;
         NSString* lastComponent = fileName.lastPathComponent.lowercaseString;
         NSString* ext = fileName.pathExtension.lowercaseString;
 
@@ -132,7 +135,9 @@ static void initMediaExtensionSets(void)
     for (NSUInteger i = 0; i < count; i++)
     {
         auto const file = tr_torrentFile(self.fHandle, i);
-        NSString* fileName = @(file.name);
+        NSString* fileName = [NSString convertedStringFromCString:file.name];
+        if (!fileName)
+            continue;
         NSString* ext = fileName.pathExtension.lowercaseString;
         if ([sAudioExtensions containsObject:ext])
         {
@@ -147,7 +152,7 @@ static void initMediaExtensionSets(void)
     NSMutableSet<NSString*>* albumFolders = [NSMutableSet set];
     for (NSString* folder in audioCountPerFolder)
     {
-        if (audioCountPerFolder[folder].unsignedIntegerValue >= 2)
+        if (audioCountPerFolder[folder].unsignedIntegerValue >= 1)
             [albumFolders addObject:folder];
     }
 

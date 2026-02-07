@@ -4,6 +4,7 @@
 
 #include <libtransmission/transmission.h>
 
+#import "NSStringAdditions.h"
 #import "Torrent.h"
 #import "TorrentPrivate.h"
 
@@ -47,37 +48,7 @@
     self.fFolderFirstMediaProgressCache = nil;
 }
 
-/// Builds cache mapping folders to their file indices (for fast progress lookups)
-- (void)buildFolderToFilesCache:(NSSet<NSString*>*)folders
-{
-    NSMutableDictionary<NSString*, NSMutableArray<NSNumber*>*>* cache = [NSMutableDictionary dictionary];
-
-    for (NSString* folder in folders)
-    {
-        cache[folder] = [NSMutableArray array];
-    }
-
-    NSUInteger const count = self.fileCount;
-    for (NSUInteger i = 0; i < count; i++)
-    {
-        auto const file = tr_torrentFile(self.fHandle, i);
-        NSString* fileName = @(file.name);
-
-        for (NSString* folder in folders)
-        {
-            // Folder paths already include torrent name prefix (e.g., "TorrentName/Disc A")
-            if ([fileName hasPrefix:folder] && (fileName.length == folder.length || [fileName characterAtIndex:folder.length] == '/'))
-            {
-                [cache[folder] addObject:@(i)];
-                break;
-            }
-        }
-    }
-
-    self.fFolderToFiles = cache;
-    self.fFolderProgressCache = nil;
-    self.fFolderFirstMediaProgressCache = nil;
-}
+// Moved to Torrent+PathResolution.mm
 
 /// Checks if disc index files for a folder are fully downloaded
 - (BOOL)discIndexFilesCompleteForFolder:(NSString*)folder
@@ -90,7 +61,7 @@
     {
         NSUInteger i = fileIndex.unsignedIntegerValue;
         auto const file = tr_torrentFile(self.fHandle, i);
-        NSString* fileName = @(file.name);
+        NSString* fileName = [NSString convertedStringFromCString:file.name];
         NSString* ext = fileName.pathExtension.lowercaseString;
         NSString* lastComponent = fileName.lastPathComponent.lowercaseString;
 
@@ -185,7 +156,7 @@
     {
         NSUInteger i = fileIndex.unsignedIntegerValue;
         auto const file = tr_torrentFile(self.fHandle, i);
-        NSString* fileName = @(file.name);
+        NSString* fileName = [NSString convertedStringFromCString:file.name];
         NSString* ext = fileName.pathExtension.lowercaseString;
         if (![audioExtensions containsObject:ext])
             continue;
@@ -208,7 +179,7 @@
     {
         NSUInteger i = fileIndex.unsignedIntegerValue;
         auto const file = tr_torrentFile(self.fHandle, i);
-        NSString* fileName = @(file.name);
+        NSString* fileName = [NSString convertedStringFromCString:file.name];
         NSString* ext = fileName.pathExtension.lowercaseString;
         if (![audioExtensions containsObject:ext] || [ext isEqualToString:@"cue"])
             continue;
@@ -226,19 +197,7 @@
     return 0.0;
 }
 
-- (NSIndexSet*)fileIndexesForFolder:(NSString*)folder
-{
-    NSArray<NSNumber*>* fileIndices = self.fFolderToFiles[folder];
-    if (!fileIndices || fileIndices.count == 0)
-        return nil;
-
-    NSMutableIndexSet* indexes = [NSMutableIndexSet indexSet];
-    for (NSNumber* fileIndex in fileIndices)
-    {
-        [indexes addIndex:fileIndex.unsignedIntegerValue];
-    }
-    return indexes;
-}
+// Moved to Torrent+PathResolution.mm
 
 @end
 #pragma clang diagnostic pop

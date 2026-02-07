@@ -4,6 +4,7 @@
 
 #include <libtransmission/transmission.h>
 
+#import "NSStringAdditions.h"
 #import "Torrent.h"
 #import "TorrentPrivate.h"
 
@@ -76,7 +77,7 @@ static BOOL hasAdultSource(NSArray<NSString*>* trackerURLs, NSString* comment)
 {
     [Torrent ensureMediaExtensionSets];
     auto const file = tr_torrentFile(self.fHandle, (tr_file_index_t)index);
-    NSString* path = @(file.name);
+    NSString* path = [NSString convertedStringFromCString:file.name];
     NSString* ext = path.pathExtension.lowercaseString;
     NSString* base = nil;
     if ([sVideoExtensions containsObject:ext])

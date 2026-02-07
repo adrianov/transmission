@@ -889,13 +889,7 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
     }
 }
 
-- (NSString*)pathToOpenForAudioPath:(NSString*)path
-{
-    if (!path || path.length == 0)
-        return path;
-    NSString* cuePath = [self cueFilePathForAudioPath:path];
-    return cuePath ?: path;
-}
+// Moved to Torrent+PathResolution.mm
 
 - (NSString*)pathToOpenForFileNode:(FileListNode*)node
 {
@@ -927,6 +921,13 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
     }
     else if (path.length > 0)
     {
+        NSString* ext = path.pathExtension.lowercaseString;
+        if ([ext isEqualToString:@"djvu"] || [ext isEqualToString:@"djv"])
+        {
+            NSString* pdfPath = [path.stringByDeletingPathExtension stringByAppendingPathExtension:@"pdf"];
+            if ([NSFileManager.defaultManager fileExistsAtPath:pdfPath])
+                path = pdfPath;
+        }
         return [self pathToOpenForAudioPath:path];
     }
     return path;

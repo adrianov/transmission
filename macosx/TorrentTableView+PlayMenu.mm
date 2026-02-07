@@ -98,7 +98,7 @@
     [fileIndexes enumerateIndexesUsingBlock:^(NSUInteger idx, BOOL* _Nonnull stop) {
         (void)stop;
         auto const file = tr_torrentFile(torrent.torrentStruct, (tr_file_index_t)idx);
-        NSString* fileName = @(file.name);
+        NSString* fileName = [NSString convertedStringFromCString:file.name];
         NSString* ext = fileName.pathExtension.lowercaseString;
         if (![audioExtensions containsObject:ext])
             return;
