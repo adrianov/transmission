@@ -132,6 +132,24 @@
         }
     }
 
+    // Same folder, single CUE: when base names differ (e.g. Album.flac + Album 2005.cue), treat as album and open .cue
+    NSMutableArray<NSString*>* cuePathsInDir = [NSMutableArray array];
+    for (NSUInteger i = 0; i < count; i++)
+    {
+        auto const file = tr_torrentFile(self.fHandle, i);
+        NSString* fileName = [NSString convertedStringFromCString:file.name];
+        NSString* fileExt = fileName.pathExtension.lowercaseString;
+        if (![fileExt isEqualToString:@"cue"])
+            continue;
+        NSString* fileDir = fileName.stringByDeletingLastPathComponent;
+        if (fileDir.length == 0 || [fileDir isEqualToString:@"."] || [fileDir isEqualToString:@"/"])
+            fileDir = @"";
+        if ([fileDir isEqualToString:directory])
+            [cuePathsInDir addObject:[self.currentDirectory stringByAppendingPathComponent:fileName]];
+    }
+    if (cuePathsInDir.count == 1)
+        return cuePathsInDir.firstObject;
+
     return nil;
 }
 

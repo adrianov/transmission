@@ -921,6 +921,14 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
     }
     else if (path.length > 0)
     {
+        // Use actual filesystem path (e.g. with .part when incomplete) so Play opens the real file.
+        NSNumber* indexNum = item[@"index"];
+        if (indexNum != nil && indexNum.unsignedIntegerValue != NSNotFound)
+        {
+            auto const location = tr_torrentFindFile(self.fHandle, (tr_file_index_t)indexNum.unsignedIntegerValue);
+            if (!std::empty(location))
+                path = @(location.c_str());
+        }
         NSString* ext = path.pathExtension.lowercaseString;
         if ([ext isEqualToString:@"djvu"] || [ext isEqualToString:@"djv"])
         {

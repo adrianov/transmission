@@ -159,7 +159,7 @@ static void initMediaExtensionSets(void)
     if (dvdDiscFolders.count > 0)
     {
         self.fIsDVD = YES;
-        self.fFolderItems = dvdDiscFolders.allObjects;
+        self.fFolderItems = [dvdDiscFolders.allObjects sortedArrayUsingSelector:@selector(localizedStandardCompare:)];
         self.fMediaType = TorrentMediaTypeVideo;
         self.fMediaFileCount = dvdDiscFolders.count;
         self.fMediaExtension = @"vob";
@@ -170,7 +170,7 @@ static void initMediaExtensionSets(void)
     if (blurayDiscFolders.count > 0)
     {
         self.fIsBluRay = YES;
-        self.fFolderItems = blurayDiscFolders.allObjects;
+        self.fFolderItems = [blurayDiscFolders.allObjects sortedArrayUsingSelector:@selector(localizedStandardCompare:)];
         self.fMediaType = TorrentMediaTypeVideo;
         self.fMediaFileCount = blurayDiscFolders.count;
         self.fMediaExtension = @"m2ts";
@@ -246,7 +246,7 @@ static void initMediaExtensionSets(void)
         if (albumFolders.count > 1)
         {
             self.fIsAlbumCollection = YES;
-            self.fFolderItems = albumFolders.allObjects;
+            self.fFolderItems = [albumFolders.allObjects sortedArrayUsingSelector:@selector(localizedStandardCompare:)];
             [self buildFolderToFilesCache:albumFolders];
         }
     }

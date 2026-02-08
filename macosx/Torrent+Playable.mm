@@ -32,8 +32,7 @@ static BOOL commonPrefixContainsSeasonToken(NSArray<NSArray<NSString*>*>* tokenA
 /// YES if the common prefix ends with "-" (Artist - Title pattern); allows stripping "Artist - " for album buttons.
 static BOOL commonPrefixEndsWithArtistSeparator(NSArray<NSArray<NSString*>*>* tokenArrays, NSUInteger prefixDrop);
 /// YES if every title's remainder (prefixDrop..n-suffixDrop) is a single token matching E + digits (episode-only); do not strip then.
-static BOOL allRemaindersAreSingleEpisodeOnlyToken(NSArray<NSArray<NSString*>*>* tokenArrays, NSUInteger prefixDrop,
-                                                   NSUInteger suffixDrop);
+static BOOL allRemaindersAreSingleEpisodeOnlyToken(NSArray<NSArray<NSString*>*>* tokenArrays, NSUInteger prefixDrop, NSUInteger suffixDrop);
 /// YES if token is E or e followed only by digits (e.g. E126).
 static BOOL isEpisodeOnlyToken(NSString* token);
 /// YES if token is digits optionally followed by period (e.g. 01., 02., 1) — leading track number for strip.
@@ -76,6 +75,27 @@ static BOOL isLeadingTrackNumberToken(NSString* token);
             return NO;
     }
     return YES;
+}
+
+/// YES when this playable item should display as album (CUE) — single source for icon and play menu.
+- (BOOL)playableItemOpensAsCueAlbum:(NSDictionary*)item
+{
+    NSString* pathToOpen = [self pathToOpenForPlayableItem:item];
+    if (pathToOpen.length > 0 && [pathToOpen.pathExtension.lowercaseString isEqualToString:@"cue"])
+        return YES;
+    NSString* path = [item[@"path"] isKindOfClass:[NSString class]] ? item[@"path"] : nil;
+    if (path.length > 0 && [path.pathExtension.lowercaseString isEqualToString:@"cue"])
+        return YES;
+    NSString* origExt = [item[@"originalExt"] isKindOfClass:[NSString class]] ? [item[@"originalExt"] lowercaseString] : nil;
+    if ([origExt isEqualToString:@"cue"])
+        return YES;
+    if ([item[@"category"] isEqualToString:@"audio"])
+    {
+        NSString* pathToCheck = pathToOpen.length > 0 ? pathToOpen : path;
+        if (pathToCheck.length > 0 && [self cueFilePathForAudioPath:pathToCheck] != nil)
+            return YES;
+    }
+    return NO;
 }
 
 /// Count to show in file-based icon subtitle. Used by iconSubtitle.
@@ -285,7 +305,7 @@ static BOOL isLeadingTrackNumberToken(NSString* token);
 }
 
 + (NSArray<NSString*>*)displayTitlesByStrippingCommonPrefixSuffix:(NSArray<NSString*>*)titles
-                                                         seasons:(NSArray<NSNumber*>*)seasons
+                                                          seasons:(NSArray<NSNumber*>*)seasons
 {
     if (titles.count < 2)
         return titles;
@@ -324,8 +344,7 @@ static BOOL isLeadingTrackNumberToken(NSString* token);
     NSUInteger prefixDrop = commonPrefixTokenCount(workArrays);
     // Allow prefix strip when: season token (S1, S01), or remainder is disc marker (CD1, Disc 1), or "Artist - " pattern.
     if (prefixDrop > 0 && !commonPrefixContainsSeasonToken(workArrays, prefixDrop) &&
-        !allTitlesHaveDiscMarkerAt(workArrays, prefixDrop) &&
-        !commonPrefixEndsWithArtistSeparator(workArrays, prefixDrop))
+        !allTitlesHaveDiscMarkerAt(workArrays, prefixDrop) && !commonPrefixEndsWithArtistSeparator(workArrays, prefixDrop))
         prefixDrop = 0;
     // Do not strip when the remainder would be only an episode-only token (e.g. E126); keep full title.
     if (prefixDrop > 0 && allRemaindersAreSingleEpisodeOnlyToken(workArrays, prefixDrop, suffixDrop) &&
@@ -477,8 +496,7 @@ static BOOL isEpisodeOnlyToken(NSString* token)
     return YES;
 }
 
-static BOOL allRemaindersAreSingleEpisodeOnlyToken(NSArray<NSArray<NSString*>*>* tokenArrays, NSUInteger prefixDrop,
-                                                  NSUInteger suffixDrop)
+static BOOL allRemaindersAreSingleEpisodeOnlyToken(NSArray<NSArray<NSString*>*>* tokenArrays, NSUInteger prefixDrop, NSUInteger suffixDrop)
 {
     for (NSArray<NSString*>* tokens in tokenArrays)
     {
@@ -763,13 +781,13 @@ static NSDictionary<NSString*, NSString*>* commonPrefixAndSuffixForStrings(NSArr
     for (NSUInteger i = 0; i < count; i++)
     {
         auto const file = tr_torrentFile(self.fHandle, i);
-        NSString* fileName = [NSString convertedStringFromCString:file.name];
-        if ([fileName.pathExtension.lowercaseString isEqualToString:@"cue"])
+        NSString* originalFileName = [NSString convertedStringFromCString:file.name];
+        if ([originalFileName.pathExtension.lowercaseString isEqualToString:@"cue"])
         {
-            NSString* baseName = fileName.stringByDeletingPathExtension;
+            NSString* baseName = originalFileName.stringByDeletingPathExtension;
             [cueBaseNames addObject:baseName];
             cueFileIndexes[baseName] = @(i);
-            cueFileNames[baseName] = fileName;
+            cueFileNames[baseName] = originalFileName;
             NSString* normalized = normalizedMediaKeyWithoutCodec(baseName);
             if (normalized.length > 0)
             {
@@ -795,15 +813,15 @@ static NSDictionary<NSString*, NSString*>* commonPrefixAndSuffixForStrings(NSArr
     for (NSUInteger i = 0; i < count; i++)
     {
         auto const file = tr_torrentFile(self.fHandle, i);
-        NSString* fileName = [NSString convertedStringFromCString:file.name];
-        NSString* ext = fileName.pathExtension.lowercaseString;
+        NSString* originalFileName = [NSString convertedStringFromCString:file.name];
+        NSString* ext = originalFileName.pathExtension.lowercaseString;
         if ([ext isEqualToString:@"pdf"])
         {
-            [pdfBaseNames addObject:fileName.stringByDeletingPathExtension.lowercaseString];
+            [pdfBaseNames addObject:originalFileName.stringByDeletingPathExtension.lowercaseString];
         }
         else if ([ext isEqualToString:@"epub"])
         {
-            [epubBaseNames addObject:fileName.stringByDeletingPathExtension.lowercaseString];
+            [epubBaseNames addObject:originalFileName.stringByDeletingPathExtension.lowercaseString];
         }
     }
 
@@ -862,7 +880,7 @@ static NSDictionary<NSString*, NSString*>* commonPrefixAndSuffixForStrings(NSArr
 
         if ([cueCompanionExtensions containsObject:ext])
         {
-            NSString* audioBaseName = fileName.stringByDeletingPathExtension;
+            NSString* audioBaseName = originalFileName.stringByDeletingPathExtension;
             NSString* normalized = normalizedMediaKeyWithoutCodec(audioBaseName);
             NSArray<NSString*>* candidateCues = normalized.length > 0 ? cueByNormalized[normalized] : nil;
             NSString* matchedCue = nil;
@@ -1011,10 +1029,12 @@ static NSDictionary<NSString*, NSString*>* commonPrefixAndSuffixForStrings(NSArr
     if (playable.count == 0)
         return nil;
 
+    // Sort by full path so directory order is preserved (e.g. Part.01 before Part.02 before Part.03).
+    // Using only lastPathComponent can yield wrong order when torrent file indices differ from path order.
     [playable sortUsingComparator:^NSComparisonResult(NSDictionary* a, NSDictionary* b) {
-        NSString* aKey = a[@"sortKey"] ?: a[@"name"];
-        NSString* bKey = b[@"sortKey"] ?: b[@"name"];
-        return [aKey localizedStandardCompare:bKey];
+        NSString* aPath = a[@"path"] ?: @"";
+        NSString* bPath = b[@"path"] ?: @"";
+        return [aPath localizedStandardCompare:bPath];
     }];
 
     NSMutableArray<NSDictionary*>* result = [NSMutableArray arrayWithCapacity:playable.count];

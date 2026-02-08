@@ -183,6 +183,8 @@ extern NSString* const kTorrentDidChangeGroupNotification;
 - (NSString*)pathToOpenForAudioPath:(NSString*)path;
 /// Path that would be opened for this playable item (e.g. .cue when present for audio). Used by play menu and play action.
 - (NSString*)pathToOpenForPlayableItem:(NSDictionary*)item;
+/// YES when this playable item should display as album (CUE) rather than single track. Single source for icon and play menu.
+- (BOOL)playableItemOpensAsCueAlbum:(NSDictionary*)item;
 /// Display name for play menu; should reflect the file that is opened (e.g. .cue when present).
 - (NSString*)displayNameForPlayableItem:(NSDictionary*)item;
 
@@ -196,6 +198,8 @@ extern NSString* const kTorrentDidChangeGroupNotification;
 
 // Returns the path to show in tooltip (prefers .cue file if available for audio files or album folders)
 - (NSString*)tooltipPathForItemPath:(NSString*)path type:(NSString*)type folder:(NSString*)folder;
+/// Resolves path to absolute (handles relative paths, symlinks). Implemented in Torrent+PathResolution.mm.
+- (NSString*)resolvePathInTorrent:(NSString*)path;
 
 /// Returns self. Used as NSSortDescriptor key so comparator receives Torrent objects, not key-path values.
 @property(nonatomic, readonly) Torrent* selfForSorting;

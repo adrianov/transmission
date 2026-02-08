@@ -59,7 +59,10 @@
                 }
                 else
                 {
-                    if (self.fMediaType == TorrentMediaTypeAudio && [self isFileBasedAudioCueBased])
+                    BOOL useAlbumIcon = [self isFileBasedAudioCueBased];
+                    if (!useAlbumIcon && self.fMediaType == TorrentMediaTypeAudio && self.playableFiles.count > 0)
+                        useAlbumIcon = [self playableItemOpensAsCueAlbum:self.playableFiles.firstObject];
+                    if (self.fMediaType == TorrentMediaTypeAudio && useAlbumIcon)
                     {
                         if (@available(macOS 11.0, *))
                         {
@@ -89,29 +92,41 @@
         }
         else
         {
-            NSString* ext = self.name.pathExtension.lowercaseString;
-            static NSSet<NSString*>* bookExtensions;
-            static dispatch_once_t onceToken;
-            dispatch_once(&onceToken, ^{
-                bookExtensions = [NSSet setWithArray:@[ @"pdf", @"epub", @"djv", @"djvu", @"fb2", @"mobi" ]];
-            });
-            if (ext.length > 0 && [bookExtensions containsObject:ext])
+            // Multi-file at root or single folder: show album icon when single playable opens as .cue (e.g. 1 FLAC + 1 CUE)
+            NSArray<NSDictionary*>* playable = self.playableFiles;
+            BOOL singleAlbum = playable.count == 1 && [self playableItemOpensAsCueAlbum:playable.firstObject];
+            if (singleAlbum && @available(macOS 11.0, *))
             {
-                auto const location = tr_torrentFindFile(self.fHandle, 0);
-                NSString* filePath = !std::empty(location) ? @(location.c_str()) :
-                                                             [self.currentDirectory stringByAppendingPathComponent:self.name];
-                baseIcon = [self iconForBookAtPath:filePath extension:ext isComplete:self.allDownloaded];
+                baseIcon = [NSImage imageWithSystemSymbolName:@"music.note.list" accessibilityDescription:nil];
+                if (baseIcon)
+                    [baseIcon setTemplate:YES];
             }
-            else
+            if (!baseIcon)
             {
-                UTType* contentType = [UTType typeWithFilenameExtension:ext];
-                baseIcon = contentType ? [NSWorkspace.sharedWorkspace iconForContentType:contentType] : nil;
-                if (!baseIcon)
+                NSString* ext = self.name.pathExtension.lowercaseString;
+                static NSSet<NSString*>* bookExtensions;
+                static dispatch_once_t onceToken;
+                dispatch_once(&onceToken, ^{
+                    bookExtensions = [NSSet setWithArray:@[ @"pdf", @"epub", @"djv", @"djvu", @"fb2", @"mobi" ]];
+                });
+                if (ext.length > 0 && [bookExtensions containsObject:ext])
                 {
+                    auto const location = tr_torrentFindFile(self.fHandle, 0);
+                    NSString* filePath = !std::empty(location) ? @(location.c_str()) :
+                                                                 [self.currentDirectory stringByAppendingPathComponent:self.name];
+                    baseIcon = [self iconForBookAtPath:filePath extension:ext isComplete:self.allDownloaded];
+                }
+                else
+                {
+                    UTType* contentType = [UTType typeWithFilenameExtension:ext];
+                    baseIcon = contentType ? [NSWorkspace.sharedWorkspace iconForContentType:contentType] : nil;
+                    if (!baseIcon)
+                    {
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
-                    baseIcon = [NSWorkspace.sharedWorkspace iconForFileType:ext];
+                        baseIcon = [NSWorkspace.sharedWorkspace iconForFileType:ext];
 #pragma clang diagnostic pop
+                    }
                 }
             }
         }
