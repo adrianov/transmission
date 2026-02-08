@@ -1002,7 +1002,8 @@
         NSRegularExpression* altSeasonRegex = [NSRegularExpression regularExpressionWithPattern:@"\\b(\\d{1,2})x(\\d{1,3})\\b"
                                                                                         options:NSRegularExpressionCaseInsensitive
                                                                                           error:nil];
-        NSTextCheckingResult* altMatch = [altSeasonRegex firstMatchInString:filename options:0 range:NSMakeRange(0, filename.length)];
+        NSTextCheckingResult* altMatch = [altSeasonRegex firstMatchInString:filename options:0
+                                                                      range:NSMakeRange(0, filename.length)];
         if (altMatch && altMatch.numberOfRanges >= 3)
         {
             NSInteger season = [[filename substringWithRange:[altMatch rangeAtIndex:1]] integerValue];
@@ -1018,7 +1019,8 @@
                                                                                         error:nil];
         if (episodeRegex == nil)
             return nil;
-        NSTextCheckingResult* episodeMatch = [episodeRegex firstMatchInString:filename options:0 range:NSMakeRange(0, filename.length)];
+        NSTextCheckingResult* episodeMatch = [episodeRegex firstMatchInString:filename options:0
+                                                                        range:NSMakeRange(0, filename.length)];
         if (!episodeMatch)
             return nil;
         // Standalone E## only: show full humanized filename so button title is meaningful (e.g. "CzechStreets - 2020.06.30 E126 Bald Rebel 2160p").
@@ -1027,9 +1029,7 @@
     }
 
     // Extract title from text after the episode marker (only when both season and episode were found)
-    NSString* remaining = episodeMatchRange.location != NSNotFound
-        ? [filename substringFromIndex:episodeMatchRange.location]
-        : @"";
+    NSString* remaining = episodeMatchRange.location != NSNotFound ? [filename substringFromIndex:episodeMatchRange.location] : @"";
 
     // If there's a dot or hyphen immediately after, skip it
     NSRegularExpression* separatorRegex = [NSRegularExpression regularExpressionWithPattern:@"^[.\\s]+" options:0 error:nil];
