@@ -123,6 +123,28 @@
     [self addTrackingArea:trackingArea];
 }
 
+- (void)updateTrackingAreas
+{
+    [super updateTrackingAreas];
+    NSTrackingArea* toReplace = nil;
+    for (NSTrackingArea* area in self.trackingAreas)
+    {
+        if (area.owner == self && (area.options & NSTrackingInVisibleRect))
+        {
+            toReplace = area;
+            break;
+        }
+    }
+    if (toReplace)
+    {
+        [self removeTrackingArea:toReplace];
+        [self addTrackingArea:[[NSTrackingArea alloc] initWithRect:NSZeroRect
+                                                           options:NSTrackingMouseEnteredAndExited | NSTrackingActiveAlways | NSTrackingInVisibleRect
+                                                             owner:self
+                                                          userInfo:nil]];
+    }
+}
+
 - (void)mouseEntered:(NSEvent*)event
 {
     self.isHovered = YES;
