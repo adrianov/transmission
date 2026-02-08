@@ -5,10 +5,49 @@
 #include <cmath>
 
 #import "PlayButtonStateBuilder.h"
+#import "NSStringAdditions.h"
 #import "Torrent.h"
 #import "TorrentPrivate.h"
 
 static CGFloat const kMinProgressToShowPlayButton = 0.01;
+
+/// When multiple buttons share the same stripped title, prepend humanized parent directory and re-strip so labels are distinct (e.g. "Part 01 — Monte Cristo").
+static void disambiguateDuplicateTitles(NSMutableArray<NSMutableDictionary*>* state, NSArray<NSNumber*>* seasons)
+{
+    if (state.count < 2)
+        return;
+    NSArray<NSString*>* titles = [state valueForKey:@"title"];
+    NSCountedSet<NSString*>* counts = [NSCountedSet setWithArray:titles];
+    BOOL anyDuplicate = NO;
+    for (NSString* t in counts)
+        if ([counts countForObject:t] > 1)
+        {
+            anyDuplicate = YES;
+            break;
+        }
+    if (!anyDuplicate)
+        return;
+    for (NSUInteger i = 0; i < state.count; i++)
+    {
+        if ([counts countForObject:titles[i]] < 2)
+            continue;
+        NSMutableDictionary* e = state[i];
+        NSString* path = e[@"path"];
+        NSString* folder = e[@"folder"];
+        NSString* parent = (path.length > 0) ? [path stringByDeletingLastPathComponent].lastPathComponent :
+            (folder.length > 0 ? (folder.lastPathComponent ?: folder) : @"");
+        if (parent.length == 0)
+            continue;
+        NSString* humanized = parent.humanReadableFileName;
+        if (humanized.length == 0)
+            continue;
+        NSString* base = e[@"baseTitle"] ?: @"";
+        e[@"baseTitle"] = [NSString stringWithFormat:@"%@ — %@", humanized, base];
+    }
+    NSArray<NSString*>* newTitles = [Torrent displayTitlesByStrippingCommonPrefixSuffix:[state valueForKey:@"baseTitle"] seasons:seasons];
+    for (NSUInteger i = 0; i < state.count; i++)
+        state[i][@"title"] = newTitles[i];
+}
 
 /// Determines if a playable item should be visible based on type, progress, and wanted state.
 static BOOL isPlayableItemVisible(NSString* type, CGFloat progress, BOOL wanted)
@@ -53,6 +92,7 @@ static NSDictionary* stateAndLayoutFromSnapshotImpl(NSArray<NSDictionary*>* snap
         NSArray<NSString*>* stripped = [Torrent displayTitlesByStrippingCommonPrefixSuffix:titles seasons:seasons];
         for (NSUInteger i = 0; i < state.count; i++)
             state[i][@"title"] = stripped[i];
+        disambiguateDuplicateTitles(state, seasons);
         for (NSUInteger i = 0; i < state.count; i++)
         {
             NSMutableDictionary* e = state[i];
@@ -272,6 +312,7 @@ static NSDictionary* stateAndLayoutFromSnapshotImpl(NSArray<NSDictionary*>* snap
             NSArray<NSString*>* stripped = [Torrent displayTitlesByStrippingCommonPrefixSuffix:titles seasons:seasons];
             for (NSUInteger i = 0; i < state.count; i++)
                 state[i][@"title"] = stripped[i];
+            disambiguateDuplicateTitles(state, seasons);
             for (NSMutableDictionary* e in state)
             {
                 if ([e[@"visible"] boolValue] && ![e[@"type"] hasPrefix:@"document"] && [e[@"progress"] doubleValue] < 1.0 &&
@@ -334,10 +375,12 @@ static NSDictionary* stateAndLayoutFromSnapshotImpl(NSArray<NSDictionary*>* snap
         }
         NSArray<NSString*>* stripped = [Torrent displayTitlesByStrippingCommonPrefixSuffix:titles seasons:seasons];
         for (NSUInteger i = 0; i < state.count; i++)
+            state[i][@"title"] = stripped[i];
+        disambiguateDuplicateTitles(state, seasons);
+        for (NSUInteger i = 0; i < state.count; i++)
         {
             NSMutableDictionary* e = state[i];
-            NSString* displayTitle = stripped[i];
-            e[@"title"] = displayTitle;
+            NSString* displayTitle = e[@"title"];
             if ([e[@"visible"] boolValue] && ![e[@"type"] hasPrefix:@"document"] && [e[@"progress"] doubleValue] < 1.0 &&
                 [e[@"progressPercent"] intValue] < 100)
                 e[@"title"] = [NSString stringWithFormat:@"%@ (%d%%)", displayTitle, [e[@"progressPercent"] intValue]];
