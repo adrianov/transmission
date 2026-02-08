@@ -116,6 +116,14 @@
     return YES;
 }
 
+- (void)setBounds:(NSRect)bounds
+{
+    [super setBounds:bounds];
+    CGFloat w = bounds.size.width;
+    if (w > 0 && (std::fabs(w - _lastLayoutWidth) > 0.001 || _layoutDirty))
+        [self setNeedsLayout:YES];
+}
+
 - (void)layout
 {
     [super layout];
@@ -171,6 +179,7 @@
 
 - (void)layoutSubviewsForWidth:(CGFloat)availableWidth
 {
+    // Regression: when outline view lays out before row width is set, bounds.width can be 0; skip layout then so we don't set zero frames. Next layout pass will run with real width.
     if (availableWidth <= 0)
         return;
     if (!_layoutDirty && std::fabs(availableWidth - _lastLayoutWidth) < 0.001)
