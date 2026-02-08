@@ -41,6 +41,7 @@ static NSTimeInterval const kToggleProgressSeconds = 0.175;
 // Associated object keys for play buttons (shared with TorrentTableView+Flow.mm; extern for C++ linkage)
 extern char const kPlayButtonTypeKey = '\0';
 extern char const kPlayButtonFolderKey = '\0';
+extern char const kPlayButtonRepresentedKey = '\0';
 
 @implementation TorrentTableView
 
@@ -129,7 +130,7 @@ extern char const kPlayButtonFolderKey = '\0';
     {
         PlayButton* button = [[PlayButton alloc] init];
         button.target = self;
-        button.action = @selector(playMediaFile:);
+        button.action = @selector(playContextItem:);
         [self.fPlayButtonPool addObject:button];
     }
 
@@ -784,15 +785,40 @@ extern char const kPlayButtonFolderKey = '\0';
     [self selectRowIndexes:selectedIndexes byExtendingSelection:NO];
 }
 
-- (void)playContextItem:(NSMenuItem*)sender
+/// Single source for (torrent, item) from context menu item or play button. Prefer context menu behavior (exact payload only).
+- (BOOL)torrent:(Torrent* _Nullable*)outTorrent item:(NSDictionary* _Nullable*)outItem fromPlaySender:(id)sender
 {
-    NSDictionary* represented = sender.representedObject;
-    Torrent* torrent = represented[@"torrent"];
-    NSDictionary* item = represented[@"item"];
-    if (torrent && item)
+    NSDictionary* represented = nil;
+    if ([sender isKindOfClass:[NSMenuItem class]])
+        represented = [(NSMenuItem*)sender representedObject];
+    else if ([sender isKindOfClass:[NSButton class]])
+        represented = objc_getAssociatedObject(sender, &kPlayButtonRepresentedKey);
+    if (![represented isKindOfClass:[NSDictionary class]])
     {
-        [self playMediaItem:item forTorrent:torrent];
+        if (outTorrent)
+            *outTorrent = nil;
+        if (outItem)
+            *outItem = nil;
+        return NO;
     }
+    Torrent* t = represented[@"torrent"];
+    NSDictionary* it = represented[@"item"];
+    Torrent* validTorrent = [t isKindOfClass:[Torrent class]] ? t : nil;
+    NSDictionary* validItem = [it isKindOfClass:[NSDictionary class]] ? it : nil;
+    if (outTorrent)
+        *outTorrent = validTorrent;
+    if (outItem)
+        *outItem = validItem;
+    return (validTorrent != nil && validItem != nil);
+}
+
+- (void)playContextItem:(id)sender
+{
+    Torrent* torrent = nil;
+    NSDictionary* item = nil;
+    if (![self torrent:&torrent item:&item fromPlaySender:sender])
+        return;
+    [self playMediaItem:item forTorrent:torrent];
 }
 
 - (NSMenu*)menuForEvent:(NSEvent*)event
@@ -896,13 +922,10 @@ extern char const kPlayButtonFolderKey = '\0';
 {
     if (item && item.action == @selector(playContextItem:))
     {
-        NSDictionary* data = item.representedObject;
-        Torrent* torrent = data[@"torrent"];
-        NSDictionary* fileItem = data[@"item"];
-        if (torrent && fileItem)
-        {
+        Torrent* torrent = nil;
+        NSDictionary* fileItem = nil;
+        if ([self torrent:&torrent item:&fileItem fromPlaySender:item])
             [self setHighPriorityForItem:fileItem forTorrent:torrent];
-        }
     }
 }
 
@@ -1137,24 +1160,6 @@ static void setPlayButtonFolderCache(NSButton* sender, id value)
     return folder;
 }
 
-- (NSIndexSet*)targetFileIndexesForPlayButton:(NSButton*)sender torrent:(Torrent*)torrent isComplete:(BOOL*)isComplete
-{
-    NSInteger fileIndex = sender.tag;
-    if (fileIndex != NSNotFound)
-    {
-        if (isComplete != NULL)
-            *isComplete = ([torrent fileProgressForIndex:fileIndex] >= 1.0);
-        return [NSIndexSet indexSetWithIndex:fileIndex];
-    }
-
-    NSString* folder = [self folderForPlayButton:sender torrent:torrent];
-    NSIndexSet* fileIndexes = folder.length > 0 ? [torrent fileIndexesForFolder:folder] : nil;
-    if (isComplete != NULL)
-        *isComplete = (fileIndexes.count == 0) || (folder.length == 0) || ([torrent folderConsecutiveProgress:folder] >= 1.0);
-
-    return fileIndexes;
-}
-
 - (NSIndexSet*)fileIndexesWithPriority:(tr_priority_t)priority torrent:(Torrent*)torrent
 {
     NSUInteger fileCount = torrent.fileCount;
@@ -1265,8 +1270,12 @@ static void setPlayButtonFolderCache(NSButton* sender, id value)
     tr_torrentSetLastPlayedDate(torrent.torrentStruct, time(nullptr));
 
     NSString* path = [torrent pathToOpenForPlayableItem:item];
-    if (!path)
+    if (!path || path.length == 0)
         return;
+
+    NSString* resolved = [torrent resolvePathInTorrent:path];
+    if (resolved.length > 0)
+        path = resolved;
 
     [Torrent invalidateIINAWatchCacheForPath:path];
     NSString* itemPath = item[@"path"];
@@ -1277,7 +1286,7 @@ static void setPlayButtonFolderCache(NSButton* sender, id value)
     [self updateVisiblePlayButtons];
 
     NSString* type = item[@"type"];
-    NSURL* fileURL = [path fileURLForOpening];
+    NSURL* fileURL = [NSURL fileURLWithPath:path];
 
     if ([type isEqualToString:@"document-books"])
     {
@@ -1324,7 +1333,7 @@ static void setPlayButtonFolderCache(NSButton* sender, id value)
         NSURL* iinaURL = [NSWorkspace.sharedWorkspace URLForApplicationWithBundleIdentifier:@"com.colliderli.iina"];
 
         // path already set from pathToOpenForPlayableItem (folder vs .cue by count)
-        fileURL = [path fileURLForOpening];
+        fileURL = [NSURL fileURLWithPath:path];
         if (iinaURL)
         {
             NSWorkspaceOpenConfiguration* config = [NSWorkspaceOpenConfiguration configuration];
@@ -1368,12 +1377,10 @@ static void setPlayButtonFolderCache(NSButton* sender, id value)
 
 - (void)setHighPriorityForButton:(NSButton*)sender
 {
-    Torrent* torrent = [self itemAtRow:[self rowForView:[sender superview]]];
-    if (!torrent)
+    Torrent* torrent = nil;
+    NSDictionary* item = nil;
+    if (![self torrent:&torrent item:&item fromPlaySender:sender])
         return;
-
-    NSDictionary* item = @{ @"index" : @(sender.tag), @"folder" : [self folderForPlayButton:sender torrent:torrent] ?: @"" };
-
     [self setHighPriorityForItem:item forTorrent:torrent];
 }
 
@@ -1386,23 +1393,6 @@ static void setPlayButtonFolderCache(NSButton* sender, id value)
             return row;
     }
     return -1;
-}
-
-- (IBAction)playMediaFile:(NSButton*)sender
-{
-    NSInteger row = [self rowForViewOrAncestor:sender];
-    Torrent* torrent = (row >= 0) ? [self itemAtRow:row] : nil;
-    if (!torrent)
-        return;
-
-    NSString* type = objc_getAssociatedObject(sender, &kPlayButtonTypeKey) ?: @"";
-    NSString* folder = [self folderForPlayButton:sender torrent:torrent] ?: @"";
-    NSString* path = sender.identifier ?: @"";
-
-    path = [torrent pathToOpenForAudioPath:path];
-    NSDictionary* item = @{ @"path" : path, @"type" : type, @"index" : @(sender.tag), @"folder" : folder };
-
-    [self playMediaItem:item forTorrent:torrent];
 }
 
 - (IBAction)displayTorrentActionPopover:(id)sender

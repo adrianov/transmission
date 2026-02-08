@@ -18,6 +18,7 @@
 static char const kFlowViewTorrentHashKey = '\0';
 extern char const kPlayButtonTypeKey;
 extern char const kPlayButtonFolderKey;
+extern char const kPlayButtonRepresentedKey;
 static CGFloat const kFlowPlayButtonRightMargin = 55.0;
 static CGFloat const kFlowPlayButtonRowHeight = 18.0;
 static CGFloat const kFlowPlayButtonVerticalPadding = 4.0;
@@ -195,11 +196,10 @@ static NSDictionary* computeStateAndLayoutFromSnapshot(NSArray<NSDictionary*>* s
     if (button)
         [self.fPlayButtonPool removeLastObject];
     else
-    {
         button = [[PlayButton alloc] init];
-        button.target = self;
-        button.action = @selector(playMediaFile:);
-    }
+    // Always set target/action so clicks and tooltips work after pool reuse or when cell is reconfigured.
+    button.target = self;
+    button.action = @selector(playContextItem:);
     return button;
 }
 
@@ -227,9 +227,14 @@ static NSDictionary* computeStateAndLayoutFromSnapshot(NSArray<NSDictionary*>* s
         playButton.identifier = path;
     NSString* tooltipPath = [torrent tooltipPathForItemPath:path ?: @"" type:type folder:folder];
     NSString* openLabel = [torrent openCountLabelForPlayableItem:entry];
-    playButton.toolTip = openLabel.length > 0 ? [NSString stringWithFormat:@"%@\n%@", tooltipPath, openLabel] : tooltipPath;
+    NSString* tip = openLabel.length > 0 ? [NSString stringWithFormat:@"%@\n%@", tooltipPath, openLabel] : tooltipPath;
+    if (tip.length == 0)
+        tip = playButton.title.length > 0 ? playButton.title : NSLocalizedString(@"Play", "Play button tooltip fallback");
+    playButton.toolTip = tip;
     objc_setAssociatedObject(playButton, &kPlayButtonTypeKey, type, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     objc_setAssociatedObject(playButton, &kPlayButtonFolderKey, folder.length > 0 ? folder : nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    NSDictionary* represented = @{ @"torrent" : torrent, @"item" : entry };
+    objc_setAssociatedObject(playButton, &kPlayButtonRepresentedKey, represented, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     NSImage* icon = [self iconForPlayableFileItem:entry torrent:torrent];
     playButton.image = icon;
     playButton.imagePosition = icon ? NSImageLeft : NSNoImage;
@@ -582,8 +587,18 @@ static NSDictionary* computeStateAndLayoutFromSnapshot(NSArray<NSDictionary*>* s
         if ([view isKindOfClass:playButtonClass])
         {
             PlayButton* button = (PlayButton*)view;
-            NSDictionary* entry = (button.tag != NSNotFound) ? stateMap[@(button.tag)] :
-                                                               (stateMap[[self folderForPlayButton:button torrent:torrent]] ?: nil);
+            NSDictionary* represented = objc_getAssociatedObject(button, &kPlayButtonRepresentedKey);
+            NSDictionary* item = [represented isKindOfClass:[NSDictionary class]] ? represented[@"item"] : nil;
+            NSDictionary* entry = nil;
+            if (item)
+            {
+                NSNumber* idx = item[@"index"];
+                NSString* folder = item[@"folder"];
+                entry = idx ? stateMap[idx] : (folder.length > 0 ? stateMap[folder] : nil);
+            }
+            if (!entry)
+                entry = (button.tag != NSNotFound) ? stateMap[@(button.tag)] :
+                       (stateMap[[self folderForPlayButton:button torrent:torrent]] ?: nil);
             if (entry)
             {
                 [self applyPathDerivedUIToPlayButton:button forEntry:entry torrent:torrent];

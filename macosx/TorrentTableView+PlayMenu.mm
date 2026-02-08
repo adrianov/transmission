@@ -16,21 +16,13 @@
 
 - (BOOL)isCueAlbumFileItem:(NSDictionary*)fileItem torrent:(Torrent*)torrent
 {
-    NSString* path = torrent ? [torrent pathToOpenForPlayableItem:fileItem] : (fileItem[@"path"] ?: @"");
-    NSString* rawPath = fileItem[@"path"];
-    BOOL const pathIsCue = path.length > 0 && [path.pathExtension.lowercaseString isEqualToString:@"cue"];
-    BOOL const rawPathIsCue = rawPath.length > 0 && [rawPath.pathExtension.lowercaseString isEqualToString:@"cue"];
-    NSString* origExt = [fileItem[@"originalExt"] isKindOfClass:[NSString class]] ? [fileItem[@"originalExt"] lowercaseString] : nil;
-    if (pathIsCue || rawPathIsCue || [origExt isEqualToString:@"cue"])
+    if (torrent)
+        return [torrent playableItemOpensAsCueAlbum:fileItem];
+    NSString* path = [fileItem[@"path"] isKindOfClass:[NSString class]] ? fileItem[@"path"] : nil;
+    if (path.length > 0 && [path.pathExtension.lowercaseString isEqualToString:@"cue"])
         return YES;
-    // Audio file that is the companion to a CUE (same base name) → album icon; many tracks + one CUE → track icon
-    if (torrent && [fileItem[@"category"] isEqualToString:@"audio"])
-    {
-        NSString* pathToCheck = path.length > 0 ? path : rawPath;
-        if (pathToCheck.length > 0 && [torrent cueFilePathForAudioPath:pathToCheck] != nil)
-            return YES;
-    }
-    return NO;
+    NSString* origExt = [fileItem[@"originalExt"] isKindOfClass:[NSString class]] ? [fileItem[@"originalExt"] lowercaseString] : nil;
+    return [origExt isEqualToString:@"cue"];
 }
 
 - (NSImage*)iconForPlayableFileItem:(NSDictionary*)fileItem torrent:(Torrent*)torrent
@@ -40,10 +32,10 @@
         NSString* type = fileItem[@"type"] ?: @"file";
         NSString* category = fileItem[@"category"];
         BOOL const isCueFile = [self isCueAlbumFileItem:fileItem torrent:torrent];
-        BOOL singleTrackAlbum = ([type isEqualToString:@"album"] && !isCueFile && torrent &&
-                                 [self tracksForAlbumItem:fileItem torrent:torrent].count == 1);
-        NSString* cacheKey = [NSString stringWithFormat:@"%@:%@:%@:%d", type, category ?: @"", isCueFile ? @"cue" : @"",
-                                 singleTrackAlbum ? 1 : 0];
+        BOOL singleTrackAlbum = (
+            [type isEqualToString:@"album"] && !isCueFile && torrent && [self tracksForAlbumItem:fileItem torrent:torrent].count == 1);
+        NSString* cacheKey = [NSString
+            stringWithFormat:@"%@:%@:%@:%d", type, category ?: @"", isCueFile ? @"cue" : @"", singleTrackAlbum ? 1 : 0];
         NSImage* cached = [self.fIconCache objectForKey:cacheKey];
         if (cached)
             return cached;
@@ -225,7 +217,7 @@
                                                                     keyEquivalent:@""];
                         trackItem.target = self;
                         trackItem.representedObject = @{ @"torrent" : torrent, @"item" : track };
-                        trackItem.image = [self iconForPlayableFileItem:track torrent:nil];
+                        trackItem.image = [self iconForPlayableFileItem:track torrent:torrent];
                         [albumMenu addItem:trackItem];
                     }
                     [currentMenu addItem:albumItem];
