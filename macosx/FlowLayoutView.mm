@@ -5,11 +5,18 @@
 #include <cmath>
 
 #import "FlowLayoutView.h"
+#import <QuartzCore/CALayer.h>
 
 @interface FlowLineBreak : NSView
 @end
 
 @implementation FlowLineBreak
+
+- (BOOL)isOpaque
+{
+    return NO;
+}
+
 @end
 
 @implementation FlowLayoutView
@@ -44,6 +51,30 @@
     return self;
 }
 
+// Regression fix: FlowLayoutView is layer-backed but draws no content of its own.
+// Without explicit transparency, the backing layer can render as a black rectangle
+// during transitional states (e.g. async button computation while scrolling).
+// All three overrides are needed: isOpaque tells AppKit the view is transparent,
+// wantsDefaultClipping avoids stale clipping rects, and makeBackingLayer ensures
+// the CALayer itself has no background fill.
+- (BOOL)isOpaque
+{
+    return NO;
+}
+
+- (BOOL)wantsDefaultClipping
+{
+    return NO;
+}
+
+- (CALayer*)makeBackingLayer
+{
+    CALayer* layer = [super makeBackingLayer];
+    layer.backgroundColor = nil;
+    layer.opaque = NO;
+    return layer;
+}
+
 - (void)addArrangedSubview:(NSView*)view
 {
     [_arrangedSubviews addObject:view];
@@ -65,12 +96,12 @@
     _visibleCacheValid = NO;
     _layoutDirty = YES;
     [self setNeedsLayout:YES];
+    [self setNeedsDisplay:YES];
 }
 
 - (void)addLineBreak
 {
     FlowLineBreak* br = [[FlowLineBreak alloc] init];
-    br.wantsLayer = YES;
     [_arrangedSubviews addObject:br];
     [self addSubview:br];
     _visibleCacheValid = NO;
@@ -81,7 +112,6 @@
 - (void)addLineBreakBatched
 {
     FlowLineBreak* br = [[FlowLineBreak alloc] init];
-    br.wantsLayer = YES;
     [_arrangedSubviews addObject:br];
     [self addSubview:br];
     // No cache invalidation - caller will call finishBatchUpdates
@@ -109,6 +139,7 @@
     _lastLayoutHeight = 0;
     [self invalidateIntrinsicContentSize];
     [self setNeedsLayout:YES];
+    [self setNeedsDisplay:YES];
 }
 
 - (BOOL)isFlipped
