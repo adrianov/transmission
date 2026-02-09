@@ -79,19 +79,29 @@
 {
     if (!_iconInternal)
     {
-        NSString* ext = _name.pathExtension.lowercaseString;
-
-        // Use PDF icon for DJVU files (book format without system icon)
-        BOOL isDjvu = [ext isEqualToString:@"djvu"] || [ext isEqualToString:@"djv"];
-        UTType* contentType = _isFolder ? UTTypeFolder : (isDjvu ? UTTypePDF : [UTType typeWithFilenameExtension:ext]);
-
-        NSImage* baseIcon = contentType ? [NSWorkspace.sharedWorkspace iconForContentType:contentType] : nil;
-        if (!baseIcon)
+        NSImage* baseIcon = nil;
+        if (_isFolder)
         {
-            // Fallback: create UTType from extension
-            UTType* fallbackType = _isFolder ? UTTypeFolder : [UTType typeWithFilenameExtension:_name.pathExtension];
-            baseIcon = fallbackType ? [NSWorkspace.sharedWorkspace iconForContentType:fallbackType] :
-                                      [NSWorkspace.sharedWorkspace iconForContentType:UTTypeData];
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+            baseIcon = [NSWorkspace.sharedWorkspace iconForFileType:NSFileTypeForHFSTypeCode(kGenericFolderIcon)];
+#pragma clang diagnostic pop
+        }
+        else
+        {
+            NSString* ext = _name.pathExtension.lowercaseString;
+            // iconForContentType: can return SF Symbol–style icons (e.g. for audio); use iconForFileType: so
+            // the Files tab shows Finder-style file icons. Exception: DJVU has no system file-type icon, use PDF.
+            BOOL isDjvu = [ext isEqualToString:@"djvu"] || [ext isEqualToString:@"djv"];
+            if (isDjvu)
+                baseIcon = [NSWorkspace.sharedWorkspace iconForContentType:UTTypePDF];
+            else
+            {
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+                baseIcon = [NSWorkspace.sharedWorkspace iconForFileType:_name.pathExtension];
+#pragma clang diagnostic pop
+            }
         }
         _iconInternal = [FileListNode iconWithShadow:baseIcon];
     }
