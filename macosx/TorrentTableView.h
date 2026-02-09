@@ -46,4 +46,7 @@ extern CGFloat const kGroupSeparatorHeight;
 
 - (void)selectAndScrollToRow:(NSInteger)row;
 
+/// Plays the given playable item (from Torrent.playableFiles) for the given torrent. Used by toolbar "Play Random Audio".
+- (void)playMediaItem:(NSDictionary*)item forTorrent:(Torrent*)torrent;
+
 @end

@@ -178,6 +178,9 @@ static NSDictionary* computeStateAndLayoutFromSnapshot(NSArray<NSDictionary*>* s
     flowView.horizontalSpacing = 6;
     flowView.verticalSpacing = 4;
     flowView.minimumButtonWidth = 50;
+    // Start hidden to prevent black rectangle while buttons are computed asynchronously.
+    // Callers unhide after populating buttons.
+    flowView.hidden = YES;
     [cell addSubview:flowView];
     cell.fPlayButtonsView = flowView;
     cell.fPlayButtonsHeightConstraint = [flowView.heightAnchor constraintEqualToConstant:0];
@@ -279,6 +282,22 @@ static NSDictionary* computeStateAndLayoutFromSnapshot(NSArray<NSDictionary*>* s
     [self.fPendingHeightRows removeAllIndexes];
 }
 
+/// When async apply is skipped because the cell was reused (e.g. during scroll), the row that displays this torrent has a different cell that never got buttons. Scheduling config for that cell fixes missing buttons. Do not remove this re-schedule or buttons will disappear in some rows while scrolling.
+- (void)scheduleConfigurePlayButtonsForTorrentIfNeeded:(Torrent*)torrent
+{
+    if (!torrent || ![self showContentButtonsPref] || torrent.playableFiles.count == 0)
+        return;
+    NSInteger row = [self rowForItem:torrent];
+    if (row < 0)
+        return;
+    NSView* cellView = [self viewAtColumn:0 row:row makeIfNecessary:NO];
+    if (![cellView isKindOfClass:[TorrentCell class]])
+        return;
+    TorrentCell* cell = (TorrentCell*)cellView;
+    if ([self cellNeedsContentButtonsConfigForCell:cell torrent:torrent])
+        [self scheduleConfigurePlayButtonsForCell:cell torrent:torrent];
+}
+
 - (void)scheduleConfigurePlayButtonsForCell:(TorrentCell*)cell torrent:(Torrent*)torrent
 {
     NSString* hash = torrent.hashString;
@@ -373,7 +392,12 @@ static NSDictionary* computeStateAndLayoutFromSnapshot(NSArray<NSDictionary*>* s
     }
     FlowLayoutView* flowView = (FlowLayoutView*)cell.fPlayButtonsView;
     if (flowView)
+    {
+        // Hide during subview recycling to avoid momentary black rectangle while
+        // the layer-backed view has no children (regression fix for scroll artifacts).
+        flowView.hidden = YES;
         [self recycleSubviewsFromFlowView:flowView];
+    }
     else
         flowView = [self newFlowViewAddedToCell:cell];
     setFlowViewTorrentHash(flowView, currentHash);
@@ -454,7 +478,10 @@ static NSDictionary* computeStateAndLayoutFromSnapshot(NSArray<NSDictionary*>* s
             if (!c || !t || !tv)
                 return;
             if (![c.fTorrentHash isEqualToString:hashForApply])
+            {
+                [tv scheduleConfigurePlayButtonsForTorrentIfNeeded:t];
                 return;
+            }
             NSMutableArray* mutableState = (NSMutableArray*)state;
             [PlayButtonStateBuilder enrichStateWithIinaUnwatched:mutableState forTorrent:t];
             __weak TorrentTableView* weakTv = tv;
@@ -463,7 +490,10 @@ static NSDictionary* computeStateAndLayoutFromSnapshot(NSArray<NSDictionary*>* s
                 if (!strongTv)
                     return;
                 if (![c.fTorrentHash isEqualToString:t.hashString])
+                {
+                    [strongTv scheduleConfigurePlayButtonsForTorrentIfNeeded:t];
                     return;
+                }
                 [strongTv applyFlowStateToCell:c torrent:t state:mutableState layout:layout playableFiles:playableFilesForApply];
             }];
             if (tv.fPendingFlowApplies.count == 1)

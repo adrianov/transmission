@@ -37,6 +37,7 @@ static NSInteger const kMaxGroup = 999999;
 static CGFloat const kErrorImageSize = 20.0;
 
 static NSTimeInterval const kToggleProgressSeconds = 0.175;
+static NSTimeInterval const kScrollSettleDelay = 0.2;
 
 // Associated object keys for play buttons (shared with TorrentTableView+Flow.mm; extern for C++ linkage)
 extern char const kPlayButtonTypeKey = '\0';
@@ -107,6 +108,15 @@ extern char const kPlayButtonRepresentedKey = '\0';
     {
         self.fScrollViewPreviousDelegate = [scrollView valueForKey:@"delegate"];
         [scrollView setValue:self forKey:@"delegate"];
+        NSClipView* contentView = scrollView.contentView;
+        if (contentView)
+        {
+            contentView.postsBoundsChangedNotifications = YES;
+            [NSNotificationCenter.defaultCenter addObserver:self
+                                                     selector:@selector(scrollViewBoundsDidChange:)
+                                                         name:NSViewBoundsDidChangeNotification
+                                                       object:contentView];
+        }
     }
 
     NSNotificationCenter* nc = NSNotificationCenter.defaultCenter;
@@ -142,6 +152,12 @@ extern char const kPlayButtonRepresentedKey = '\0';
         field.wantsLayer = YES;
         [self.fHeaderPool addObject:field];
     }
+}
+
+- (void)dealloc
+{
+    [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(ensureContentButtonsAfterScrollSettled) object:nil];
+    [NSNotificationCenter.defaultCenter removeObserver:self];
 }
 
 - (void)viewDidEndLiveResize
@@ -265,6 +281,17 @@ extern char const kPlayButtonRepresentedKey = '\0';
         if ([self cellNeedsContentButtonsConfigForCell:cell torrent:torrent])
             [self scheduleConfigurePlayButtonsForCell:cell torrent:torrent];
     }];
+}
+
+- (void)scrollViewBoundsDidChange:(NSNotification*)notification
+{
+    [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(ensureContentButtonsAfterScrollSettled) object:nil];
+    [self performSelector:@selector(ensureContentButtonsAfterScrollSettled) withObject:nil afterDelay:kScrollSettleDelay];
+}
+
+- (void)ensureContentButtonsAfterScrollSettled
+{
+    [self ensureContentButtonsForVisibleRows];
 }
 
 - (void)scrollViewDidEndLiveScroll:(id)scrollView
