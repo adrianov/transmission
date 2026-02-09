@@ -37,6 +37,10 @@ static BOOL allRemaindersAreSingleEpisodeOnlyToken(NSArray<NSArray<NSString*>*>*
 static BOOL isEpisodeOnlyToken(NSString* token);
 /// YES if token is digits optionally followed by period (e.g. 01., 02., 1) — leading track number for strip.
 static BOOL isLeadingTrackNumberToken(NSString* token);
+/// YES if string is only a resolution/format tag (e.g. 1080p, 2160p, #1080p); avoid using as button title (over-stripped).
+static BOOL isResolutionOnlyTitle(NSString* s);
+/// YES if string is only digits or digits + trailing period (e.g. 13, 01.); avoid using as button title (over-stripped).
+static BOOL isBareTrackNumberOnly(NSString* s);
 /// Normalize so "01.Monte.Cristo" tokenizes as leading number + words (enables "01", "02" strip when remainder is same).
 static NSString* normalizeTitleForTokenization(NSString* s);
 
@@ -398,12 +402,19 @@ static NSString* normalizeTitleForTokenization(NSString* s);
             [remainders addObject:joined.length > 0 ? joined : @""];
         if (joined.length == 0)
             [result addObject:raw];
+        // Regression fix: Prevent over-stripping in first pass. If token-based stripping produces only a resolution
+        // (e.g. "1080p") or bare track number (e.g. "13"), keep the original title. This prevents buttons from showing
+        // meaningless labels like "1080p" or "13" when the full title should be displayed. The "all same remainder"
+        // logic below (lines 425-434) will override this for the special case where all titles share the same suffix
+        // (e.g. "01. Same", "02. Same" → "01", "02"), which is the intended behavior.
+        else if (isResolutionOnlyTitle(joined) || isBareTrackNumberOnly(joined))
+            [result addObject:raw];
         else if (leadingTokens)
             [result addObject:[[leadingTokens[i] stringByAppendingString:@" "] stringByAppendingString:joined]];
         else
             [result addObject:joined];
     }
-    // When all titles are "NN. SameSuffix" (e.g. 01. Monte Cristo, 02. Monte Cristo), show only the number on buttons so labels are "01", "02", "03", "04" instead of repeating the same suffix. Also when the remainder is entirely common (joined empty), strip to the number.
+    // When all titles are "NN. SameSuffix" (e.g. 01. Monte Cristo, 02. Monte Cristo), show only the number on buttons so labels are "01", "02", "03", "04" instead of repeating the same suffix. Do not strip to number when remainder is empty (over-stripped); keep full title so button shows e.g. "13. Darkside Blues" not "13".
     if (leadingTokens && titles.count >= 2 && remainders.count == titles.count)
     {
         NSString* firstRem = remainders[0];
@@ -416,7 +427,7 @@ static NSString* normalizeTitleForTokenization(NSString* s);
                 break;
             }
         }
-        if (allSameRemainder)
+        if (allSameRemainder && firstRem.length > 0)
         {
             for (NSUInteger i = 0; i < result.count; i++)
             {
@@ -556,6 +567,45 @@ static BOOL isLeadingTrackNumberToken(NSString* token)
     if (i < token.length && [token characterAtIndex:i] == '.')
         i++;
     return i == token.length;
+}
+
+static BOOL isResolutionOnlyTitle(NSString* s)
+{
+    if (s.length == 0)
+        return NO;
+    NSString* t = [s stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet];
+    if (t.length == 0)
+        return NO;
+    if ([t hasPrefix:@"#"])
+        t = [[t substringFromIndex:1] stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet];
+    if (t.length == 0)
+        return NO;
+    static NSSet<NSString*>* resolutionTags;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        resolutionTags = [NSSet setWithArray:@[
+            @"1080p", @"720p", @"480p", @"2160p", @"1920p", @"4K", @"8K", @"UHD",
+            @"DVD5", @"DVD9", @"DVD", @"BD25", @"BD50", @"BD66", @"BD100", @"XviD", @"DivX"
+        ]];
+    });
+    return [resolutionTags containsObject:t] || [resolutionTags containsObject:t.lowercaseString];
+}
+
+static BOOL isBareTrackNumberOnly(NSString* s)
+{
+    if (s.length == 0)
+        return NO;
+    NSString* t = [s stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet];
+    if (t.length == 0)
+        return NO;
+    NSUInteger i = 0;
+    while (i < t.length && [[NSCharacterSet decimalDigitCharacterSet] characterIsMember:[t characterAtIndex:i]])
+        i++;
+    if (i == 0)
+        return NO;
+    if (i < t.length && [t characterAtIndex:i] == '.')
+        i++;
+    return i == t.length;
 }
 
 static NSString* normalizeTitleForTokenization(NSString* s)
@@ -1105,7 +1155,8 @@ static NSDictionary<NSString*, NSString*>* commonPrefixAndSuffixForStrings(NSArr
         if (commonSuffix.length > 0 && title.length > commonSuffix.length && [title hasSuffix:commonSuffix])
             title = [title substringToIndex:title.length - commonSuffix.length];
         title = [title stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
-        if (title.length > 0)
+        // Regression: do not strip to resolution-only (e.g. "1080p") or bare track number (e.g. "13"); keep humanized title so button is meaningful.
+        if (title.length > 0 && !isResolutionOnlyTitle(title) && !isBareTrackNumberOnly(title))
             fileInfo[@"name"] = title;
     }
 
@@ -1120,7 +1171,13 @@ static NSDictionary<NSString*, NSString*>* commonPrefixAndSuffixForStrings(NSArr
             for (NSUInteger i = 0; i < playable.count; i++)
             {
                 NSString* s = stripped[i];
-                if ([s isKindOfClass:[NSString class]] && s.length > 0)
+                // Regression fix: Accept bare track numbers from "all same remainder" logic (e.g. "01", "02" when all
+                // titles are "01. Same", "02. Same"). The displayTitlesByStrippingCommonPrefixSuffix method (lines 405-406)
+                // already prevents unwanted bare numbers in the first pass, so if a bare number reaches here, it's because
+                // it was intentionally produced by the "all same remainder" logic (lines 425-434). Reject only resolution-only
+                // titles (e.g. "1080p") which indicate over-stripping. Do not add isBareTrackNumberOnly check here, as it
+                // would break the intended "01", "02", "03" behavior for albums/tracks with identical suffixes.
+                if ([s isKindOfClass:[NSString class]] && s.length > 0 && !isResolutionOnlyTitle(s))
                     ((NSMutableDictionary*)playable[i])[@"name"] = s;
             }
         }
