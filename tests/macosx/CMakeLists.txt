@@ -6,6 +6,7 @@ target_sources(macosx-test
     PRIVATE
         IINAWatchHelper-test.mm
         NSStringAdditions-test.mm
+        TorrentPlayable-regression-test.mm
         ${CMAKE_SOURCE_DIR}/macosx/IINAWatchHelper.h
         ${CMAKE_SOURCE_DIR}/macosx/IINAWatchHelper.mm
         ${CMAKE_SOURCE_DIR}/macosx/NSDataAdditions.h
