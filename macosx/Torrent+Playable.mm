@@ -37,6 +37,8 @@ static BOOL allRemaindersAreSingleEpisodeOnlyToken(NSArray<NSArray<NSString*>*>*
 static BOOL isEpisodeOnlyToken(NSString* token);
 /// YES if token is digits optionally followed by period (e.g. 01., 02., 1) — leading track number for strip.
 static BOOL isLeadingTrackNumberToken(NSString* token);
+/// Normalize so "01.Monte.Cristo" tokenizes as leading number + words (enables "01", "02" strip when remainder is same).
+static NSString* normalizeTitleForTokenization(NSString* s);
 
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wobjc-protocol-method-implementation"
@@ -316,6 +318,8 @@ static BOOL isLeadingTrackNumberToken(NSString* token);
         NSString* s = [raw isKindOfClass:[NSString class]] ? raw : nil;
         if (s.length > 0)
             s = [s stringByTrimmingCharactersInSet:ws];
+        if (s.length > 0)
+            s = normalizeTitleForTokenization(s);
         NSArray<NSString*>* tokens = (s.length > 0) ? wordTokensFromString(s) : @[];
         [tokenArrays addObject:tokens];
     }
@@ -367,12 +371,15 @@ static BOOL isLeadingTrackNumberToken(NSString* token);
         }
     }
     NSMutableArray<NSString*>* result = [NSMutableArray arrayWithCapacity:titles.count];
+    NSMutableArray<NSString*>* remainders = leadingTokens ? [NSMutableArray arrayWithCapacity:titles.count] : nil;
     for (NSUInteger i = 0; i < titles.count; i++)
     {
         NSString* raw = titles[i];
         if (![raw isKindOfClass:[NSString class]] || raw.length == 0)
         {
             [result addObject:raw ?: @""];
+            if (remainders)
+                [remainders addObject:@""];
             continue;
         }
         NSArray<NSString*>* tokens = workArrays[i];
@@ -387,12 +394,38 @@ static BOOL isLeadingTrackNumberToken(NSString* token);
             NSArray<NSString*>* kept = [tokens subarrayWithRange:NSMakeRange(from, to - from)];
             joined = trimTrailingParenAndSpace(stringFromWordTokens(kept));
         }
+        if (remainders)
+            [remainders addObject:joined.length > 0 ? joined : @""];
         if (joined.length == 0)
             [result addObject:raw];
         else if (leadingTokens)
             [result addObject:[[leadingTokens[i] stringByAppendingString:@" "] stringByAppendingString:joined]];
         else
             [result addObject:joined];
+    }
+    // When all titles are "NN. SameSuffix" (e.g. 01. Monte Cristo, 02. Monte Cristo), show only the number on buttons so labels are "01", "02", "03", "04" instead of repeating the same suffix. Also when the remainder is entirely common (joined empty), strip to the number.
+    if (leadingTokens && titles.count >= 2 && remainders.count == titles.count)
+    {
+        NSString* firstRem = remainders[0];
+        BOOL allSameRemainder = YES;
+        for (NSUInteger i = 1; i < remainders.count; i++)
+        {
+            if (![remainders[i] isEqualToString:firstRem])
+            {
+                allSameRemainder = NO;
+                break;
+            }
+        }
+        if (allSameRemainder)
+        {
+            for (NSUInteger i = 0; i < result.count; i++)
+            {
+                NSString* num = leadingTokens[i];
+                if ([num hasSuffix:@"."] && num.length > 1)
+                    num = [num substringToIndex:num.length - 1];
+                result[i] = num;
+            }
+        }
     }
     return result;
 }
@@ -525,6 +558,31 @@ static BOOL isLeadingTrackNumberToken(NSString* token)
     return i == token.length;
 }
 
+static NSString* normalizeTitleForTokenization(NSString* s)
+{
+    if (s.length == 0)
+        return s;
+    if ([s rangeOfCharacterFromSet:NSCharacterSet.whitespaceAndNewlineCharacterSet].location != NSNotFound)
+        return s;
+    NSUInteger i = 0;
+    NSCharacterSet* digits = [NSCharacterSet decimalDigitCharacterSet];
+    while (i < s.length && [digits characterIsMember:[s characterAtIndex:i]])
+        i++;
+    if (i == 0)
+        return s;
+    if (i < s.length && [s characterAtIndex:i] == '.')
+        i++;
+    if (i >= s.length || ![[NSCharacterSet letterCharacterSet] characterIsMember:[s characterAtIndex:i]])
+        return s;
+    NSString* leading = [s substringToIndex:i];
+    NSMutableString* rest = [[s substringFromIndex:i] mutableCopy];
+    [rest replaceOccurrencesOfString:@"."
+                           withString:@" "
+                              options:0
+                                range:NSMakeRange(0, rest.length)];
+    return [[leading stringByAppendingString:@" "] stringByAppendingString:[rest stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet]];
+}
+
 static NSArray<NSString*>* wordTokensFromString(NSString* s)
 {
     NSUInteger len = s.length;
@@ -642,7 +700,7 @@ static NSString* trimTrailingParenAndSpace(NSString* s)
     return s;
 }
 
-/// Returns common prefix and suffix for an array of strings (e.g. sibling file paths or folder names).
+/// Returns common prefix and suffix for an array of strings (Playable button titles per parent; not file paths).
 static NSDictionary<NSString*, NSString*>* commonPrefixAndSuffixForStrings(NSArray<NSString*>* strings)
 {
     static NSCharacterSet* separators;
@@ -826,30 +884,8 @@ static NSDictionary<NSString*, NSString*>* commonPrefixAndSuffixForStrings(NSArr
     }
 
     NSMutableDictionary<NSString*, NSNumber*>* cueProgress = [NSMutableDictionary dictionary];
-    NSMutableDictionary<NSString*, NSMutableArray<NSString*>*>* siblingFilesByParent = [NSMutableDictionary dictionary];
-    for (NSUInteger i = 0; i < count; i++)
-    {
-        auto const file = tr_torrentFile(self.fHandle, i);
-        NSString* path = [NSString convertedStringFromCString:file.name];
-        NSString* parent = path.stringByDeletingLastPathComponent;
-        NSMutableArray<NSString*>* siblings = siblingFilesByParent[parent];
-        if (!siblings)
-        {
-            siblings = [NSMutableArray array];
-            siblingFilesByParent[parent] = siblings;
-        }
-        [siblings addObject:path];
-    }
-
-    NSMutableDictionary<NSString*, NSString*>* commonPrefixByParent = [NSMutableDictionary dictionary];
-    NSMutableDictionary<NSString*, NSString*>* commonSuffixByParent = [NSMutableDictionary dictionary];
-    for (NSString* parent in siblingFilesByParent)
-    {
-        NSArray<NSString*>* paths = siblingFilesByParent[parent];
-        NSDictionary* pair = commonPrefixAndSuffixForStrings(paths);
-        commonPrefixByParent[parent] = pair[@"prefix"] ?: @"";
-        commonSuffixByParent[parent] = pair[@"suffix"] ?: @"";
-    }
+    /// Button titles per parent — used for common prefix/suffix (Playable button titles only, not file paths).
+    NSMutableDictionary<NSString*, NSMutableArray<NSString*>*>* playableTitlesByParent = [NSMutableDictionary dictionary];
 
     for (NSUInteger i = 0; i < count; i++)
     {
@@ -857,13 +893,6 @@ static NSDictionary<NSString*, NSString*>* commonPrefixAndSuffixForStrings(NSArr
         NSString* fileName = [NSString convertedStringFromCString:file.name];
         NSString* originalFileName = fileName;
         NSString* parent = fileName.stringByDeletingLastPathComponent;
-        NSString* commonPrefix = commonPrefixByParent[parent] ?: @"";
-        NSString* commonSuffix = commonSuffixByParent[parent] ?: @"";
-
-        if (commonPrefix.length > 0 && [fileName hasPrefix:commonPrefix] && fileName.length > commonPrefix.length)
-            fileName = [fileName substringFromIndex:commonPrefix.length];
-        if (commonSuffix.length > 0 && [fileName hasSuffix:commonSuffix] && fileName.length > commonSuffix.length)
-            fileName = [fileName substringToIndex:fileName.length - commonSuffix.length];
 
         NSString* ext = originalFileName.pathExtension.lowercaseString;
 
@@ -981,19 +1010,27 @@ static NSDictionary<NSString*, NSString*>* commonPrefixAndSuffixForStrings(NSArr
         }
 
         BOOL const opensInBooks = (isDocument && ![documentExternalExtensions containsObject:ext]) || useCompanionPdf || useCompanionEpub;
-        [playable addObject:@{
+        NSMutableArray<NSString*>* titlesInParent = playableTitlesByParent[parent];
+        if (!titlesInParent)
+        {
+            titlesInParent = [NSMutableArray array];
+            playableTitlesByParent[parent] = titlesInParent;
+        }
+        [titlesInParent addObject:displayName];
+        [playable addObject:[@{
             @"type" : isDocument ? (opensInBooks ? @"document-books" : @"document") : @"file",
             @"category" : category ?: @"",
             @"index" : @(i),
             @"name" : displayName,
             @"path" : path,
+            @"relativePath" : originalFileName,
             @"season" : season,
             @"episode" : episode,
             @"progress" : @(progress),
             @"sortKey" : fileName.lastPathComponent,
             @"originalExt" : ext,
             @"isCompanion" : @(useCompanionPdf || useCompanionEpub)
-        }];
+        } mutableCopy]];
     }
 
     for (NSString* cueBaseName in cueBaseNames)
@@ -1003,31 +1040,136 @@ static NSDictionary<NSString*, NSString*>* commonPrefixAndSuffixForStrings(NSArr
         if (cueIndex && audioIndex)
         {
             NSString* cueFileName = cueFileNames[cueBaseName];
+            NSString* cueParent = cueFileName.stringByDeletingLastPathComponent;
+            NSString* cueDisplayName = cueBaseName.humanReadableFileName;
+            NSMutableArray<NSString*>* titlesInParent = playableTitlesByParent[cueParent];
+            if (!titlesInParent)
+            {
+                titlesInParent = [NSMutableArray array];
+                playableTitlesByParent[cueParent] = titlesInParent;
+            }
+            [titlesInParent addObject:cueDisplayName];
+
             CGFloat progress = cueProgress[cueBaseName] ? cueProgress[cueBaseName].doubleValue : 0.0;
             if (progress < 0)
                 progress = 0;
 
             NSString* path = [self.currentDirectory stringByAppendingPathComponent:cueFileName];
-            NSString* displayName = cueBaseName.humanReadableFileName;
+            NSString* displayName = cueDisplayName;
 
-            [playable addObject:@{
+            [playable addObject:[@{
                 @"type" : @"album",
                 @"category" : @"audio",
                 @"index" : cueIndex,
                 @"name" : displayName,
                 @"path" : path,
+                @"relativePath" : cueFileName,
                 @"season" : @0,
                 @"episode" : cueIndex,
                 @"progress" : @(progress),
                 @"sortKey" : cueFileName,
                 @"originalExt" : @"cue",
                 @"isCompanion" : @NO
-            }];
+            } mutableCopy]];
         }
     }
 
     if (playable.count == 0)
         return nil;
+
+    NSMutableDictionary<NSString*, NSString*>* commonPrefixByParent = [NSMutableDictionary dictionary];
+    NSMutableDictionary<NSString*, NSString*>* commonSuffixByParent = [NSMutableDictionary dictionary];
+    for (NSString* parent in playableTitlesByParent)
+    {
+        NSArray<NSString*>* titles = playableTitlesByParent[parent];
+        NSDictionary* pair = commonPrefixAndSuffixForStrings(titles);
+        commonPrefixByParent[parent] = pair[@"prefix"] ?: @"";
+        commonSuffixByParent[parent] = pair[@"suffix"] ?: @"";
+    }
+
+    // Entries in playable must be NSMutableDictionary: we update @"name" in place (common prefix/suffix stripping).
+    // Using immutable NSDictionary here caused -[__NSDictionaryI setObject:forKeyedSubscript:]: unrecognized selector crash.
+    for (NSMutableDictionary* fileInfo in playable)
+    {
+        NSString* relativePath = fileInfo[@"relativePath"];
+        if (relativePath.length == 0)
+            continue;
+        NSString* parent = relativePath.stringByDeletingLastPathComponent;
+        NSString* commonPrefix = commonPrefixByParent[parent] ?: @"";
+        NSString* commonSuffix = commonSuffixByParent[parent] ?: @"";
+        NSString* title = fileInfo[@"name"];
+        if (title.length == 0)
+            continue;
+        if (commonPrefix.length > 0 && title.length > commonPrefix.length && [title hasPrefix:commonPrefix])
+            title = [title substringFromIndex:commonPrefix.length];
+        if (commonSuffix.length > 0 && title.length > commonSuffix.length && [title hasSuffix:commonSuffix])
+            title = [title substringToIndex:title.length - commonSuffix.length];
+        title = [title stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+        if (title.length > 0)
+            fileInfo[@"name"] = title;
+    }
+
+    // When each playable is in a different parent (e.g. Part.01, Part.02) we had only one title per parent so
+    // per-parent strip did nothing. Run token-based strip globally so "01 Monte Cristo", "02 Monte Cristo" → "01", "02".
+    if (playable.count >= 2)
+    {
+        NSArray<NSString*>* allNames = [playable valueForKey:@"name"];
+        NSArray<NSString*>* stripped = [Torrent displayTitlesByStrippingCommonPrefixSuffix:allNames];
+        if (stripped.count == playable.count)
+        {
+            for (NSUInteger i = 0; i < playable.count; i++)
+            {
+                NSString* s = stripped[i];
+                if ([s isKindOfClass:[NSString class]] && s.length > 0)
+                    ((NSMutableDictionary*)playable[i])[@"name"] = s;
+            }
+        }
+    }
+
+    // When multiple files in the same folder share the same base name (only extension differs), show extension only (e.g. pdf, epub).
+    NSMutableDictionary<NSString*, NSMutableArray<NSMutableDictionary*>*>* byParent = [NSMutableDictionary dictionary];
+    for (NSMutableDictionary* fileInfo in playable)
+    {
+        NSString* relativePath = fileInfo[@"relativePath"];
+        if (relativePath.length == 0)
+            continue;
+        NSString* parent = relativePath.stringByDeletingLastPathComponent;
+        NSMutableArray* list = byParent[parent];
+        if (!list)
+        {
+            list = [NSMutableArray array];
+            byParent[parent] = list;
+        }
+        [list addObject:fileInfo];
+    }
+    for (NSMutableArray* list in byParent.allValues)
+    {
+        if (list.count < 2)
+            continue;
+        NSDictionary* firstInfo = list.firstObject;
+        NSString* first = firstInfo[@"name"];
+        if (first.length == 0)
+            continue;
+        BOOL allSame = YES;
+        for (NSUInteger i = 1; i < list.count; i++)
+        {
+            NSString* name = [[list objectAtIndex:i] objectForKey:@"name"];
+            if (![name isEqualToString:first])
+            {
+                allSame = NO;
+                break;
+            }
+        }
+        if (allSame)
+        {
+            for (NSMutableDictionary* fileInfo in list)
+            {
+                NSString* ext = fileInfo[@"originalExt"];
+                if ([ext isKindOfClass:[NSString class]] && ext.length > 0)
+                    fileInfo[@"name"] = ext.lowercaseString;
+            }
+        }
+    }
 
     // Sort by full path so directory order is preserved (e.g. Part.01 before Part.02 before Part.03).
     // Using only lastPathComponent can yield wrong order when torrent file indices differ from path order.
@@ -1046,6 +1188,7 @@ static NSDictionary<NSString*, NSString*>* commonPrefixAndSuffixForStrings(NSArr
             continue;
 
         NSMutableDictionary* entry = [fileInfo mutableCopy];
+        [entry removeObjectForKey:@"relativePath"];
         entry[@"baseTitle"] = fileInfo[@"name"];
         [result addObject:entry];
     }
