@@ -183,6 +183,8 @@ extern NSString* const kTorrentDidChangeGroupNotification;
 - (NSString*)pathToOpenForAudioPath:(NSString*)path;
 /// Path that would be opened for this playable item (e.g. .cue when present for audio). Used by play menu and play action.
 - (NSString*)pathToOpenForPlayableItem:(NSDictionary*)item;
+/// Same as pathToOpenForPlayableItem but returns nil if the path does not exist on disk. Use for play actions to avoid "Cannot open stream".
+- (NSString*)pathToOpenForPlayableItemIfExists:(NSDictionary*)item;
 /// YES when this playable item should display as album (CUE) rather than single track. Single source for icon and play menu.
 - (BOOL)playableItemOpensAsCueAlbum:(NSDictionary*)item;
 /// Display name for play menu; should reflect the file that is opened (e.g. .cue when present).

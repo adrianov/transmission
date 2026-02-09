@@ -1296,13 +1296,9 @@ static void setPlayButtonFolderCache(NSButton* sender, id value)
     // Update last played date for the torrent
     tr_torrentSetLastPlayedDate(torrent.torrentStruct, time(nullptr));
 
-    NSString* path = [torrent pathToOpenForPlayableItem:item];
+    NSString* path = [torrent pathToOpenForPlayableItemIfExists:item];
     if (!path || path.length == 0)
         return;
-
-    NSString* resolved = [torrent resolvePathInTorrent:path];
-    if (resolved.length > 0)
-        path = resolved;
 
     [Torrent invalidateIINAWatchCacheForPath:path];
     NSString* itemPath = item[@"path"];

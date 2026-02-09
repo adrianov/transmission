@@ -11,6 +11,7 @@
 #import "GroupToolbarItem.h"
 #import "InfoWindowController.h"
 #import "ShareToolbarItem.h"
+#import "PlayButtonStateBuilder.h"
 #import "Torrent.h"
 #import "Toolbar.h"
 #import "TorrentTableView.h"
@@ -18,24 +19,6 @@
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wobjc-protocol-method-implementation"
 @implementation Controller (Toolbar)
-
-static BOOL isPlayableItemTransferred(NSDictionary* item, Torrent* torrent)
-{
-    NSNumber* idx = item[@"index"];
-    if (idx != nil)
-        return [torrent fileProgressForIndex:idx.unsignedIntegerValue] >= 1.0;
-    NSString* folder = item[@"folder"];
-    if (folder.length > 0)
-        return [torrent folderConsecutiveProgress:folder] >= 1.0;
-    return NO;
-}
-
-static BOOL isPlayableItemAudio(NSDictionary* item)
-{
-    if ([item[@"category"] isEqualToString:@"audio"])
-        return YES;
-    return [item[@"type"] isEqualToString:@"album"];
-}
 
 - (ButtonToolbarItem*)standardToolbarButtonWithIdentifier:(NSString*)ident
 {
@@ -337,14 +320,31 @@ static BOOL isPlayableItemAudio(NSDictionary* item)
     }
 }
 
+/// Candidates for Play Random Audio: only items that have a visible content button (same visibility as flow) and an existing path.
 - (NSArray<NSArray*>*)transferredAudioCandidates
 {
     NSMutableArray<NSArray*>* result = [NSMutableArray array];
     for (Torrent* torrent in self.fTorrents)
     {
-        for (NSDictionary* item in torrent.playableFiles)
+        NSDictionary* snapshotDict = [PlayButtonStateBuilder buildSnapshotForTorrent:torrent];
+        if (!snapshotDict)
+            continue;
+        NSArray* playableFiles = snapshotDict[@"playableFiles"];
+        NSArray* snapshot = snapshotDict[@"snapshot"];
+        NSDictionary* stateAndLayout = [PlayButtonStateBuilder stateAndLayoutFromSnapshot:snapshot];
+        NSArray* state = stateAndLayout[@"state"];
+        if (state.count != playableFiles.count)
+            continue;
+        for (NSUInteger i = 0; i < state.count; i++)
         {
-            if (!isPlayableItemAudio(item) || !isPlayableItemTransferred(item, torrent))
+            NSDictionary* entry = state[i];
+            if (![entry[@"visible"] boolValue])
+                continue;
+            NSString* category = entry[@"category"] ?: @"";
+            if (![category isEqualToString:@"audio"])
+                continue;
+            NSDictionary* item = playableFiles[i];
+            if (![torrent pathToOpenForPlayableItemIfExists:item])
                 continue;
             [result addObject:@[ torrent, item ]];
         }

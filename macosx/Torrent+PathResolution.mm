@@ -295,6 +295,17 @@
     return absolutePath;
 }
 
+/// Path to open for playable item only when that path exists on disk; nil otherwise. Use for play actions so we never pass missing paths to the player.
+- (NSString*)pathToOpenForPlayableItemIfExists:(NSDictionary*)item
+{
+    NSString* path = [self pathToOpenForPlayableItem:item];
+    if (!path || path.length == 0)
+        return nil;
+    NSString* resolved = [self resolvePathInTorrent:path];
+    NSString* final = (resolved.length > 0) ? resolved : path;
+    return [NSFileManager.defaultManager fileExistsAtPath:final] ? final : nil;
+}
+
 /// Returns tooltip path for item (prefers .cue for audio/album).
 - (NSString*)tooltipPathForItemPath:(NSString*)path type:(NSString*)type folder:(NSString*)folder
 {
