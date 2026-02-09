@@ -217,6 +217,7 @@ extern NSString* const kTorrentDidChangeGroupNotification;
 - (void)recordOpenForFileNode:(FileListNode*)node;
 - (void)recordOpenForPlayableItem:(NSDictionary*)item;
 - (NSUInteger)openCountForFileNode:(FileListNode*)node;
+- (NSUInteger)openCountForPlayableItem:(NSDictionary*)item;
 /// "Played: N" for video/audio, "Opened: N" for other, nil when count is 0.
 - (NSString*)openCountLabelForFileNode:(FileListNode*)node;
 - (NSString*)openCountLabelForPlayableItem:(NSDictionary*)item;

@@ -68,6 +68,12 @@ static void saveOpenCounts(NSDictionary<NSString*, NSNumber*>* counts)
     return [(NSNumber*)openCountsDictionary()[key] unsignedIntegerValue];
 }
 
+- (NSUInteger)openCountForPlayableItem:(NSDictionary*)item
+{
+    NSString* key = [self openCountKeyForPlayableItem:item];
+    return [(NSNumber*)openCountsDictionary()[key] unsignedIntegerValue];
+}
+
 - (NSString*)openCountLabelForFileNode:(FileListNode*)node
 {
     NSUInteger n = [self openCountForFileNode:node];
