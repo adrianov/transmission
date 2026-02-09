@@ -4,7 +4,7 @@ The main window automatically resizes to fit torrent list content when AutoSize 
 
 ## How It Works
 
-The window sizing algorithm in `Controller.mm` calculates the required height:
+The window sizing algorithm in `Controller+WindowLayout.mm` calculates the required height:
 
 1. **Table content height:** Get the bottom edge of the last row using `NSOutlineView.rectOfRow:`
 2. **Other UI components:** Measure dynamically by subtracting scroll view height from content view height
@@ -47,5 +47,5 @@ CGFloat contentHeight = tableContentHeight + otherComponentsHeight;
 
 ## Related Files
 
-- `macosx/Controller.mm` - `setWindowSizeToFit` method
+- `macosx/Controller+WindowLayout.mm` - `setWindowSizeToFit` method
 - `macosx/TorrentTableView.mm` - `outlineView:heightOfRowByItem:` for variable row heights
