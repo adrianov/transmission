@@ -130,6 +130,32 @@
             [toDelete addObject:t];
         }
 
+        // Minimize deletions: remove smallest items from list until freed would be below deficit
+        if (freedPotential > deficit)
+        {
+            [toDelete sortUsingComparator:^NSComparisonResult(Torrent* a, Torrent* b) {
+                uint64_t sa = a.sizeWhenDone, sb = b.sizeWhenDone;
+                return sa < sb ? NSOrderedAscending : (sa > sb ? NSOrderedDescending : NSOrderedSame);
+            }];
+            NSInteger removeCount = 0;
+            uint64_t wouldFree = freedPotential;
+            for (Torrent* t in toDelete)
+            {
+                if (wouldFree - t.sizeWhenDone >= deficit)
+                {
+                    wouldFree -= t.sizeWhenDone;
+                    ++removeCount;
+                }
+                else
+                    break;
+            }
+            if (removeCount > 0)
+            {
+                [toDelete removeObjectsInRange:NSMakeRange(0, removeCount)];
+                freedPotential = wouldFree;
+            }
+        }
+
         if (toDelete.count == 0 || freedPotential < deficit)
         {
             dispatch_async(dispatch_get_main_queue(), ^{
@@ -256,6 +282,32 @@
                 break;
             freedPotential += t.sizeWhenDone;
             [toDelete addObject:t];
+        }
+
+        // Minimize deletions: remove smallest items from list until freed would be below deficit
+        if (freedPotential > deficit)
+        {
+            [toDelete sortUsingComparator:^NSComparisonResult(Torrent* a, Torrent* b) {
+                uint64_t sa = a.sizeWhenDone, sb = b.sizeWhenDone;
+                return sa < sb ? NSOrderedAscending : (sa > sb ? NSOrderedDescending : NSOrderedSame);
+            }];
+            NSInteger removeCount = 0;
+            uint64_t wouldFree = freedPotential;
+            for (Torrent* t in toDelete)
+            {
+                if (wouldFree - t.sizeWhenDone >= deficit)
+                {
+                    wouldFree -= t.sizeWhenDone;
+                    ++removeCount;
+                }
+                else
+                    break;
+            }
+            if (removeCount > 0)
+            {
+                [toDelete removeObjectsInRange:NSMakeRange(0, removeCount)];
+                freedPotential = wouldFree;
+            }
         }
 
         if (freedPotential < deficit || toDelete.count == 0)
