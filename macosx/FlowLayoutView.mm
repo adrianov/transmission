@@ -158,7 +158,13 @@
 - (void)layout
 {
     [super layout];
-    [self layoutSubviewsForWidth:self.bounds.size.width];
+    CGFloat width = self.bounds.size.width;
+    // Regression: new partial-transfer rows can get flow view with bounds.width still 0 when async
+    // apply runs; layoutSubviewsForWidth then skips and buttons keep zero frame, so they don't
+    // receive hits. Use superview width so buttons get valid frames and remain clickable.
+    if (width <= 0 && self.superview)
+        width = self.superview.bounds.size.width;
+    [self layoutSubviewsForWidth:width];
 }
 
 - (NSSize)sizeForView:(NSView*)view
