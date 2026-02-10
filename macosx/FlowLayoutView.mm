@@ -205,56 +205,79 @@
     for (NSView* view in _arrangedSubviews)
     {
         if (!view.hidden)
-        {
             [visible addObject:view];
-        }
     }
     _visibleSubviewsCache = [visible copy];
     _visibleCacheValid = YES;
     return _visibleSubviewsCache;
 }
 
-- (void)layoutSubviewsForWidth:(CGFloat)availableWidth
+/// Partitions visible subviews into rows: each row is a horizontal list of views; line breaks and width wrap start a new row.
+- (NSArray<NSArray<NSView*>*>*)rowsForWidth:(CGFloat)availableWidth
 {
-    // Regression: when outline view lays out before row width is set, bounds.width can be 0; skip layout then so we don't set zero frames. Next layout pass will run with real width.
-    if (availableWidth <= 0)
-        return;
-    if (!_layoutDirty && std::fabs(availableWidth - _lastLayoutWidth) < 0.001)
-        return;
-
-    CGFloat x = 0;
-    CGFloat y = 0;
-    CGFloat rowHeight = 0;
+    NSMutableArray<NSArray<NSView*>*>* rows = [NSMutableArray array];
+    NSMutableArray<NSView*>* currentRow = [NSMutableArray array];
+    CGFloat rowX = 0;
 
     for (NSView* view in [self visibleArrangedSubviews])
     {
         if ([view isKindOfClass:[FlowLineBreak class]])
         {
-            y += rowHeight + (rowHeight > 0 ? _verticalSpacing : 0);
-            rowHeight = 0;
-            x = 0;
+            if (currentRow.count > 0)
+            {
+                [rows addObject:[currentRow copy]];
+                [currentRow removeAllObjects];
+            }
+            rowX = 0;
             continue;
         }
 
         NSSize size = [self sizeForView:view];
         size.width = MIN(size.width, availableWidth);
-
-        // Wrap to next line if needed
-        if (x > 0 && x + size.width > availableWidth)
+        BOOL wrap = currentRow.count > 0 && rowX + size.width > availableWidth;
+        if (wrap)
         {
-            x = 0;
-            y += rowHeight + _verticalSpacing;
-            rowHeight = 0;
+            [rows addObject:[currentRow copy]];
+            [currentRow removeAllObjects];
+            rowX = 0;
         }
+        [currentRow addObject:view];
+        rowX += size.width + _horizontalSpacing;
+    }
+    if (currentRow.count > 0)
+        [rows addObject:currentRow];
 
-        view.frame = NSMakeRect(x, y, size.width, size.height);
-        x += size.width + _horizontalSpacing;
-        rowHeight = MAX(rowHeight, size.height);
+    return rows;
+}
+
+- (void)layoutSubviewsForWidth:(CGFloat)availableWidth
+{
+    if (availableWidth <= 0)
+        return;
+    if (!_layoutDirty && std::fabs(availableWidth - _lastLayoutWidth) < 0.001)
+        return;
+
+    NSArray<NSArray<NSView*>*>* rows = [self rowsForWidth:availableWidth];
+    CGFloat y = 0;
+
+    for (NSArray<NSView*>* row in rows)
+    {
+        CGFloat x = 0;
+        CGFloat rowHeight = 0;
+        for (NSView* view in row)
+        {
+            NSSize size = [self sizeForView:view];
+            size.width = MIN(size.width, availableWidth);
+            view.frame = NSMakeRect(x, y, size.width, size.height);
+            x += size.width + _horizontalSpacing;
+            rowHeight = MAX(rowHeight, size.height);
+        }
+        y += rowHeight + _verticalSpacing;
     }
 
+    _lastLayoutHeight = rows.count > 0 ? y - _verticalSpacing : 0;
     _layoutDirty = NO;
     _lastLayoutWidth = availableWidth;
-    _lastLayoutHeight = y + rowHeight;
 }
 
 - (CGFloat)heightForWidth:(CGFloat)availableWidth
@@ -264,36 +287,17 @@
     if (!_layoutDirty && std::fabs(availableWidth - _lastLayoutWidth) < 0.001)
         return _lastLayoutHeight;
 
-    CGFloat x = 0;
+    NSArray<NSArray<NSView*>*>* rows = [self rowsForWidth:availableWidth];
     CGFloat y = 0;
-    CGFloat rowHeight = 0;
-
-    for (NSView* view in [self visibleArrangedSubviews])
+    for (NSArray<NSView*>* row in rows)
     {
-        if ([view isKindOfClass:[FlowLineBreak class]])
-        {
-            x = 0;
-            y += rowHeight + (rowHeight > 0 ? _verticalSpacing : 0);
-            rowHeight = 0;
-            continue;
-        }
-
-        NSSize size = [self sizeForView:view];
-        size.width = MIN(size.width, availableWidth);
-
-        if (x > 0 && x + size.width > availableWidth)
-        {
-            x = 0;
-            y += rowHeight + _verticalSpacing;
-            rowHeight = 0;
-        }
-
-        x += size.width + _horizontalSpacing;
-        rowHeight = MAX(rowHeight, size.height);
+        CGFloat rowHeight = 0;
+        for (NSView* view in row)
+            rowHeight = MAX(rowHeight, [self sizeForView:view].height);
+        y += rowHeight + _verticalSpacing;
     }
-
     _lastLayoutWidth = availableWidth;
-    _lastLayoutHeight = y + rowHeight;
+    _lastLayoutHeight = rows.count > 0 ? y - _verticalSpacing : 0;
     return _lastLayoutHeight;
 }
 

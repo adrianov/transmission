@@ -4,7 +4,7 @@
 
 #import <AppKit/AppKit.h>
 
-/// A view that arranges its subviews in a flow layout (left to right, wrapping to new lines).
+/// A view that arranges its subviews as a vertical stack of horizontal rows (left to right, wrapping or line breaks start a new row).
 /// Buttons size to their content with minimum padding.
 @interface FlowLayoutView : NSView
 
