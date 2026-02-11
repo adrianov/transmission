@@ -685,8 +685,9 @@
         title = [tagRegex stringByReplacingMatchesInString:title options:0 range:NSMakeRange(0, title.length) withTemplate:@""];
     }
 
-    // Remove resolution, season markers, year, date from title (and preceding dot, #, or surrounding parentheses)
-    NSRegularExpression* resRemoveRegex = [NSRegularExpression regularExpressionWithPattern:@"\\.?#?\\(?\\b(2160p|1080p|720p|480p)\\b\\)?"
+    // Remove resolution from title (optional leading dot or #). Do not remove surrounding parentheses:
+    // e.g. "(1080p HD)" must become "( HD)" then cleaned, not " HD)" which leaves an unpaired ')'.
+    NSRegularExpression* resRemoveRegex = [NSRegularExpression regularExpressionWithPattern:@"\\.?#?\\b(2160p|1080p|720p|480p)\\b"
                                                                                     options:NSRegularExpressionCaseInsensitive
                                                                                       error:nil];
     title = [resRemoveRegex stringByReplacingMatchesInString:title options:0 range:NSMakeRange(0, title.length) withTemplate:@""];
@@ -757,9 +758,13 @@
                                                         withTemplate:@"$1$2"];
     title = [title stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet];
 
-    // Remove empty parentheses (artifacts from tag removal)
+    // Remove empty parentheses and parentheticals that only contain HD/SD (artifacts from resolution/tag removal).
     NSRegularExpression* emptyParenRegex = [NSRegularExpression regularExpressionWithPattern:@"\\(\\s*\\)" options:0 error:nil];
     title = [emptyParenRegex stringByReplacingMatchesInString:title options:0 range:NSMakeRange(0, title.length) withTemplate:@""];
+    NSRegularExpression* hdSdOnlyParenRegex = [NSRegularExpression regularExpressionWithPattern:@"\\(\\s*(?:HD|SD)\\s*\\)"
+                                                                                       options:NSRegularExpressionCaseInsensitive
+                                                                                         error:nil];
+    title = [hdSdOnlyParenRegex stringByReplacingMatchesInString:title options:0 range:NSMakeRange(0, title.length) withTemplate:@""];
 
     // Remove leading/trailing hyphens and spaces (but not dots - they may be ellipsis)
     while ([title hasPrefix:@"-"] || [title hasPrefix:@" "])

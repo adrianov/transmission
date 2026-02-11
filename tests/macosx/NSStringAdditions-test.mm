@@ -100,6 +100,16 @@ TEST_F(NSStringAdditionsTest, HumanReadableTitle_1080pResolution)
     EXPECT_TRUE([result containsString:@"Season 1"]) << "Should contain Season 1, got: " << [result UTF8String];
 }
 
+TEST_F(NSStringAdditionsTest, HumanReadableTitle_ResolutionInParenthesesNoUnpairedParen)
+{
+    // Regression: "(1080p HD).m4v" must not become "Hick HD) #1080p" (unpaired ')').
+    NSString* input = @"Hick (1080p HD).m4v";
+    NSString* result = input.humanReadableTitle;
+    EXPECT_TRUE([result containsString:@"#1080p"]) << "Should contain #1080p, got: " << [result UTF8String];
+    EXPECT_FALSE([result containsString:@"HD)"]) << "Should not contain unpaired ')', got: " << [result UTF8String];
+    EXPECT_TRUE([result hasPrefix:@"Hick"]) << "Should start with Hick, got: " << [result UTF8String];
+}
+
 TEST_F(NSStringAdditionsTest, HumanReadableTitle_2160pResolution)
 {
     NSString* input = @"Major.Grom.Igra.protiv.pravil.S01.2025.WEB-DL.HEVC.2160p.SDR.ExKinoRay";

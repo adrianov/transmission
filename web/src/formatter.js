@@ -266,10 +266,10 @@ function formatHumanTitle(name) {
     );
   }
 
-  // Remove resolution, season markers, year, date (and preceding dot or # if used as separator)
-  // Also remove Cyrillic audio format variants and surrounding parentheses
+  // Remove resolution (optional leading dot or #). Do not remove surrounding parentheses:
+  // e.g. "(1080p HD)" must become "( HD)" then cleaned, not " HD)" which leaves an unpaired ')'.
   title = title
-    .replaceAll(/\.?#?\(?\b(2160p|1080p|720p|480p|8K|4K|UHD)\b\)?/gi, '')
+    .replaceAll(/\.?#?\b(2160p|1080p|720p|480p|8K|4K|UHD)\b/gi, '')
     .replaceAll(/\.?#?\(?(DVD5|DVD9|DVD|BD25|BD50|BD66|BD100)\)?/gi, '')
     .replaceAll(
       /\.?#?\(?\b(XviD|DivX|MP3|FLAC|OGG|AAC|WAV|APE|ALAC|WMA|OPUS|M4A)\b\)?/gi,
@@ -323,8 +323,8 @@ function formatHumanTitle(name) {
     .trim();
   /* eslint-enable sonarjs/slow-regex */
 
-  // Remove empty parentheses (artifacts from tag removal)
-  title = title.replaceAll(/\(\s*\)/g, '');
+  // Remove empty parentheses and parentheticals that only contain HD/SD (artifacts from resolution/tag removal)
+  title = title.replaceAll(/\(\s*\)/g, '').replaceAll(/\(\s*(?:HD|SD)\s*\)/gi, '');
 
   // Remove trailing/leading hyphens and spaces (but not dots - they may be ellipsis)
   while (title.startsWith(' ') || title.startsWith('-')) {
