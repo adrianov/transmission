@@ -16,6 +16,45 @@
     [super awakeFromNib];
 }
 
+- (void)mouseEntered:(NSEvent*)event
+{
+    [super mouseEntered:event];
+    if (self.fTorrentTableView)
+        [self.fTorrentTableView hoverEventBeganForView:self];
+}
+
+- (void)mouseExited:(NSEvent*)event
+{
+    [super mouseExited:event];
+    if (self.fTorrentTableView)
+        [self.fTorrentTableView hoverEventEndedForView:self];
+}
+
+- (void)updateTrackingAreas
+{
+    [super updateTrackingAreas];
+    if (self.fHoverTrackingArea)
+    {
+        [self removeTrackingArea:self.fHoverTrackingArea];
+        self.fHoverTrackingArea = nil;
+    }
+    NSRect hoverRect = NSZeroRect;
+    if (self.fIconView)
+        hoverRect = self.fIconView.frame;
+    for (NSView* v in @[ self.fActionButton, self.fControlButton, self.fRevealButton, self.fURLButton ])
+    {
+        if (v)
+            hoverRect = NSUnionRect(hoverRect, v.frame);
+    }
+    if (NSIsEmptyRect(hoverRect))
+        hoverRect = self.bounds;
+    self.fHoverTrackingArea = [[NSTrackingArea alloc] initWithRect:hoverRect
+                                                            options:NSTrackingMouseEnteredAndExited | NSTrackingActiveInKeyWindow
+                                                              owner:self
+                                                           userInfo:nil];
+    [self addTrackingArea:self.fHoverTrackingArea];
+}
+
 - (BOOL)wantsUpdateLayer
 {
     return NO;

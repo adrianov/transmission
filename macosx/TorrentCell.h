@@ -26,16 +26,18 @@
 
 @property(nonatomic) IBOutlet NSView* fTorrentProgressBarView;
 
-/// Container view for dynamically created play buttons. Created programmatically.
-@property(nonatomic) NSView* fPlayButtonsView;
+/// Container view for play buttons. From XIB in full view; nil in minimal view.
+@property(nonatomic) IBOutlet NSView* fPlayButtonsView;
 /// Height constraint for the play buttons view (updated dynamically)
-@property(nonatomic) NSLayoutConstraint* fPlayButtonsHeightConstraint;
+@property(nonatomic) IBOutlet NSLayoutConstraint* fPlayButtonsHeightConstraint;
 /// Tracks which playable files array was used to create the buttons (for cache invalidation)
 @property(nonatomic, weak) NSArray* fPlayButtonsSourceFiles;
 /// Tracks the torrent hash to detect when cell is reused for a different torrent
 @property(nonatomic, copy) NSString* fTorrentHash;
 
 @property(nonatomic) TorrentTableView* fTorrentTableView;
+
+@property(nonatomic) NSTrackingArea* fHoverTrackingArea;
 
 /// Cached progress bar image to avoid redrawing during scroll
 @property(nonatomic) NSImage* fCachedProgressBarImage;
