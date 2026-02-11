@@ -46,7 +46,12 @@ static void disambiguateDuplicateTitles(NSMutableArray<NSMutableDictionary*>* st
     }
     NSArray<NSString*>* newTitles = [Torrent displayTitlesByStrippingCommonPrefixSuffix:[state valueForKey:@"baseTitle"] seasons:seasons];
     for (NSUInteger i = 0; i < state.count; i++)
-        state[i][@"title"] = newTitles[i];
+    {
+        if ([state[i][@"type"] isEqualToString:@"document-books"])
+            state[i][@"title"] = state[i][@"baseTitle"] ?: @"";
+        else
+            state[i][@"title"] = newTitles[i];
+    }
 }
 
 /// Determines if a playable item should be visible based on type, progress, and wanted state.
@@ -91,7 +96,12 @@ static NSDictionary* stateAndLayoutFromSnapshotImpl(NSArray<NSDictionary*>* snap
         }
         NSArray<NSString*>* stripped = [Torrent displayTitlesByStrippingCommonPrefixSuffix:titles seasons:seasons];
         for (NSUInteger i = 0; i < state.count; i++)
-            state[i][@"title"] = stripped[i];
+        {
+            // Regression: do not apply token-based strip to document-books; it over-strips (e.g. "In The Court Of The Crimson King..."
+            // → "In" when mixed with audio tracks sharing tokens). See Torrent+Playable.mm playableFiles.
+            if (![state[i][@"type"] isEqualToString:@"document-books"])
+                state[i][@"title"] = stripped[i];
+        }
         disambiguateDuplicateTitles(state, seasons);
         for (NSUInteger i = 0; i < state.count; i++)
         {
@@ -311,7 +321,10 @@ static NSDictionary* stateAndLayoutFromSnapshotImpl(NSArray<NSDictionary*>* snap
             }
             NSArray<NSString*>* stripped = [Torrent displayTitlesByStrippingCommonPrefixSuffix:titles seasons:seasons];
             for (NSUInteger i = 0; i < state.count; i++)
-                state[i][@"title"] = stripped[i];
+            {
+                if (![state[i][@"type"] isEqualToString:@"document-books"])
+                    state[i][@"title"] = stripped[i];
+            }
             disambiguateDuplicateTitles(state, seasons);
             for (NSMutableDictionary* e in state)
             {
@@ -375,7 +388,10 @@ static NSDictionary* stateAndLayoutFromSnapshotImpl(NSArray<NSDictionary*>* snap
         }
         NSArray<NSString*>* stripped = [Torrent displayTitlesByStrippingCommonPrefixSuffix:titles seasons:seasons];
         for (NSUInteger i = 0; i < state.count; i++)
-            state[i][@"title"] = stripped[i];
+        {
+            if (![state[i][@"type"] isEqualToString:@"document-books"])
+                state[i][@"title"] = stripped[i];
+        }
         disambiguateDuplicateTitles(state, seasons);
         for (NSUInteger i = 0; i < state.count; i++)
         {
