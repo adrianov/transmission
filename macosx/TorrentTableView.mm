@@ -85,7 +85,8 @@ extern char const kPlayButtonRepresentedKey = '\0';
         _fPendingHeightRows = [[NSMutableIndexSet alloc] init];
 
         _fFlowViewCache = [[NSCache alloc] init];
-        _fFlowViewCache.countLimit = 80;
+        // Preserve flow views per torrent so rows keep content when scrolling off and back (no full redraw).
+        _fFlowViewCache.countLimit = 150;
 
         _fPendingFlowConfigs = [[NSMutableArray alloc] init];
         _fPendingFlowApplies = [[NSMutableArray alloc] init];
