@@ -936,7 +936,8 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
             if ([NSFileManager.defaultManager fileExistsAtPath:pdfPath])
                 path = pdfPath;
         }
-        return [self pathToOpenForAudioPath:path];
+        // Open the selected file directly. Do not redirect to .cue for single-file play: the user clicked a specific track; redirecting to .cue caused "file not found" when the player resolved CUE references.
+        return path;
     }
     return path;
 }
