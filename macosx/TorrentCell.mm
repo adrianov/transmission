@@ -38,21 +38,30 @@
         [self removeTrackingArea:self.fHoverTrackingArea];
         self.fHoverTrackingArea = nil;
     }
-    NSRect hoverRect = NSZeroRect;
-    if (self.fIconView)
-        hoverRect = self.fIconView.frame;
-    for (NSView* v in @[ self.fActionButton, self.fControlButton, self.fRevealButton, self.fURLButton ])
+    if (self.fHoverButtonsTrackingArea)
     {
-        if (v)
-            hoverRect = NSUnionRect(hoverRect, v.frame);
+        [self removeTrackingArea:self.fHoverButtonsTrackingArea];
+        self.fHoverButtonsTrackingArea = nil;
     }
-    if (NSIsEmptyRect(hoverRect))
-        hoverRect = self.bounds;
+    NSRect iconRect = self.fIconView ? self.fIconView.frame : NSZeroRect;
+    NSRect buttonsRect = NSZeroRect;
+    for (NSView* v in @[ self.fActionButton, self.fControlButton, self.fRevealButton, self.fURLButton ])
+        if (v)
+            buttonsRect = NSUnionRect(buttonsRect, v.frame);
+    NSRect hoverRect = NSIsEmptyRect(iconRect) ? self.bounds : iconRect;
     self.fHoverTrackingArea = [[NSTrackingArea alloc] initWithRect:hoverRect
                                                             options:NSTrackingMouseEnteredAndExited | NSTrackingActiveInKeyWindow
                                                               owner:self
                                                            userInfo:nil];
     [self addTrackingArea:self.fHoverTrackingArea];
+    if (!NSIsEmptyRect(buttonsRect))
+    {
+        self.fHoverButtonsTrackingArea = [[NSTrackingArea alloc] initWithRect:buttonsRect
+                                                                      options:NSTrackingMouseEnteredAndExited | NSTrackingActiveInKeyWindow
+                                                                        owner:self
+                                                                     userInfo:nil];
+        [self addTrackingArea:self.fHoverButtonsTrackingArea];
+    }
 }
 
 - (BOOL)wantsUpdateLayer

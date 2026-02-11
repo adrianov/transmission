@@ -38,6 +38,7 @@ static CGFloat const kErrorImageSize = 20.0;
 
 static NSTimeInterval const kToggleProgressSeconds = 0.175;
 static NSTimeInterval const kScrollSettleDelay = 0.2;
+static NSTimeInterval const kHoverHideDelay = 0.05;
 
 // Associated object keys for play buttons (shared with TorrentTableView+Flow.mm; extern for C++ linkage)
 extern char const kPlayButtonTypeKey = '\0';
@@ -577,6 +578,12 @@ extern char const kPlayButtonRepresentedKey = '\0';
     if (minimal)
     {
         torrentCell.fTorrentStatusField.stringValue = self.fDisplaySmallStatusRegular ? torrent.shortStatusString : torrent.remainingTimeString;
+        BOOL iconHover = self.fHoverEventDict && [self.fHoverEventDict[@"row"] integerValue] == row;
+        torrentCell.fActionButton.hidden = !iconHover;
+        if (iconHover)
+            torrentCell.fIconView.hidden = YES;
+        else
+            torrentCell.fIconView.hidden = NO;
     }
     else
     {
@@ -591,23 +598,14 @@ extern char const kPlayButtonRepresentedKey = '\0';
             statusString = torrent.statusString;
         if (![torrentCell.fTorrentStatusField.stringValue isEqualToString:statusString])
             torrentCell.fTorrentStatusField.stringValue = statusString;
-    }
 
-    if (self.fHoverEventDict && [self.fHoverEventDict[@"row"] integerValue] == row)
-    {
-        torrentCell.fTorrentStatusField.hidden = YES;
-        torrentCell.fActionButton.hidden = NO;
+        torrentCell.fTorrentStatusField.hidden = NO;
         torrentCell.fControlButton.hidden = NO;
         torrentCell.fRevealButton.hidden = NO;
         torrentCell.fURLButton.hidden = (torrent.commentURL == nil);
-    }
-    else
-    {
-        torrentCell.fTorrentStatusField.hidden = NO;
-        torrentCell.fActionButton.hidden = YES;
-        torrentCell.fControlButton.hidden = YES;
-        torrentCell.fRevealButton.hidden = YES;
-        torrentCell.fURLButton.hidden = YES;
+        BOOL iconHover = self.fHoverEventDict && [self.fHoverEventDict[@"row"] integerValue] == row &&
+                         [self.fHoverEventDict[@"iconHover"] boolValue];
+        torrentCell.fActionButton.hidden = !iconHover;
     }
 }
 
@@ -984,6 +982,7 @@ extern char const kPlayButtonRepresentedKey = '\0';
 
 - (void)hoverEventBeganForView:(id)view
 {
+    [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(performDelayedHoverHide) object:nil];
     NSInteger row = [self rowForView:view];
     Torrent* torrent = [self itemAtRow:row];
 
@@ -1003,7 +1002,11 @@ extern char const kPlayButtonRepresentedKey = '\0';
     else
     {
         NSString* statusString;
-        if ([view isKindOfClass:[TorrentCellRevealButton class]])
+        if ([view isKindOfClass:[TorrentCell class]] || [view isKindOfClass:[TorrentCellActionButton class]])
+        {
+            statusString = torrent.statusString;
+        }
+        else if ([view isKindOfClass:[TorrentCellRevealButton class]])
         {
             statusString = NSLocalizedString(@"Show data file in Finder", "Torrent cell -> button info");
         }
@@ -1038,11 +1041,25 @@ extern char const kPlayButtonRepresentedKey = '\0';
 
         if (statusString)
         {
-            self.fHoverEventDict = @{ @"string" : statusString, @"row" : [NSNumber numberWithInteger:row] };
+            BOOL iconHover = [view isKindOfClass:[TorrentCell class]] || [view isKindOfClass:[TorrentCellActionButton class]];
+            self.fHoverEventDict = @{
+                @"string" : statusString,
+                @"row" : [NSNumber numberWithInteger:row],
+                @"iconHover" : @(iconHover)
+            };
         }
     }
 
     [self refreshTorrentRowInPlace:row];
+}
+
+- (void)performDelayedHoverHide
+{
+    self.fHoverEventDict = nil;
+    NSIndexSet* visible = [self visibleRowIndexSet];
+    [visible enumerateIndexesUsingBlock:^(NSUInteger row, BOOL*) {
+        [self refreshTorrentRowInPlace:(NSInteger)row];
+    }];
 }
 
 - (void)hoverEventEndedForView:(id)view
@@ -1066,8 +1083,8 @@ extern char const kPlayButtonRepresentedKey = '\0';
 
     if (update)
     {
-        self.fHoverEventDict = nil;
-        [self refreshTorrentRowInPlace:row];
+        [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(performDelayedHoverHide) object:nil];
+        [self performSelector:@selector(performDelayedHoverHide) withObject:nil afterDelay:kHoverHideDelay];
     }
 }
 

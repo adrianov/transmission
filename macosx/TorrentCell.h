@@ -38,6 +38,7 @@
 @property(nonatomic) TorrentTableView* fTorrentTableView;
 
 @property(nonatomic) NSTrackingArea* fHoverTrackingArea;
+@property(nonatomic) NSTrackingArea* fHoverButtonsTrackingArea;
 
 /// Cached progress bar image to avoid redrawing during scroll
 @property(nonatomic) NSImage* fCachedProgressBarImage;

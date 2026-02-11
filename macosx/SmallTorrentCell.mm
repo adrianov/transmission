@@ -14,27 +14,22 @@
 
 @implementation SmallTorrentCell
 
-// show fControlButton and fRevealButton
 - (void)mouseEntered:(NSEvent*)event
 {
     [super mouseEntered:event];
-
-    NSPoint mouseLocation = [self convertPoint:[event locationInWindow] fromView:nil];
-    if (NSPointInRect(mouseLocation, self.fTrackingArea.rect))
-    {
+    NSPoint p = [self.window mouseLocationOutsideOfEventStream];
+    p = [self convertPoint:p fromView:nil];
+    if (NSPointInRect(p, self.fTrackingArea.rect))
         [self.fTorrentTableView hoverEventBeganForView:self];
-    }
 }
 
 - (void)mouseExited:(NSEvent*)event
 {
     [super mouseExited:event];
-
-    NSPoint mouseLocation = [self convertPoint:[event locationInWindow] fromView:nil];
-    if (!NSPointInRect(mouseLocation, self.fTrackingArea.rect))
-    {
+    NSPoint p = [self.window mouseLocationOutsideOfEventStream];
+    p = [self convertPoint:p fromView:nil];
+    if (!NSPointInRect(p, self.fTrackingArea.rect))
         [self.fTorrentTableView hoverEventEndedForView:self];
-    }
 }
 
 - (void)mouseUp:(NSEvent*)event
@@ -52,24 +47,20 @@
         [self removeTrackingArea:self.fTrackingArea];
     }
 
-    NSRect rect = self.bounds;
+    NSRect rect = self.fIconView ? self.fIconView.frame : self.bounds;
+    if (NSIsEmptyRect(rect))
+        rect = self.bounds;
 
     NSTrackingAreaOptions opts = (NSTrackingMouseEnteredAndExited | NSTrackingActiveInKeyWindow);
     self.fTrackingArea = [[NSTrackingArea alloc] initWithRect:rect options:opts owner:self userInfo:nil];
     [self addTrackingArea:self.fTrackingArea];
 
-    //check to see if mouse is already within rect
     NSPoint mouseLocation = [self.window mouseLocationOutsideOfEventStream];
-    mouseLocation = [self.superview convertPoint:mouseLocation fromView:nil];
-
+    mouseLocation = [self convertPoint:mouseLocation fromView:nil];
     if (NSPointInRect(mouseLocation, rect))
-    {
         [self mouseEntered:[[NSEvent alloc] init]];
-    }
     else
-    {
         [self mouseExited:[[NSEvent alloc] init]];
-    }
 }
 
 @end
