@@ -13,6 +13,7 @@
 #import "TorrentTableView.h"
 #import "TorrentTableViewPrivate.h"
 #include <cmath>
+#import <QuartzCore/QuartzCore.h>
 #import <objc/runtime.h>
 
 static char const kFlowViewTorrentHashKey = '\0';
@@ -152,20 +153,27 @@ static NSDictionary* computeStateAndLayoutFromSnapshot(NSArray<NSDictionary*>* s
                playableFiles:(NSArray*)playableFiles
 {
     [cached removeFromSuperview];
-    [cell addSubview:cached];
+    // Insert at back so status/progress text is never obscured by play buttons (fix for new transfers).
+    NSView* refView = cell.subviews.firstObject ?: cell.fTorrentStatusField;
+    [cell addSubview:cached positioned:NSWindowBelow relativeTo:refView];
     cell.fPlayButtonsView = cached;
     cell.fPlayButtonsSourceFiles = playableFiles;
     setFlowViewTorrentHash(cached, torrent.hashString);
-    cell.fPlayButtonsHeightConstraint = [cached.heightAnchor constraintEqualToConstant:0];
+    CGFloat savedHeight = cached.lastLayoutHeight > 0 ? cached.lastLayoutHeight : 0;
+    cell.fPlayButtonsHeightConstraint = [cached.heightAnchor constraintEqualToConstant:savedHeight];
     [NSLayoutConstraint activateConstraints:@[
         [cached.leadingAnchor constraintEqualToAnchor:cell.fTorrentStatusField.leadingAnchor],
         [cached.topAnchor constraintEqualToAnchor:cell.fTorrentStatusField.bottomAnchor constant:kFlowPlayButtonVerticalPadding],
         [cached.trailingAnchor constraintEqualToAnchor:cell.trailingAnchor constant:-kFlowPlayButtonRightMargin],
         cell.fPlayButtonsHeightConstraint
     ]];
-    cached.hidden = NO;
     [self updatePlayButtonProgressForCell:cell torrent:torrent forceLayout:YES];
+    [cached layoutSubtreeIfNeeded];
     [cell layoutSubtreeIfNeeded];
+    [CATransaction begin];
+    [CATransaction setDisableActions:YES];
+    cached.hidden = NO;
+    [CATransaction commit];
     [cell setBackgroundStyle:cell.backgroundStyle];
     [cached setNeedsDisplay:YES];
     [cell setNeedsDisplay:YES];
@@ -178,10 +186,13 @@ static NSDictionary* computeStateAndLayoutFromSnapshot(NSArray<NSDictionary*>* s
     flowView.horizontalSpacing = 6;
     flowView.verticalSpacing = 4;
     flowView.minimumButtonWidth = 50;
+    flowView.maximumColumnCount = 8;
     // Start hidden to prevent black rectangle while buttons are computed asynchronously.
     // Callers unhide after populating buttons.
     flowView.hidden = YES;
-    [cell addSubview:flowView];
+    // Insert at back so status/progress text is never obscured by play buttons (fix for new transfers).
+    NSView* refView = cell.subviews.firstObject ?: cell.fTorrentStatusField;
+    [cell addSubview:flowView positioned:NSWindowBelow relativeTo:refView];
     cell.fPlayButtonsView = flowView;
     cell.fPlayButtonsHeightConstraint = [flowView.heightAnchor constraintEqualToConstant:0];
     [NSLayoutConstraint activateConstraints:@[
@@ -373,7 +384,10 @@ static NSDictionary* computeStateAndLayoutFromSnapshot(NSArray<NSDictionary*>* s
     if (cell.fPlayButtonsView && [cell.fTorrentHash isEqualToString:currentHash] && flowViewMatchesTorrent && sameSource &&
         (!hasLayout || hasExistingButtons))
     {
+        [CATransaction begin];
+        [CATransaction setDisableActions:YES];
         cell.fPlayButtonsView.hidden = NO;
+        [CATransaction commit];
         CGFloat const availableWidth = [self playButtonsAvailableWidthForCell:cell];
         BOOL const widthChanged = std::fabs(availableWidth - torrent.cachedPlayButtonsWidth) > 5.0;
         [self updatePlayButtonProgressForCell:cell torrent:torrent forceLayout:widthChanged];
@@ -408,12 +422,17 @@ static NSDictionary* computeStateAndLayoutFromSnapshot(NSArray<NSDictionary*>* s
             [self addPlayButtonLayoutEntry:entry toFlowView:flowView torrent:torrent];
         [flowView finishBatchUpdates];
     }
-    flowView.hidden = NO;
     if (layout.count > 0)
         [self.fFlowViewCache setObject:flowView forKey:currentHash];
     [self updatePlayButtonProgressForCell:cell torrent:torrent forceLayout:YES];
-    // Force layout so flow view gets bounds and sets button frames before draw (avoids empty button area).
+    // Layout before revealing so buttons have final frames when shown (avoids blank-then-expand flicker on scroll).
+    [flowView layoutSubtreeIfNeeded];
     [cell layoutSubtreeIfNeeded];
+    // Disable implicit layer animations to avoid odd expand/flicker when revealing.
+    [CATransaction begin];
+    [CATransaction setDisableActions:YES];
+    flowView.hidden = NO;
+    [CATransaction commit];
     [cell setBackgroundStyle:cell.backgroundStyle];
     [flowView setNeedsDisplay:YES];
     [cell setNeedsDisplay:YES];
@@ -628,7 +647,7 @@ static NSDictionary* computeStateAndLayoutFromSnapshot(NSArray<NSDictionary*>* s
             }
             if (!entry)
                 entry = (button.tag != NSNotFound) ? stateMap[@(button.tag)] :
-                       (stateMap[[self folderForPlayButton:button torrent:torrent]] ?: nil);
+                                                     (stateMap[[self folderForPlayButton:button torrent:torrent]] ?: nil);
             if (entry)
             {
                 [self applyPathDerivedUIToPlayButton:button forEntry:entry torrent:torrent];
@@ -685,9 +704,9 @@ static NSDictionary* computeStateAndLayoutFromSnapshot(NSArray<NSDictionary*>* s
     }
     if (layoutNeeded)
     {
-        [flowView invalidateLayoutCache];
         CGFloat const availableWidth = [self playButtonsAvailableWidthForCell:cell];
-        CGFloat buttonHeight = [flowView heightForWidth:availableWidth];
+        BOOL useSavedHeight = [flowView hasValidLayoutForWidth:availableWidth] && flowView.lastLayoutHeight > 0;
+        CGFloat buttonHeight = useSavedHeight ? flowView.lastLayoutHeight : [flowView heightForWidth:availableWidth];
         if (buttonHeight > 0 && buttonHeight < kFlowPlayButtonRowHeight)
             buttonHeight = kFlowPlayButtonRowHeight;
         if (cell.fPlayButtonsHeightConstraint)
@@ -702,7 +721,8 @@ static NSDictionary* computeStateAndLayoutFromSnapshot(NSArray<NSDictionary*>* s
             if (buttonHeight > 0)
                 [self noteHeightOfRowsWithIndexesChanged:[NSIndexSet indexSetWithIndex:(NSUInteger)row]];
         }
-        [flowView setNeedsDisplay:YES];
+        if (!useSavedHeight)
+            [flowView setNeedsDisplay:YES];
     }
 }
 
