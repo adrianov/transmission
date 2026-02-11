@@ -80,11 +80,10 @@
     self = [super init];
     if (self)
     {
-        // Regression fix: PlayButton must be layer-backed because FlowLayoutView (parent) is layer-backed.
-        // Mixed layer/non-layer hierarchies cause buttons to disappear during scroll.
-        // The custom cell's drawBezelWithFrame and drawTitle work correctly with layers.
+        // Layer-backed for correct compositing in scrolled table cells.
+        // RedrawDuringViewResize ensures content redraws when frame changes (fixes empty blocks after scroll).
         self.wantsLayer = YES;
-        self.layerContentsRedrawPolicy = NSViewLayerContentsRedrawOnSetNeedsDisplay;
+        self.layerContentsRedrawPolicy = NSViewLayerContentsRedrawDuringViewResize;
         self.bordered = YES;
         self.bezelStyle = NSBezelStyleRounded;
         self.showsBorderOnlyWhileMouseInside = NO;

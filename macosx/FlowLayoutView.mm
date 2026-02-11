@@ -5,179 +5,110 @@
 #include <cmath>
 
 #import "FlowLayoutView.h"
-#import <QuartzCore/CALayer.h>
 
 @interface FlowLineBreak : NSView
 @end
 
 @implementation FlowLineBreak
+- (BOOL)isOpaque { return NO; }
+@end
 
-- (BOOL)isOpaque
-{
-    return NO;
-}
-
+@interface FlowLayoutView ()
+@property(nonatomic) NSMutableArray<NSView*>* contentViews;
+@property(nonatomic) NSMapTable<NSView*, NSValue*>* cachedSizes;
+@property(nonatomic) CGFloat lastLayoutWidth;
+@property(nonatomic) CGFloat lastLayoutHeight;
+@property(nonatomic) BOOL layoutDirty;
 @end
 
 @implementation FlowLayoutView
+
+- (void)commonInit
 {
-    NSMutableArray<NSView*>* _arrangedSubviews;
-    NSMapTable<NSView*, NSValue*>* _cachedSizes;
-    NSArray<NSView*>* _visibleSubviewsCache;
-    BOOL _visibleCacheValid;
-    BOOL _layoutDirty;
-    CGFloat _lastLayoutWidth;
-    CGFloat _lastLayoutHeight;
-    NSStackView* _verticalStack;
-    NSMutableArray<NSStackView*>* _rowStacks;
+    self.translatesAutoresizingMaskIntoConstraints = NO;
+    // Non-layer-backed: avoids layer caching that causes empty blocks after scroll.
+    // Subviews (PlayButton) remain layer-backed; that combination works correctly.
+    self.wantsLayer = NO;
+
+    _contentViews = [NSMutableArray array];
+    _cachedSizes = [NSMapTable weakToStrongObjectsMapTable];
+    _horizontalSpacing = 6;
+    _verticalSpacing = 4;
+    _minimumButtonWidth = 50;
+    _layoutDirty = YES;
 }
 
 - (instancetype)initWithFrame:(NSRect)frameRect
 {
-    if (self = [super initWithFrame:frameRect])
-    {
-        self.translatesAutoresizingMaskIntoConstraints = NO;
-        self.wantsLayer = YES;
-        self.layerContentsRedrawPolicy = NSViewLayerContentsRedrawOnSetNeedsDisplay;
-
-        _arrangedSubviews = [NSMutableArray array];
-        _cachedSizes = [NSMapTable weakToStrongObjectsMapTable];
-        _horizontalSpacing = 6;
-        _verticalSpacing = 4;
-        _minimumButtonWidth = 50;
-        _visibleCacheValid = NO;
-        _layoutDirty = YES;
-        _lastLayoutWidth = 0;
-        _lastLayoutHeight = 0;
-        _rowStacks = [NSMutableArray array];
-
-        _verticalStack = [[NSStackView alloc] init];
-        _verticalStack.translatesAutoresizingMaskIntoConstraints = NO;
-        _verticalStack.orientation = NSUserInterfaceLayoutOrientationVertical;
-        _verticalStack.alignment = NSLayoutAttributeLeading;
-        _verticalStack.distribution = NSStackViewDistributionGravityAreas;
-        _verticalStack.spacing = 4;
-        [self addSubview:_verticalStack];
-    }
+    self = [super initWithFrame:frameRect];
+    if (self)
+        [self commonInit];
     return self;
 }
 
-// Regression fix: FlowLayoutView is layer-backed but draws no content of its own.
-// Without explicit transparency, the backing layer can render as a black rectangle
-// during transitional states (e.g. async button computation while scrolling).
-// All three overrides are needed: isOpaque tells AppKit the view is transparent,
-// wantsDefaultClipping avoids stale clipping rects, and makeBackingLayer ensures
-// the CALayer itself has no background fill.
-- (BOOL)isOpaque
+- (instancetype)initWithCoder:(NSCoder*)coder
 {
-    return NO;
+    self = [super initWithCoder:coder];
+    if (self)
+        [self commonInit];
+    return self;
 }
 
-- (BOOL)wantsDefaultClipping
-{
-    return NO;
-}
+- (BOOL)isOpaque { return NO; }
 
-- (CALayer*)makeBackingLayer
-{
-    CALayer* layer = [super makeBackingLayer];
-    layer.backgroundColor = nil;
-    layer.opaque = NO;
-    return layer;
-}
+- (BOOL)isFlipped { return YES; }
 
 - (void)addArrangedSubview:(NSView*)view
 {
-    [_arrangedSubviews addObject:view];
+    [_contentViews addObject:view];
     [self addSubview:view];
-    _visibleCacheValid = NO;
     _layoutDirty = YES;
-    // Don't trigger layout for each view - let caller batch updates
 }
 
 - (void)addArrangedSubviewBatched:(NSView*)view
 {
-    [_arrangedSubviews addObject:view];
+    [_contentViews addObject:view];
     [self addSubview:view];
-    // No cache invalidation - caller will call finishBatchUpdates
 }
 
 - (void)finishBatchUpdates
 {
-    _visibleCacheValid = NO;
     _layoutDirty = YES;
     [self setNeedsLayout:YES];
-    [self setNeedsDisplay:YES];
 }
 
 - (void)addLineBreak
 {
     FlowLineBreak* br = [[FlowLineBreak alloc] init];
-    [_arrangedSubviews addObject:br];
+    [_contentViews addObject:br];
     [self addSubview:br];
-    _visibleCacheValid = NO;
     _layoutDirty = YES;
-    // Don't trigger layout for each view - let caller batch updates
 }
 
 - (void)addLineBreakBatched
 {
     FlowLineBreak* br = [[FlowLineBreak alloc] init];
-    [_arrangedSubviews addObject:br];
+    [_contentViews addObject:br];
     [self addSubview:br];
-    // No cache invalidation - caller will call finishBatchUpdates
 }
 
-- (NSArray<NSView*>*)arrangedSubviews
+- (NSArray<NSView*>*)contentSubviews
 {
-    return [_arrangedSubviews copy];
+    return [_contentViews copy];
 }
 
 - (void)removeAllArrangedSubviews
 {
-    if (_arrangedSubviews.count == 0)
+    if (_contentViews.count == 0)
         return;
-
-    for (NSView* view in _arrangedSubviews)
-        [view removeFromSuperview];
-    [_arrangedSubviews removeAllObjects];
-    for (NSStackView* rowStack in _rowStacks)
-    {
-        for (NSView* v in [rowStack.arrangedSubviews copy])
-            [rowStack removeArrangedSubview:v];
-    }
-    for (NSView* v in [_verticalStack.arrangedSubviews copy])
-        [_verticalStack removeArrangedSubview:v];
+    for (NSView* v in _contentViews)
+        [v removeFromSuperview];
+    [_contentViews removeAllObjects];
     [_cachedSizes removeAllObjects];
-    _visibleCacheValid = NO;
     _layoutDirty = YES;
     _lastLayoutWidth = 0;
     _lastLayoutHeight = 0;
     [self invalidateIntrinsicContentSize];
-    [self setNeedsLayout:YES];
-    [self setNeedsDisplay:YES];
-}
-
-- (BOOL)isFlipped
-{
-    return YES;
-}
-
-- (void)setBounds:(NSRect)bounds
-{
-    [super setBounds:bounds];
-    CGFloat w = bounds.size.width;
-    if (w > 0 && (std::fabs(w - _lastLayoutWidth) > 0.001 || _layoutDirty))
-        [self setNeedsLayout:YES];
-}
-
-- (void)layout
-{
-    [super layout];
-    CGFloat width = self.bounds.size.width;
-    if (width <= 0 && self.superview)
-        width = self.superview.bounds.size.width;
-    [self syncStackRowsForWidth:width];
 }
 
 - (NSSize)sizeForView:(NSView*)view
@@ -185,173 +116,112 @@
     NSValue* cached = [_cachedSizes objectForKey:view];
     if (cached)
         return cached.sizeValue;
-
     NSSize size;
     if ([view isKindOfClass:[NSButton class]])
     {
-        // For buttons, use intrinsicContentSize + fixed padding to avoid expensive cellSizeForBounds
         size = view.intrinsicContentSize;
-        size.width += 10; // Padding for recessed style
+        size.width += 10;
         if (size.width < _minimumButtonWidth)
             size.width = _minimumButtonWidth;
     }
     else
-    {
         size = view.fittingSize;
-    }
-
-    if (size.width <= 0)
-        size.width = 60;
-    if (size.height <= 0)
-        size.height = 18;
-
+    if (size.width <= 0) size.width = 60;
+    if (size.height <= 0) size.height = 18;
     [_cachedSizes setObject:[NSValue valueWithSize:size] forKey:view];
     return size;
 }
 
-- (NSArray<NSView*>*)visibleArrangedSubviews
-{
-    if (_visibleCacheValid)
-        return _visibleSubviewsCache;
-
-    NSMutableArray<NSView*>* visible = [NSMutableArray array];
-    for (NSView* view in _arrangedSubviews)
-    {
-        if (!view.hidden)
-            [visible addObject:view];
-    }
-    _visibleSubviewsCache = [visible copy];
-    _visibleCacheValid = YES;
-    return _visibleSubviewsCache;
-}
-
-/// Partitions visible subviews into rows by flow: left-to-right until width overflows, then next row. Line breaks force new row.
-- (NSArray<NSArray<NSView*>*>*)rowsForWidth:(CGFloat)availableWidth
+- (NSArray<NSArray<NSView*>*>*)rowsForWidth:(CGFloat)width
 {
     NSMutableArray<NSArray<NSView*>*>* rows = [NSMutableArray array];
     NSMutableArray<NSView*>* currentRow = [NSMutableArray array];
-    CGFloat currentX = 0;
+    CGFloat x = 0;
 
-    for (NSView* view in [self visibleArrangedSubviews])
+    for (NSView* v in _contentViews)
     {
-        if ([view isKindOfClass:[FlowLineBreak class]])
+        if ([v isKindOfClass:[FlowLineBreak class]])
         {
             if (currentRow.count > 0)
             {
                 [rows addObject:[currentRow copy]];
                 [currentRow removeAllObjects];
             }
-            currentX = 0;
+            x = 0;
             continue;
         }
-        CGFloat w = [self sizeForView:view].width;
-        BOOL overflow = (currentX + w > availableWidth + 0.001) && currentRow.count > 0;
+        if (v.hidden)
+            continue;
+        CGFloat w = [self sizeForView:v].width;
+        BOOL overflow = (x + w > width + 0.001) && currentRow.count > 0;
         BOOL atCap = _maximumColumnCount > 0 && currentRow.count >= _maximumColumnCount;
         if ((overflow || atCap) && currentRow.count > 0)
         {
             [rows addObject:[currentRow copy]];
             [currentRow removeAllObjects];
-            currentX = 0;
+            x = 0;
         }
-        [currentRow addObject:view];
-        currentX += w + _horizontalSpacing;
+        [currentRow addObject:v];
+        x += w + _horizontalSpacing;
     }
     if (currentRow.count > 0)
         [rows addObject:currentRow];
-
     return rows;
 }
 
-/// Syncs row stacks with rowsForWidth and lets NSStackView handle layout.
-- (void)syncStackRowsForWidth:(CGFloat)availableWidth
+- (void)applyLayoutForWidth:(CGFloat)width
 {
-    if (availableWidth <= 0)
-        return;
-    if (!_layoutDirty && std::fabs(availableWidth - _lastLayoutWidth) < 0.001)
-        return;
+    if (width <= 0) return;
+    if (!_layoutDirty && std::fabs(width - _lastLayoutWidth) < 0.001) return;
 
-    NSRect bounds = self.bounds;
-    if (!NSEqualRects(_verticalStack.frame, bounds))
-        _verticalStack.frame = bounds;
-    if (std::fabs(_verticalStack.spacing - _verticalSpacing) > 0.001)
-        _verticalStack.spacing = _verticalSpacing;
-
-    NSArray<NSArray<NSView*>*>* rows = [self rowsForWidth:availableWidth];
-    while (_rowStacks.count < rows.count)
-    {
-        NSStackView* rowStack = [[NSStackView alloc] init];
-        rowStack.orientation = NSUserInterfaceLayoutOrientationHorizontal;
-        rowStack.alignment = NSLayoutAttributeCenterY;
-        rowStack.distribution = NSStackViewDistributionGravityAreas;
-        rowStack.spacing = _horizontalSpacing;
-        [_rowStacks addObject:rowStack];
-    }
-    NSUInteger r = 0;
-    for (NSArray<NSView*>* row in rows)
-    {
-        NSStackView* rowStack = _rowStacks[r++];
-        if (![rowStack.arrangedSubviews isEqualToArray:row])
-        {
-            for (NSView* v in [rowStack.arrangedSubviews copy])
-            {
-                [rowStack removeArrangedSubview:v];
-                [self addSubview:v];
-            }
-            for (NSView* v in row)
-            {
-                [v removeFromSuperview];
-                [rowStack addArrangedSubview:v];
-            }
-        }
-    }
-    for (NSUInteger i = rows.count; i < _rowStacks.count; i++)
-    {
-        NSStackView* rowStack = _rowStacks[i];
-        for (NSView* v in [rowStack.arrangedSubviews copy])
-        {
-            [rowStack removeArrangedSubview:v];
-            [self addSubview:v];
-        }
-    }
-    // Vertical stack must show first row at top: arranged order = _rowStacks[0], _rowStacks[1], ...
-    NSArray* currentStacks = _verticalStack.arrangedSubviews;
-    BOOL orderMatches = currentStacks.count == rows.count;
-    if (orderMatches)
-        for (NSUInteger i = 0; i < rows.count; i++)
-            if (currentStacks[i] != _rowStacks[i])
-            {
-                orderMatches = NO;
-                break;
-            }
-    if (!orderMatches)
-    {
-        for (NSView* v in currentStacks)
-            [v removeFromSuperview];
-        for (NSUInteger i = 0; i < rows.count; i++)
-            [_verticalStack addArrangedSubview:_rowStacks[i]];
-    }
-
+    NSArray<NSArray<NSView*>*>* rows = [self rowsForWidth:width];
     CGFloat y = 0;
-    for (NSArray<NSView*>* row in rows)
+
+    for (NSView* v in _contentViews)
+        if ([v isKindOfClass:[FlowLineBreak class]])
+        {
+            v.hidden = YES;
+            v.frame = NSZeroRect;
+        }
+    for (NSArray* row in rows)
     {
-        CGFloat rowHeight = 0;
-        for (NSView* view in row)
-            rowHeight = MAX(rowHeight, [self sizeForView:view].height);
-        y += rowHeight + _verticalSpacing;
+        CGFloat rowH = 0;
+        for (NSView* v in row)
+            rowH = MAX(rowH, [self sizeForView:v].height);
+        CGFloat x = 0;
+        for (NSView* v in row)
+        {
+            NSSize sz = [self sizeForView:v];
+            v.hidden = NO;
+            CGFloat vY = y + (rowH - sz.height) / 2.0;
+            v.frame = NSMakeRect(x, vY, sz.width, sz.height);
+            [v setNeedsDisplay:YES];
+            x += sz.width + _horizontalSpacing;
+        }
+        y += rowH + _verticalSpacing;
     }
+
     _lastLayoutHeight = rows.count > 0 ? y - _verticalSpacing : 0;
     _layoutDirty = NO;
-    _lastLayoutWidth = availableWidth;
+    _lastLayoutWidth = width;
 }
 
-- (CGFloat)lastLayoutHeight
+- (void)layout
 {
+    [super layout];
+    CGFloat width = NSWidth(self.bounds);
+    if (width <= 0 && self.superview)
+        width = NSWidth(self.superview.bounds);
+    [self applyLayoutForWidth:width];
+}
+
+- (CGFloat)heightForWidth:(CGFloat)width
+{
+    if (width <= 0) return 0;
+    if (!_layoutDirty && std::fabs(width - _lastLayoutWidth) < 0.001)
+        return _lastLayoutHeight;
+    [self applyLayoutForWidth:width];
     return _lastLayoutHeight;
-}
-
-- (CGFloat)lastLayoutWidth
-{
-    return _lastLayoutWidth;
 }
 
 - (BOOL)hasValidLayoutForWidth:(CGFloat)width
@@ -359,48 +229,32 @@
     return !_layoutDirty && width > 0 && std::fabs(width - _lastLayoutWidth) < 0.001;
 }
 
-- (CGFloat)heightForWidth:(CGFloat)availableWidth
-{
-    if (availableWidth <= 0)
-        return 0;
-    if (!_layoutDirty && std::fabs(availableWidth - _lastLayoutWidth) < 0.001)
-        return _lastLayoutHeight;
-    [self syncStackRowsForWidth:availableWidth];
-    return _lastLayoutHeight;
-}
-
 - (NSSize)intrinsicContentSize
 {
     BOOL hasVisible = NO;
-    for (NSView* view in [self visibleArrangedSubviews])
-        if (![view isKindOfClass:[FlowLineBreak class]])
+    for (NSView* v in _contentViews)
+        if (![v isKindOfClass:[FlowLineBreak class]] && !v.hidden)
         {
             hasVisible = YES;
             break;
         }
     if (!hasVisible)
         return NSMakeSize(NSViewNoIntrinsicMetric, 0);
-
-    CGFloat width = self.bounds.size.width;
-    if (width < 100)
-        width = self.superview ? self.superview.bounds.size.width : 600;
-    if (width < 100)
-        width = 600;
-
-    CGFloat height = [self heightForWidth:width];
-    return NSMakeSize(NSViewNoIntrinsicMetric, MAX(height, 0));
+    CGFloat w = NSWidth(self.bounds);
+    if (w < 100)
+        w = self.superview ? NSWidth(self.superview.bounds) : 600;
+    if (w < 100) w = 600;
+    return NSMakeSize(NSViewNoIntrinsicMetric, MAX([self heightForWidth:w], 0));
 }
 
 - (void)invalidateSizeForView:(NSView*)view
 {
     [_cachedSizes removeObjectForKey:view];
-    _visibleCacheValid = NO;
     _layoutDirty = YES;
 }
 
 - (void)invalidateLayoutCache
 {
-    _visibleCacheValid = NO;
     _layoutDirty = YES;
     [self setNeedsLayout:YES];
 }
