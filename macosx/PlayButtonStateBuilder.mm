@@ -35,7 +35,7 @@ static void disambiguateDuplicateTitles(NSMutableArray<NSMutableDictionary*>* st
         NSString* path = e[@"path"];
         NSString* folder = e[@"folder"];
         NSString* parent = (path.length > 0) ? [path stringByDeletingLastPathComponent].lastPathComponent :
-            (folder.length > 0 ? (folder.lastPathComponent ?: folder) : @"");
+                                               (folder.length > 0 ? (folder.lastPathComponent ?: folder) : @"");
         if (parent.length == 0)
             continue;
         NSString* humanized = parent.humanReadableFileName;
@@ -44,7 +44,8 @@ static void disambiguateDuplicateTitles(NSMutableArray<NSMutableDictionary*>* st
         NSString* base = e[@"baseTitle"] ?: @"";
         e[@"baseTitle"] = [NSString stringWithFormat:@"%@ — %@", humanized, base];
     }
-    NSArray<NSString*>* newTitles = [Torrent displayTitlesByStrippingCommonPrefixSuffix:[state valueForKey:@"baseTitle"] seasons:seasons];
+    NSArray<NSString*>* newTitles = [Torrent displayTitlesByStrippingCommonPrefixSuffix:[state valueForKey:@"baseTitle"]
+                                                                                seasons:seasons];
     for (NSUInteger i = 0; i < state.count; i++)
     {
         if ([state[i][@"type"] isEqualToString:@"document-books"])

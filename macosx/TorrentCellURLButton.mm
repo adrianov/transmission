@@ -7,7 +7,6 @@
 #import "TorrentCell.h"
 
 @interface TorrentCellURLButton ()
-@property(nonatomic) NSTrackingArea* fTrackingArea;
 @property(nonatomic, copy) NSString* urlImageString;
 @property(nonatomic) IBOutlet TorrentCell* torrentCell;
 @property(nonatomic, readonly) TorrentTableView* torrentTableView;
@@ -23,6 +22,10 @@
 - (void)awakeFromNib
 {
     [super awakeFromNib];
+
+    self.wantsLayer = YES;
+    self.layerContentsRedrawPolicy = NSViewLayerContentsRedrawOnSetNeedsDisplay;
+
     self.urlImageString = @"URLOff";
     [self updateImage];
 }
@@ -48,9 +51,14 @@
 - (void)mouseDown:(NSEvent*)event
 {
     [self.window makeFirstResponder:self.torrentTableView];
-
     [super mouseDown:event];
     self.urlImageString = @"URLOn";
+    [self updateImage];
+}
+
+- (void)resetImage
+{
+    self.urlImageString = @"URLOff";
     [self updateImage];
 }
 
@@ -63,14 +71,19 @@
 
 - (void)updateTrackingAreas
 {
-    if (self.fTrackingArea != nil)
+    [super updateTrackingAreas];
+    for (NSTrackingArea* area in self.trackingAreas)
     {
-        [self removeTrackingArea:self.fTrackingArea];
+        if (area.owner == self && (area.options & NSTrackingInVisibleRect))
+        {
+            [self removeTrackingArea:area];
+            break;
+        }
     }
-
-    NSTrackingAreaOptions opts = (NSTrackingMouseEnteredAndExited | NSTrackingActiveAlways);
-    self.fTrackingArea = [[NSTrackingArea alloc] initWithRect:self.bounds options:opts owner:self userInfo:nil];
-    [self addTrackingArea:self.fTrackingArea];
+    [self addTrackingArea:[[NSTrackingArea alloc] initWithRect:NSZeroRect
+                                                       options:NSTrackingMouseEnteredAndExited | NSTrackingActiveAlways | NSTrackingInVisibleRect
+                                                         owner:self
+                                                      userInfo:nil]];
 }
 
 @end

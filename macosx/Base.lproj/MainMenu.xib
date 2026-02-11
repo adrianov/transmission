@@ -254,6 +254,12 @@
                                                                 <constraint firstAttribute="height" constant="14" id="D7V-m1-heE"/>
                                                             </constraints>
                                                         </customView>
+                                                        <customView translatesAutoresizingMaskIntoConstraints="NO" id="flow-view-001" customClass="FlowLayoutView">
+                                                            <rect key="frame" x="63" y="29" width="350" height="0"/>
+                                                            <constraints>
+                                                                <constraint firstAttribute="height" constant="0" id="flow-h-001"/>
+                                                            </constraints>
+                                                        </customView>
                                                     </subviews>
                                                     <constraints>
                                                         <constraint firstItem="FLl-ue-i20" firstAttribute="top" secondItem="7Ic-8y-f3v" secondAttribute="top" constant="3" id="7iF-OP-ifv"/>
@@ -282,6 +288,9 @@
                                                         <constraint firstItem="J4v-0p-u4L" firstAttribute="leading" secondItem="Ifq-ub-ay4" secondAttribute="leading" id="vQR-NJ-Twe"/>
                                                         <constraint firstItem="k5I-MN-hYk" firstAttribute="centerY" secondItem="kNl-5i-USx" secondAttribute="centerY" id="xjv-n4-F1m"/>
                                                         <constraint firstItem="Rxb-qW-x6p" firstAttribute="centerY" secondItem="WTV-L6-lc2" secondAttribute="centerY" id="y0a-c5-pYS"/>
+                                                        <constraint firstItem="flow-view-001" firstAttribute="leading" secondItem="J4v-0p-u4L" secondAttribute="leading" id="flow-c-001"/>
+                                                        <constraint firstItem="flow-view-001" firstAttribute="top" secondItem="J4v-0p-u4L" secondAttribute="bottom" constant="4" id="flow-c-002"/>
+                                                        <constraint firstItem="7Ic-8y-f3v" firstAttribute="trailing" secondItem="flow-view-001" secondAttribute="trailing" constant="55" id="flow-c-003"/>
                                                     </constraints>
                                                     <connections>
                                                         <outlet property="fActionButton" destination="Rxb-qW-x6p" id="ICn-NC-ahy"/>
@@ -298,6 +307,8 @@
                                                         <outlet property="fTorrentProgressField" destination="7sy-Kk-M9Y" id="nk4-R3-1Wv"/>
                                                         <outlet property="fTorrentStatusField" destination="J4v-0p-u4L" id="nqa-rT-XUI"/>
                                                         <outlet property="fTorrentTitleField" destination="gIX-h2-fIl" id="h3s-C4-XNT"/>
+                                                        <outlet property="fPlayButtonsView" destination="flow-view-001" id="flow-ol-001"/>
+                                                        <outlet property="fPlayButtonsHeightConstraint" destination="flow-h-001" id="flow-ol-002"/>
                                                     </connections>
                                                 </tableCellView>
                                                 <tableCellView identifier="SmallTorrentCell" id="ouH-H8-Otv" customClass="SmallTorrentCell">

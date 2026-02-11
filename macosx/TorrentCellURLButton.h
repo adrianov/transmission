@@ -5,4 +5,5 @@
 #import <Cocoa/Cocoa.h>
 
 @interface TorrentCellURLButton : NSButton
+- (void)resetImage;
 @end

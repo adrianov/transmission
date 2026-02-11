@@ -762,9 +762,10 @@
     NSRegularExpression* emptyParenRegex = [NSRegularExpression regularExpressionWithPattern:@"\\(\\s*\\)" options:0 error:nil];
     title = [emptyParenRegex stringByReplacingMatchesInString:title options:0 range:NSMakeRange(0, title.length) withTemplate:@""];
     NSRegularExpression* hdSdOnlyParenRegex = [NSRegularExpression regularExpressionWithPattern:@"\\(\\s*(?:HD|SD)\\s*\\)"
-                                                                                       options:NSRegularExpressionCaseInsensitive
-                                                                                         error:nil];
-    title = [hdSdOnlyParenRegex stringByReplacingMatchesInString:title options:0 range:NSMakeRange(0, title.length) withTemplate:@""];
+                                                                                        options:NSRegularExpressionCaseInsensitive
+                                                                                          error:nil];
+    title = [hdSdOnlyParenRegex stringByReplacingMatchesInString:title options:0 range:NSMakeRange(0, title.length)
+                                                    withTemplate:@""];
 
     // Remove leading/trailing hyphens and spaces (but not dots - they may be ellipsis)
     while ([title hasPrefix:@"-"] || [title hasPrefix:@" "])

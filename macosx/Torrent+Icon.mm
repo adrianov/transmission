@@ -88,9 +88,9 @@
             {
                 NSDictionary* item = playable.firstObject;
                 id pathObj = item[@"path"];
-                NSString* itemExt = [pathObj isKindOfClass:[NSString class]] && [(NSString*)pathObj length] > 0
-                    ? [(NSString*)pathObj pathExtension].lowercaseString
-                    : nil;
+                NSString* itemExt = [pathObj isKindOfClass:[NSString class]] && [(NSString*)pathObj length] > 0 ?
+                    [(NSString*)pathObj pathExtension].lowercaseString :
+                    nil;
                 if (itemExt.length == 0)
                     itemExt = [item[@"originalExt"] isKindOfClass:[NSString class]] ? [item[@"originalExt"] lowercaseString] : nil;
                 if ([itemExt isEqualToString:@"cue"])

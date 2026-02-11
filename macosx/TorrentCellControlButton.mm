@@ -8,7 +8,6 @@
 #import "TorrentCell.h"
 
 @interface TorrentCellControlButton ()
-@property(nonatomic) NSTrackingArea* fTrackingArea;
 @property(nonatomic, copy) NSString* controlImageSuffix;
 @property(nonatomic) IBOutlet TorrentCell* torrentCell;
 @property(nonatomic, readonly) TorrentTableView* torrentTableView;
@@ -24,6 +23,10 @@
 - (void)awakeFromNib
 {
     [super awakeFromNib];
+
+    // Layer-backed to match FlowLayoutView/PlayButton hierarchy; avoids blank rectangles during scroll.
+    self.wantsLayer = YES;
+    self.layerContentsRedrawPolicy = NSViewLayerContentsRedrawOnSetNeedsDisplay;
 
     self.controlImageSuffix = @"Off";
     [self updateImage];
@@ -93,14 +96,19 @@
 
 - (void)updateTrackingAreas
 {
-    if (self.fTrackingArea != nil)
+    [super updateTrackingAreas];
+    for (NSTrackingArea* area in self.trackingAreas)
     {
-        [self removeTrackingArea:self.fTrackingArea];
+        if (area.owner == self && (area.options & NSTrackingInVisibleRect))
+        {
+            [self removeTrackingArea:area];
+            break;
+        }
     }
-
-    NSTrackingAreaOptions opts = (NSTrackingMouseEnteredAndExited | NSTrackingActiveAlways);
-    self.fTrackingArea = [[NSTrackingArea alloc] initWithRect:self.bounds options:opts owner:self userInfo:nil];
-    [self addTrackingArea:self.fTrackingArea];
+    [self addTrackingArea:[[NSTrackingArea alloc] initWithRect:NSZeroRect
+                                                       options:NSTrackingMouseEnteredAndExited | NSTrackingActiveAlways | NSTrackingInVisibleRect
+                                                         owner:self
+                                                      userInfo:nil]];
 }
 
 @end

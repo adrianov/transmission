@@ -8,12 +8,8 @@
 #import "TorrentCell.h"
 
 @interface TorrentCellActionButton ()
-@property(nonatomic) NSTrackingArea* fTrackingArea;
-@property(nonatomic) NSImage* fImage;
-@property(nonatomic) NSImage* fAlternativeImage;
 @property(nonatomic) IBOutlet TorrentCell* torrentCell;
 @property(nonatomic, readonly) TorrentTableView* torrentTableView;
-@property(nonatomic) NSUserDefaults* fDefaults;
 @end
 
 @implementation TorrentCellActionButton
@@ -26,59 +22,51 @@
 - (void)awakeFromNib
 {
     [super awakeFromNib];
-    self.fDefaults = NSUserDefaults.standardUserDefaults;
-    self.fImage = self.image;
 
-    // hide image by default and show only on hover
-    self.fAlternativeImage = [[NSImage alloc] init];
-    self.image = self.fAlternativeImage;
+    self.wantsLayer = YES;
+    self.layerContentsRedrawPolicy = NSViewLayerContentsRedrawOnSetNeedsDisplay;
 
-    // disable button click highlighting
     [self.cell setHighlightsBy:NSNoCellMask];
+    self.image = [NSImage imageNamed:@"ActionHover"];
 }
 
 - (void)mouseEntered:(NSEvent*)event
 {
     [super mouseEntered:event];
-
-    self.image = self.fImage;
-
     [self.torrentTableView hoverEventBeganForView:self];
 }
 
 - (void)mouseExited:(NSEvent*)event
 {
     [super mouseExited:event];
-
-    self.image = self.fAlternativeImage;
-
     [self.torrentTableView hoverEventEndedForView:self];
 }
 
 - (void)mouseDown:(NSEvent*)event
 {
-    //when filterbar is shown, we need to remove focus otherwise action fails
     [self.window makeFirstResponder:self.torrentTableView];
-
     [super mouseDown:event];
 
-    BOOL minimal = [self.fDefaults boolForKey:@"SmallView"];
+    BOOL minimal = [NSUserDefaults.standardUserDefaults boolForKey:@"SmallView"];
     if (!minimal)
-    {
         [self.torrentTableView hoverEventEndedForView:self];
-    }
 }
 
 - (void)updateTrackingAreas
 {
-    if (self.fTrackingArea != nil)
+    [super updateTrackingAreas];
+    for (NSTrackingArea* area in self.trackingAreas)
     {
-        [self removeTrackingArea:self.fTrackingArea];
+        if (area.owner == self && (area.options & NSTrackingInVisibleRect))
+        {
+            [self removeTrackingArea:area];
+            break;
+        }
     }
-
-    NSTrackingAreaOptions opts = (NSTrackingMouseEnteredAndExited | NSTrackingActiveAlways);
-    self.fTrackingArea = [[NSTrackingArea alloc] initWithRect:self.bounds options:opts owner:self userInfo:nil];
-    [self addTrackingArea:self.fTrackingArea];
+    [self addTrackingArea:[[NSTrackingArea alloc] initWithRect:NSZeroRect
+                                                       options:NSTrackingMouseEnteredAndExited | NSTrackingActiveAlways | NSTrackingInVisibleRect
+                                                         owner:self
+                                                      userInfo:nil]];
 }
 
 @end

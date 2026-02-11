@@ -26,10 +26,7 @@ extern ToolbarItemIdentifier const ToolbarItemIdentifierShare;
 extern ToolbarItemIdentifier const ToolbarItemIdentifierSearch;
 extern ToolbarItemIdentifier const ToolbarItemIdentifierPlayRandomAudio;
 
-typedef NS_ENUM(NSUInteger, ToolbarGroupTag) {
-    ToolbarGroupTagPause = 0,
-    ToolbarGroupTagResume = 1
-};
+typedef NS_ENUM(NSUInteger, ToolbarGroupTag) { ToolbarGroupTagPause = 0, ToolbarGroupTagResume = 1 };
 
 typedef NSString* SortType NS_TYPED_EXTENSIBLE_ENUM;
 
@@ -55,10 +52,7 @@ typedef NS_ENUM(NSUInteger, SortTag) {
     SortTagETA = 8
 };
 
-typedef NS_ENUM(NSUInteger, SortOrderTag) {
-    SortOrderTagAscending = 0,
-    SortOrderTagDescending = 1
-};
+typedef NS_ENUM(NSUInteger, SortOrderTag) { SortOrderTagAscending = 0, SortOrderTagDescending = 1 };
 
 extern NSString* const kTorrentTableViewDataType;
 
