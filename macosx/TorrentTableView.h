@@ -33,6 +33,8 @@ extern CGFloat const kGroupSeparatorHeight;
 
 - (void)hoverEventBeganForView:(id)view;
 - (void)hoverEventEndedForView:(id)view;
+/// Refreshes one row's cell content (status, hover, buttons). Used when hover state changes within the row.
+- (void)refreshTorrentRowInPlace:(NSInteger)row;
 
 - (void)toggleGroupRowRatio;
 

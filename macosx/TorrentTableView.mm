@@ -578,8 +578,14 @@ extern char const kPlayButtonRepresentedKey = '\0';
     if (minimal)
     {
         torrentCell.fTorrentStatusField.stringValue = self.fDisplaySmallStatusRegular ? torrent.shortStatusString : torrent.remainingTimeString;
-        BOOL iconHover = self.fHoverEventDict && [self.fHoverEventDict[@"row"] integerValue] == row;
-        torrentCell.fActionButton.hidden = !iconHover;
+        BOOL rowHover = self.fHoverEventDict && [self.fHoverEventDict[@"row"] integerValue] == row;
+        BOOL iconHover = rowHover && [torrentCell isKindOfClass:[SmallTorrentCell class]] &&
+                         [(SmallTorrentCell*)torrentCell fIconHover];
+        torrentCell.fTorrentStatusField.hidden = rowHover;
+        torrentCell.fControlButton.hidden = !rowHover;
+        torrentCell.fRevealButton.hidden = !rowHover;
+        torrentCell.fURLButton.hidden = !rowHover || (torrent.commentURL == nil);
+        torrentCell.fActionButton.hidden = !rowHover;
         if (iconHover)
             torrentCell.fIconView.hidden = YES;
         else
@@ -1070,7 +1076,7 @@ extern char const kPlayButtonRepresentedKey = '\0';
     BOOL minimal = self.fSmallView;
     if (minimal)
     {
-        if (minimal && ![view isKindOfClass:[SmallTorrentCell class]])
+        if (![view isKindOfClass:[SmallTorrentCell class]])
         {
             if ([view isKindOfClass:[TorrentCellActionButton class]])
             {
@@ -1084,7 +1090,10 @@ extern char const kPlayButtonRepresentedKey = '\0';
     if (update)
     {
         [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(performDelayedHoverHide) object:nil];
-        [self performSelector:@selector(performDelayedHoverHide) withObject:nil afterDelay:kHoverHideDelay];
+        if (minimal)
+            [self performDelayedHoverHide];
+        else
+            [self performSelector:@selector(performDelayedHoverHide) withObject:nil afterDelay:kHoverHideDelay];
     }
 }
 
@@ -1298,6 +1307,17 @@ static void setPlayButtonFolderCache(NSButton* sender, id value)
     [torrent setFilePriority:TR_PRI_HIGH forIndexes:targetIndexes];
 }
 
+static BOOL openWithIINAIfAvailable(NSURL* fileURL)
+{
+    NSURL* iinaURL = [NSWorkspace.sharedWorkspace URLForApplicationWithBundleIdentifier:@"com.colliderli.iina"];
+    if (!iinaURL)
+        return NO;
+    NSWorkspaceOpenConfiguration* config = [NSWorkspaceOpenConfiguration configuration];
+    [NSWorkspace.sharedWorkspace openURLs:@[ fileURL ] withApplicationAtURL:iinaURL configuration:config
+                        completionHandler:nil];
+    return YES;
+}
+
 - (void)playMediaItem:(NSDictionary*)item forTorrent:(Torrent*)torrent
 {
     [self setHighPriorityForItem:item forTorrent:torrent];
@@ -1392,17 +1412,12 @@ static void setPlayButtonFolderCache(NSButton* sender, id value)
         }
     }
 
-    // CUE files: use IINA (handles cue+flac well)
-    if ([path.pathExtension.lowercaseString isEqualToString:@"cue"])
+    NSString* ext = path.pathExtension.lowercaseString;
+    // CUE and m4a: open in IINA when installed (CUE for cue+flac; m4a for consistent playback)
+    if ([ext isEqualToString:@"cue"] || [ext isEqualToString:@"m4a"])
     {
-        NSURL* iinaURL = [NSWorkspace.sharedWorkspace URLForApplicationWithBundleIdentifier:@"com.colliderli.iina"];
-        if (iinaURL)
-        {
-            NSWorkspaceOpenConfiguration* config = [NSWorkspaceOpenConfiguration configuration];
-            [NSWorkspace.sharedWorkspace openURLs:@[ fileURL ] withApplicationAtURL:iinaURL configuration:config
-                                completionHandler:nil];
+        if (openWithIINAIfAvailable(fileURL))
             return;
-        }
     }
 
     // File or fallback: open with default app
