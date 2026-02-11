@@ -35,9 +35,6 @@
 @property(nonatomic, readonly) NSMutableArray<PlayButton*>* fPlayButtonPool;
 @property(nonatomic, readonly) NSMutableArray<NSTextField*>* fHeaderPool;
 @property(nonatomic, readonly) NSMutableIndexSet* fPendingHeightRows;
-@property(nonatomic, readonly) NSCache<NSString*, FlowLayoutView*>* fFlowViewCache;
-@property(nonatomic, readonly) NSMutableArray* fPendingFlowConfigs;
-@property(nonatomic, readonly) NSMutableArray* fPendingFlowApplies;
 @property(nonatomic, weak) id fScrollViewPreviousDelegate;
 
 - (BOOL)showContentButtonsPref;
@@ -49,7 +46,7 @@
 - (BOOL)cellNeedsContentButtonsConfigForCell:(TorrentCell*)cell torrent:(Torrent*)torrent;
 - (void)configurePlayButtonsForCell:(TorrentCell*)cell torrent:(Torrent*)torrent;
 - (void)refreshPlayButtonStateForCell:(TorrentCell*)cell torrent:(Torrent*)torrent;
-- (void)scheduleConfigurePlayButtonsForCell:(TorrentCell*)cell torrent:(Torrent*)torrent;
+- (void)recycleFlowViewForCellReuse:(TorrentCell*)cell;
 - (void)recycleSubviewsFromFlowView:(FlowLayoutView*)flowView;
 - (void)updatePlayButtonProgressForCell:(TorrentCell*)cell torrent:(Torrent*)torrent;
 - (NSMutableArray<NSMutableDictionary*>*)playButtonStateForTorrent:(Torrent*)torrent;

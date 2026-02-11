@@ -2,7 +2,7 @@
 // It may be used under the MIT (SPDX: MIT) license.
 // License text can be found in the licenses/ folder.
 
-// Content buttons (flow view) lifecycle: config, apply, progress update. Keeps TorrentTableView under line limit.
+// Content buttons (flow view): synchronous config, no cache. Simple and reliable.
 
 #import "CocoaCompatibility.h"
 #import "FlowLayoutView.h"
@@ -13,7 +13,6 @@
 #import "TorrentTableView.h"
 #import "TorrentTableViewPrivate.h"
 #include <cmath>
-#import <QuartzCore/QuartzCore.h>
 #import <objc/runtime.h>
 
 static char const kFlowViewTorrentHashKey = '\0';
@@ -24,16 +23,6 @@ static CGFloat const kFlowPlayButtonRightMargin = 55.0;
 static CGFloat const kFlowPlayButtonRowHeight = 18.0;
 static CGFloat const kFlowPlayButtonVerticalPadding = 4.0;
 static NSTimeInterval const kHeightFlushDelay = 0.1;
-
-static dispatch_queue_t gFlowComputeQueue(void)
-{
-    static dispatch_queue_t q;
-    static dispatch_once_t once;
-    dispatch_once(&once, ^{
-        q = dispatch_queue_create("org.m0k.transmission.flowCompute", DISPATCH_QUEUE_CONCURRENT);
-    });
-    return q;
-}
 
 static void setFlowViewTorrentHash(FlowLayoutView* flowView, NSString* hash)
 {
@@ -46,26 +35,20 @@ static NSString* flowViewTorrentHash(FlowLayoutView* flowView)
     return [obj isKindOfClass:[NSString class]] ? (NSString*)obj : nil;
 }
 
-static NSDictionary* computeStateAndLayoutFromSnapshot(NSArray<NSDictionary*>* snapshot)
-{
-    return [PlayButtonStateBuilder stateAndLayoutFromSnapshot:snapshot];
-}
-
 @implementation TorrentTableView (Flow)
 
 - (BOOL)cellNeedsContentButtonsConfigForCell:(TorrentCell*)cell torrent:(Torrent*)torrent
 {
-    if (![self showContentButtonsPref])
-        return YES;
+    if (self.fSmallView || ![self showContentButtonsPref])
+        return NO;
     if (!cell.fPlayButtonsView)
         return YES;
     NSString* hash = torrent.hashString;
     if (![flowViewTorrentHash((FlowLayoutView*)cell.fPlayButtonsView) isEqualToString:hash])
         return YES;
-    NSArray* playable = torrent.playableFiles;
     FlowLayoutView* flowView = (FlowLayoutView*)cell.fPlayButtonsView;
-    NSUInteger buttonCount = [flowView arrangedSubviews].count;
-    if (playable.count > 0 && buttonCount == 0)
+    NSUInteger buttonCount = [flowView contentSubviews].count;
+    if (torrent.playableFiles.count > 0 && buttonCount == 0)
         return YES;
     return NO;
 }
@@ -93,11 +76,20 @@ static NSDictionary* computeStateAndLayoutFromSnapshot(NSArray<NSDictionary*>* s
     return MAX((CGFloat)200.0, availableWidth);
 }
 
+- (void)recycleFlowViewForCellReuse:(TorrentCell*)cell
+{
+    if (!cell.fPlayButtonsView)
+        return;
+    [self recycleSubviewsFromFlowView:(FlowLayoutView*)cell.fPlayButtonsView];
+    setFlowViewTorrentHash((FlowLayoutView*)cell.fPlayButtonsView, @"");
+    cell.fPlayButtonsSourceFiles = nil;
+}
+
 - (void)recycleSubviewsFromFlowView:(FlowLayoutView*)flowView
 {
     if (!flowView)
         return;
-    for (NSView* view in [flowView arrangedSubviews])
+    for (NSView* view in [flowView contentSubviews])
     {
         if ([view isKindOfClass:[PlayButton class]])
         {
@@ -145,38 +137,6 @@ static NSDictionary* computeStateAndLayoutFromSnapshot(NSArray<NSDictionary*>* s
         torrent.cachedPlayButtonsHeight = 0;
         [self queueHeightUpdateForRow:[self rowForItem:torrent]];
     }
-}
-
-- (void)attachCachedFlowView:(FlowLayoutView*)cached
-                      toCell:(TorrentCell*)cell
-                     torrent:(Torrent*)torrent
-               playableFiles:(NSArray*)playableFiles
-{
-    [cached removeFromSuperview];
-    // Insert at back so status/progress text is never obscured by play buttons (fix for new transfers).
-    NSView* refView = cell.subviews.firstObject ?: cell.fTorrentStatusField;
-    [cell addSubview:cached positioned:NSWindowBelow relativeTo:refView];
-    cell.fPlayButtonsView = cached;
-    cell.fPlayButtonsSourceFiles = playableFiles;
-    setFlowViewTorrentHash(cached, torrent.hashString);
-    CGFloat savedHeight = cached.lastLayoutHeight > 0 ? cached.lastLayoutHeight : 0;
-    cell.fPlayButtonsHeightConstraint = [cached.heightAnchor constraintEqualToConstant:savedHeight];
-    [NSLayoutConstraint activateConstraints:@[
-        [cached.leadingAnchor constraintEqualToAnchor:cell.fTorrentStatusField.leadingAnchor],
-        [cached.topAnchor constraintEqualToAnchor:cell.fTorrentStatusField.bottomAnchor constant:kFlowPlayButtonVerticalPadding],
-        [cached.trailingAnchor constraintEqualToAnchor:cell.trailingAnchor constant:-kFlowPlayButtonRightMargin],
-        cell.fPlayButtonsHeightConstraint
-    ]];
-    [self updatePlayButtonProgressForCell:cell torrent:torrent forceLayout:YES];
-    [cached layoutSubtreeIfNeeded];
-    [cell layoutSubtreeIfNeeded];
-    [CATransaction begin];
-    [CATransaction setDisableActions:YES];
-    cached.hidden = NO;
-    [CATransaction commit];
-    [cell setBackgroundStyle:cell.backgroundStyle];
-    [cached setNeedsDisplay:YES];
-    [cell setNeedsDisplay:YES];
 }
 
 - (FlowLayoutView*)newFlowViewAddedToCell:(TorrentCell*)cell
@@ -293,154 +253,10 @@ static NSDictionary* computeStateAndLayoutFromSnapshot(NSArray<NSDictionary*>* s
     [self.fPendingHeightRows removeAllIndexes];
 }
 
-/// When async apply is skipped because the cell was reused (e.g. during scroll), the row that displays this torrent has a different cell that never got buttons. Scheduling config for that cell fixes missing buttons. Do not remove this re-schedule or buttons will disappear in some rows while scrolling.
-- (void)scheduleConfigurePlayButtonsForTorrentIfNeeded:(Torrent*)torrent
-{
-    if (!torrent || ![self showContentButtonsPref] || torrent.playableFiles.count == 0)
-        return;
-    NSInteger row = [self rowForItem:torrent];
-    if (row < 0)
-        return;
-    NSView* cellView = [self viewAtColumn:0 row:row makeIfNecessary:NO];
-    if (![cellView isKindOfClass:[TorrentCell class]])
-        return;
-    TorrentCell* cell = (TorrentCell*)cellView;
-    if ([self cellNeedsContentButtonsConfigForCell:cell torrent:torrent])
-        [self scheduleConfigurePlayButtonsForCell:cell torrent:torrent];
-}
-
-- (void)scheduleConfigurePlayButtonsForCell:(TorrentCell*)cell torrent:(Torrent*)torrent
-{
-    NSString* hash = torrent.hashString;
-    __weak TorrentCell* weakCell = cell;
-    __weak Torrent* weakTorrent = torrent;
-    __weak TorrentTableView* weakSelf = self;
-    void (^block)(void) = ^{
-        TorrentCell* c = weakCell;
-        Torrent* t = weakTorrent;
-        TorrentTableView* tv = weakSelf;
-        if (!c || !t || !tv)
-            return;
-        if ([c.fTorrentHash isEqualToString:hash])
-            [tv configurePlayButtonsForCell:c torrent:t];
-    };
-    [self.fPendingFlowConfigs addObject:block];
-    if (self.fPendingFlowConfigs.count == 1)
-        dispatch_async(dispatch_get_main_queue(), ^{
-            [self drainOneFlowConfig];
-        });
-}
-
-- (void)drainOneFlowConfig
-{
-    if (self.fPendingFlowConfigs.count == 0)
-        return;
-    void (^block)(void) = self.fPendingFlowConfigs.firstObject;
-    [self.fPendingFlowConfigs removeObjectAtIndex:0];
-    block();
-    if (self.fPendingFlowConfigs.count > 0)
-        dispatch_async(dispatch_get_main_queue(), ^{
-            [self drainOneFlowConfig];
-        });
-}
-
-- (void)drainOneFlowApply
-{
-    if (self.fPendingFlowApplies.count == 0)
-        return;
-    void (^block)(void) = self.fPendingFlowApplies.firstObject;
-    [self.fPendingFlowApplies removeObjectAtIndex:0];
-    block();
-    if (self.fPendingFlowApplies.count > 0)
-        dispatch_async(dispatch_get_main_queue(), ^{
-            [self drainOneFlowApply];
-        });
-}
-
-- (void)applyFlowStateToCell:(TorrentCell*)cell
-                     torrent:(Torrent*)torrent
-                       state:(NSArray<NSDictionary*>*)state
-                      layout:(NSArray<NSDictionary*>*)layout
-               playableFiles:(NSArray<NSDictionary*>*)playableFiles
-{
-    NSString* currentHash = torrent.hashString;
-    torrent.cachedPlayButtonSource = playableFiles;
-    torrent.cachedPlayButtonState = (NSMutableArray<NSMutableDictionary*>*)state;
-    torrent.cachedPlayButtonLayout = layout;
-    torrent.cachedPlayButtonProgressGeneration = torrent.statsGeneration;
-
-    if (layout.count == 0)
-    {
-        cell.fPlayButtonsSourceFiles = playableFiles;
-        [self hideFlowViewAndResetRowHeightForCell:cell torrent:torrent];
-        return;
-    }
-    FlowLayoutView* existingFlowView = (FlowLayoutView*)cell.fPlayButtonsView;
-    BOOL flowViewMatchesTorrent = existingFlowView && [flowViewTorrentHash(existingFlowView) isEqualToString:currentHash];
-    BOOL const sameSource = (cell.fPlayButtonsSourceFiles == playableFiles);
-    BOOL const hasLayout = (layout.count > 0);
-    BOOL const hasExistingButtons = existingFlowView && [existingFlowView arrangedSubviews].count > 0;
-
-    if (cell.fPlayButtonsView && [cell.fTorrentHash isEqualToString:currentHash] && flowViewMatchesTorrent && sameSource &&
-        (!hasLayout || hasExistingButtons))
-    {
-        [CATransaction begin];
-        [CATransaction setDisableActions:YES];
-        cell.fPlayButtonsView.hidden = NO;
-        [CATransaction commit];
-        CGFloat const availableWidth = [self playButtonsAvailableWidthForCell:cell];
-        BOOL const widthChanged = std::fabs(availableWidth - torrent.cachedPlayButtonsWidth) > 5.0;
-        [self updatePlayButtonProgressForCell:cell torrent:torrent forceLayout:widthChanged];
-        return;
-    }
-    if (existingFlowView && !flowViewMatchesTorrent)
-    {
-        NSString* existingHash = flowViewTorrentHash(existingFlowView);
-        if (existingHash.length > 0 && [existingFlowView arrangedSubviews].count > 0)
-            [self.fFlowViewCache setObject:existingFlowView forKey:existingHash];
-        [existingFlowView removeFromSuperview];
-        cell.fPlayButtonsView = nil;
-        cell.fPlayButtonsHeightConstraint = nil;
-        cell.fPlayButtonsSourceFiles = nil;
-        existingFlowView = nil;
-    }
-    FlowLayoutView* flowView = (FlowLayoutView*)cell.fPlayButtonsView;
-    if (flowView)
-    {
-        // Hide during subview recycling to avoid momentary black rectangle while
-        // the layer-backed view has no children (regression fix for scroll artifacts).
-        flowView.hidden = YES;
-        [self recycleSubviewsFromFlowView:flowView];
-    }
-    else
-        flowView = [self newFlowViewAddedToCell:cell];
-    setFlowViewTorrentHash(flowView, currentHash);
-    cell.fPlayButtonsSourceFiles = playableFiles;
-    if (layout.count > 0)
-    {
-        for (NSDictionary* entry in layout)
-            [self addPlayButtonLayoutEntry:entry toFlowView:flowView torrent:torrent];
-        [flowView finishBatchUpdates];
-    }
-    if (layout.count > 0)
-        [self.fFlowViewCache setObject:flowView forKey:currentHash];
-    [self updatePlayButtonProgressForCell:cell torrent:torrent forceLayout:YES];
-    // Layout before revealing so buttons have final frames when shown (avoids blank-then-expand flicker on scroll).
-    [flowView layoutSubtreeIfNeeded];
-    [cell layoutSubtreeIfNeeded];
-    // Disable implicit layer animations to avoid odd expand/flicker when revealing.
-    [CATransaction begin];
-    [CATransaction setDisableActions:YES];
-    flowView.hidden = NO;
-    [CATransaction commit];
-    [cell setBackgroundStyle:cell.backgroundStyle];
-    [flowView setNeedsDisplay:YES];
-    [cell setNeedsDisplay:YES];
-}
-
+/// Configures play buttons for a cell. Synchronous and simple.
 - (void)configurePlayButtonsForCell:(TorrentCell*)cell torrent:(Torrent*)torrent
 {
-    if (![self showContentButtonsPref])
+    if (self.fSmallView || ![self showContentButtonsPref])
     {
         [self clearFlowViewFromCell:cell];
         return;
@@ -453,74 +269,44 @@ static NSDictionary* computeStateAndLayoutFromSnapshot(NSArray<NSDictionary*>* s
     }
     NSString* currentHash = torrent.hashString;
     if (cell.fPlayButtonsView && cell.fTorrentHash.length > 0 && ![cell.fTorrentHash isEqualToString:currentHash])
-    {
-        FlowLayoutView* evicted = (FlowLayoutView*)cell.fPlayButtonsView;
-        if ([evicted arrangedSubviews].count > 0)
-            [self.fFlowViewCache setObject:evicted forKey:cell.fTorrentHash];
         [self clearFlowViewFromCell:cell];
-    }
-    FlowLayoutView* cached = [self.fFlowViewCache objectForKey:currentHash];
-    if (cached)
-    {
-        [self.fFlowViewCache removeObjectForKey:currentHash];
-        NSString* cachedHash = flowViewTorrentHash(cached);
-        if (cachedHash.length > 0 && ![cachedHash isEqualToString:currentHash])
-        {
-            [self.fFlowViewCache setObject:cached forKey:cachedHash];
-            cached = nil;
-        }
-        else if ([cached arrangedSubviews].count == 0)
-            cached = nil;
-    }
-    if (cached)
-    {
-        [self attachCachedFlowView:cached toCell:cell torrent:torrent playableFiles:playableFiles];
-        return;
-    }
+
+    FlowLayoutView* flowView = (FlowLayoutView*)cell.fPlayButtonsView;
+    if (!flowView)
+        flowView = [self newFlowViewAddedToCell:cell];
+
+    [flowView removeAllArrangedSubviews];
+    setFlowViewTorrentHash(flowView, currentHash);
+    cell.fPlayButtonsSourceFiles = playableFiles;
+
     NSDictionary* snapshotDict = [self buildFlowSnapshotForTorrent:torrent];
     if (!snapshotDict)
         return;
     NSArray* snapshot = snapshotDict[@"snapshot"];
     NSArray* playableFilesForApply = snapshotDict[@"playableFiles"];
-    __weak TorrentCell* weakCell = cell;
-    __weak Torrent* weakTorrent = torrent;
-    __weak TorrentTableView* weakSelf = self;
-    NSString* hashForApply = currentHash;
-    dispatch_async(gFlowComputeQueue(), ^{
-        NSDictionary* result = computeStateAndLayoutFromSnapshot(snapshot);
-        NSMutableArray* state = result[@"state"];
-        NSArray* layout = result[@"layout"];
-        dispatch_async(dispatch_get_main_queue(), ^{
-            TorrentCell* c = weakCell;
-            Torrent* t = weakTorrent;
-            TorrentTableView* tv = weakSelf;
-            if (!c || !t || !tv)
-                return;
-            if (![c.fTorrentHash isEqualToString:hashForApply])
-            {
-                [tv scheduleConfigurePlayButtonsForTorrentIfNeeded:t];
-                return;
-            }
-            NSMutableArray* mutableState = (NSMutableArray*)state;
-            [PlayButtonStateBuilder enrichStateWithIinaUnwatched:mutableState forTorrent:t];
-            __weak TorrentTableView* weakTv = tv;
-            [tv.fPendingFlowApplies addObject:^{
-                TorrentTableView* strongTv = weakTv;
-                if (!strongTv)
-                    return;
-                if (![c.fTorrentHash isEqualToString:t.hashString])
-                {
-                    [strongTv scheduleConfigurePlayButtonsForTorrentIfNeeded:t];
-                    return;
-                }
-                [strongTv applyFlowStateToCell:c torrent:t state:mutableState layout:layout playableFiles:playableFilesForApply];
-            }];
-            if (tv.fPendingFlowApplies.count == 1)
-                dispatch_async(dispatch_get_main_queue(), ^{
-                    [tv drainOneFlowApply];
-                });
-        });
-    });
+    NSDictionary* result = [PlayButtonStateBuilder stateAndLayoutFromSnapshot:snapshot];
+    NSMutableArray* state = result[@"state"];
+    NSArray* layout = result[@"layout"];
+    [PlayButtonStateBuilder enrichStateWithIinaUnwatched:state forTorrent:torrent];
+
+    torrent.cachedPlayButtonSource = playableFilesForApply;
+    torrent.cachedPlayButtonState = state;
+    torrent.cachedPlayButtonLayout = layout;
+    torrent.cachedPlayButtonProgressGeneration = torrent.statsGeneration;
+
+    if (layout.count == 0)
+    {
+        [self hideFlowViewAndResetRowHeightForCell:cell torrent:torrent];
+        return;
+    }
+    for (NSDictionary* entry in layout)
+        [self addPlayButtonLayoutEntry:entry toFlowView:flowView torrent:torrent];
+    [flowView finishBatchUpdates];
+    [self updatePlayButtonProgressForCell:cell torrent:torrent forceLayout:YES];
+    flowView.hidden = NO;
+    [cell setBackgroundStyle:cell.backgroundStyle];
+    [flowView setNeedsDisplay:YES];
+    [cell setNeedsDisplay:YES];
 }
 
 - (void)addPlayButtonLayoutEntry:(NSDictionary*)entry toFlowView:(FlowLayoutView*)flowView torrent:(Torrent*)torrent
@@ -543,10 +329,12 @@ static NSDictionary* computeStateAndLayoutFromSnapshot(NSArray<NSDictionary*>* s
 
 - (void)refreshPlayButtonStateForCell:(TorrentCell*)cell torrent:(Torrent*)torrent
 {
+    if (self.fSmallView || ![self showContentButtonsPref])
+        return;
     if (cell.fPlayButtonsView)
         [self updatePlayButtonProgressForCell:cell torrent:torrent];
-    else if ([self showContentButtonsPref] && torrent.playableFiles.count > 0)
-        [self scheduleConfigurePlayButtonsForCell:cell torrent:torrent];
+    else if (torrent.playableFiles.count > 0)
+        [self configurePlayButtonsForCell:cell torrent:torrent];
 }
 
 - (void)updatePlayButtonProgressForCell:(TorrentCell*)cell torrent:(Torrent*)torrent
@@ -583,14 +371,14 @@ static NSDictionary* computeStateAndLayoutFromSnapshot(NSArray<NSDictionary*>* s
         }
     }
     NSUInteger playButtonCount = 0;
-    for (NSView* v in [flowView arrangedSubviews])
+    for (NSView* v in [flowView contentSubviews])
     {
         if ([v isKindOfClass:[PlayButton class]])
             playButtonCount++;
     }
     if (anyVisible && playButtonCount == 0)
     {
-        [self scheduleConfigurePlayButtonsForCell:cell torrent:torrent];
+        [self configurePlayButtonsForCell:cell torrent:torrent];
         return;
     }
     NSInteger row = [self rowForItem:torrent];
@@ -614,7 +402,7 @@ static NSDictionary* computeStateAndLayoutFromSnapshot(NSArray<NSDictionary*>* s
     Class const playButtonClass = [PlayButton class];
     Class const textFieldClass = [NSTextField class];
 
-    for (NSView* view in [flowView arrangedSubviews])
+    for (NSView* view in [flowView contentSubviews])
     {
         if ([view isKindOfClass:textFieldClass])
         {

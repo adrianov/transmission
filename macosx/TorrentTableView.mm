@@ -84,13 +84,6 @@ extern char const kPlayButtonRepresentedKey = '\0';
         _fHeaderPool = [[NSMutableArray alloc] init];
         _fPendingHeightRows = [[NSMutableIndexSet alloc] init];
 
-        _fFlowViewCache = [[NSCache alloc] init];
-        // Preserve flow views per torrent so rows keep content when scrolling off and back (no full redraw).
-        _fFlowViewCache.countLimit = 150;
-
-        _fPendingFlowConfigs = [[NSMutableArray alloc] init];
-        _fPendingFlowApplies = [[NSMutableArray alloc] init];
-
         self.style = NSTableViewStyleFullWidth;
     }
 
@@ -113,10 +106,9 @@ extern char const kPlayButtonRepresentedKey = '\0';
         if (contentView)
         {
             contentView.postsBoundsChangedNotifications = YES;
-            [NSNotificationCenter.defaultCenter addObserver:self
-                                                     selector:@selector(scrollViewBoundsDidChange:)
-                                                         name:NSViewBoundsDidChangeNotification
-                                                       object:contentView];
+            [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(scrollViewBoundsDidChange:)
+                                                       name:NSViewBoundsDidChangeNotification
+                                                     object:contentView];
         }
     }
 
@@ -265,27 +257,30 @@ extern char const kPlayButtonRepresentedKey = '\0';
     }];
 }
 
-/// Schedules content button config for each visible torrent row that still needs it (e.g. after scroll).
-/// Call when scroll ends so rows that got an empty flow view get buttons populated.
+/// Configures content buttons for each visible torrent row that still needs it (e.g. after scroll).
 - (void)ensureContentButtonsForVisibleRows
 {
+    if (self.fSmallView || ![self showContentButtonsPref])
+        return;
     NSIndexSet* visible = [self visibleRowIndexSet];
     [visible enumerateIndexesUsingBlock:^(NSUInteger row, BOOL*) {
         id item = [self itemAtRow:row];
         if (![item isKindOfClass:[Torrent class]])
             return;
-        NSView* cellView = [self viewAtColumn:0 row:row makeIfNecessary:NO];
+        NSView* cellView = [self viewAtColumn:0 row:row makeIfNecessary:YES];
         if (![cellView isKindOfClass:[TorrentCell class]])
             return;
         TorrentCell* cell = (TorrentCell*)cellView;
         Torrent* torrent = (Torrent*)item;
         if ([self cellNeedsContentButtonsConfigForCell:cell torrent:torrent])
-            [self scheduleConfigurePlayButtonsForCell:cell torrent:torrent];
+            [self configurePlayButtonsForCell:cell torrent:torrent];
     }];
 }
 
 - (void)scrollViewBoundsDidChange:(NSNotification*)notification
 {
+    if (self.fSmallView || ![self showContentButtonsPref])
+        return;
     [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(ensureContentButtonsAfterScrollSettled) object:nil];
     [self performSelector:@selector(ensureContentButtonsAfterScrollSettled) withObject:nil afterDelay:kScrollSettleDelay];
 }
@@ -297,7 +292,8 @@ extern char const kPlayButtonRepresentedKey = '\0';
 
 - (void)scrollViewDidEndLiveScroll:(id)scrollView
 {
-    [self ensureContentButtonsForVisibleRows];
+    if (!self.fSmallView && [self showContentButtonsPref])
+        [self ensureContentButtonsForVisibleRows];
     id prev = self.fScrollViewPreviousDelegate;
     if ([prev respondsToSelector:@selector(scrollViewDidEndLiveScroll:)])
         [prev scrollViewDidEndLiveScroll:scrollView];
@@ -312,7 +308,7 @@ extern char const kPlayButtonRepresentedKey = '\0';
         {
             TorrentCell* cell = [self viewAtColumn:0 row:row makeIfNecessary:NO];
             if ([cell isKindOfClass:[TorrentCell class]])
-                [self resetControlButtonForTorrentCell:cell];
+                [self resetContentButtonsForTorrentCell:cell];
         }
     }];
 }
@@ -415,17 +411,11 @@ extern char const kPlayButtonRepresentedKey = '\0';
             BOOL const sameTorrentFull = [torrentCell.fTorrentHash isEqualToString:torrentHash];
 
             if (!sameTorrentFull && torrentCell.fPlayButtonsView)
-            {
-                [self recycleSubviewsFromFlowView:(FlowLayoutView*)torrentCell.fPlayButtonsView];
-                [torrentCell.fPlayButtonsView removeFromSuperview];
-                torrentCell.fPlayButtonsView = nil;
-                torrentCell.fPlayButtonsSourceFiles = nil;
-                torrentCell.fPlayButtonsHeightConstraint = nil;
-            }
+                [self recycleFlowViewForCellReuse:torrentCell];
             if (!sameTorrentFull)
                 torrentCell.fTorrentHash = torrentHash;
             if ([self cellNeedsContentButtonsConfigForCell:torrentCell torrent:torrent])
-                [self scheduleConfigurePlayButtonsForCell:torrentCell torrent:torrent];
+                [self configurePlayButtonsForCell:torrentCell torrent:torrent];
 
             // Static content - only update when torrent changes
             if (!sameTorrentFull)
@@ -473,11 +463,9 @@ extern char const kPlayButtonRepresentedKey = '\0';
 
             torrentCell.fURLButton.hidden = (torrent.commentURL == nil);
             torrentCell.fTorrentStatusField.hidden = NO;
-            torrentCell.fControlButton.hidden = NO;
-            torrentCell.fRevealButton.hidden = NO;
             torrentCell.fIconView.hidden = NO;
-
             [self applyDynamicContentToTorrentCell:torrentCell torrent:torrent row:[self rowForItem:item]];
+            [self resetContentButtonsForTorrentCell:torrentCell];
         }
 
         torrentCell.fTorrentTableView = self;
@@ -608,6 +596,7 @@ extern char const kPlayButtonRepresentedKey = '\0';
     if (self.fHoverEventDict && [self.fHoverEventDict[@"row"] integerValue] == row)
     {
         torrentCell.fTorrentStatusField.hidden = YES;
+        torrentCell.fActionButton.hidden = NO;
         torrentCell.fControlButton.hidden = NO;
         torrentCell.fRevealButton.hidden = NO;
         torrentCell.fURLButton.hidden = (torrent.commentURL == nil);
@@ -615,20 +604,24 @@ extern char const kPlayButtonRepresentedKey = '\0';
     else
     {
         torrentCell.fTorrentStatusField.hidden = NO;
-        if (minimal)
-        {
-            torrentCell.fControlButton.hidden = YES;
-            torrentCell.fRevealButton.hidden = YES;
-            torrentCell.fURLButton.hidden = YES;
-        }
+        torrentCell.fActionButton.hidden = YES;
+        torrentCell.fControlButton.hidden = YES;
+        torrentCell.fRevealButton.hidden = YES;
+        torrentCell.fURLButton.hidden = YES;
     }
 }
 
-/// Resets the control button image for a torrent cell. Used after content updates so play/pause icon is correct.
-- (void)resetControlButtonForTorrentCell:(TorrentCell*)cell
+/// Resets content button images when cell is configured. Ensures correct state after scroll/reuse.
+- (void)resetContentButtonsForTorrentCell:(TorrentCell*)cell
 {
-    if ([cell isKindOfClass:[TorrentCell class]] && cell.fControlButton)
+    if (![cell isKindOfClass:[TorrentCell class]])
+        return;
+    if (cell.fControlButton)
         [(TorrentCellControlButton*)cell.fControlButton resetImage];
+    if ([cell.fRevealButton isKindOfClass:[TorrentCellRevealButton class]])
+        [(TorrentCellRevealButton*)cell.fRevealButton resetImage];
+    if ([cell.fURLButton isKindOfClass:[TorrentCellURLButton class]])
+        [(TorrentCellURLButton*)cell.fURLButton resetImage];
 }
 
 /// Updates one torrent row's cell in place (status, hover, control button, play button colors). Avoids reloadDataForRowIndexes so the flow view is not re-requested.
@@ -643,7 +636,7 @@ extern char const kPlayButtonRepresentedKey = '\0';
         return;
     TorrentCell* cell = (TorrentCell*)cellView;
     [self applyDynamicContentToTorrentCell:cell torrent:torrent row:row];
-    [self resetControlButtonForTorrentCell:cell];
+    [self resetContentButtonsForTorrentCell:cell];
     [self refreshPlayButtonStateForCell:cell torrent:torrent];
     [cell setNeedsDisplay:YES];
 }
