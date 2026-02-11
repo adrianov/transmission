@@ -28,13 +28,15 @@
     BOOL _layoutDirty;
     CGFloat _lastLayoutWidth;
     CGFloat _lastLayoutHeight;
+    NSStackView* _verticalStack;
+    NSMutableArray<NSStackView*>* _rowStacks;
 }
 
 - (instancetype)initWithFrame:(NSRect)frameRect
 {
     if (self = [super initWithFrame:frameRect])
     {
-        self.translatesAutoresizingMaskIntoConstraints = NO; // Required for Auto Layout
+        self.translatesAutoresizingMaskIntoConstraints = NO;
         self.wantsLayer = YES;
         self.layerContentsRedrawPolicy = NSViewLayerContentsRedrawOnSetNeedsDisplay;
 
@@ -47,6 +49,15 @@
         _layoutDirty = YES;
         _lastLayoutWidth = 0;
         _lastLayoutHeight = 0;
+        _rowStacks = [NSMutableArray array];
+
+        _verticalStack = [[NSStackView alloc] init];
+        _verticalStack.translatesAutoresizingMaskIntoConstraints = NO;
+        _verticalStack.orientation = NSUserInterfaceLayoutOrientationVertical;
+        _verticalStack.alignment = NSLayoutAttributeLeading;
+        _verticalStack.distribution = NSStackViewDistributionGravityAreas;
+        _verticalStack.spacing = 4;
+        [self addSubview:_verticalStack];
     }
     return self;
 }
@@ -128,10 +139,15 @@
         return;
 
     for (NSView* view in _arrangedSubviews)
-    {
         [view removeFromSuperview];
-    }
     [_arrangedSubviews removeAllObjects];
+    for (NSStackView* rowStack in _rowStacks)
+    {
+        for (NSView* v in [rowStack.arrangedSubviews copy])
+            [rowStack removeArrangedSubview:v];
+    }
+    for (NSView* v in [_verticalStack.arrangedSubviews copy])
+        [_verticalStack removeArrangedSubview:v];
     [_cachedSizes removeAllObjects];
     _visibleCacheValid = NO;
     _layoutDirty = YES;
@@ -159,12 +175,9 @@
 {
     [super layout];
     CGFloat width = self.bounds.size.width;
-    // Regression: new partial-transfer rows can get flow view with bounds.width still 0 when async
-    // apply runs; layoutSubviewsForWidth then skips and buttons keep zero frame, so they don't
-    // receive hits. Use superview width so buttons get valid frames and remain clickable.
     if (width <= 0 && self.superview)
         width = self.superview.bounds.size.width;
-    [self layoutSubviewsForWidth:width];
+    [self syncStackRowsForWidth:width];
 }
 
 - (NSSize)sizeForView:(NSView*)view
@@ -212,12 +225,12 @@
     return _visibleSubviewsCache;
 }
 
-/// Partitions visible subviews into rows: each row is a horizontal list of views; line breaks and width wrap start a new row.
+/// Partitions visible subviews into rows by flow: left-to-right until width overflows, then next row. Line breaks force new row.
 - (NSArray<NSArray<NSView*>*>*)rowsForWidth:(CGFloat)availableWidth
 {
     NSMutableArray<NSArray<NSView*>*>* rows = [NSMutableArray array];
     NSMutableArray<NSView*>* currentRow = [NSMutableArray array];
-    CGFloat rowX = 0;
+    CGFloat currentX = 0;
 
     for (NSView* view in [self visibleArrangedSubviews])
     {
@@ -228,21 +241,20 @@
                 [rows addObject:[currentRow copy]];
                 [currentRow removeAllObjects];
             }
-            rowX = 0;
+            currentX = 0;
             continue;
         }
-
-        NSSize size = [self sizeForView:view];
-        size.width = MIN(size.width, availableWidth);
-        BOOL wrap = currentRow.count > 0 && rowX + size.width > availableWidth;
-        if (wrap)
+        CGFloat w = [self sizeForView:view].width;
+        BOOL overflow = (currentX + w > availableWidth + 0.001) && currentRow.count > 0;
+        BOOL atCap = _maximumColumnCount > 0 && currentRow.count >= _maximumColumnCount;
+        if ((overflow || atCap) && currentRow.count > 0)
         {
             [rows addObject:[currentRow copy]];
             [currentRow removeAllObjects];
-            rowX = 0;
+            currentX = 0;
         }
         [currentRow addObject:view];
-        rowX += size.width + _horizontalSpacing;
+        currentX += w + _horizontalSpacing;
     }
     if (currentRow.count > 0)
         [rows addObject:currentRow];
@@ -250,44 +262,75 @@
     return rows;
 }
 
-- (void)layoutSubviewsForWidth:(CGFloat)availableWidth
+/// Syncs row stacks with rowsForWidth and lets NSStackView handle layout.
+- (void)syncStackRowsForWidth:(CGFloat)availableWidth
 {
     if (availableWidth <= 0)
         return;
     if (!_layoutDirty && std::fabs(availableWidth - _lastLayoutWidth) < 0.001)
         return;
 
-    NSArray<NSArray<NSView*>*>* rows = [self rowsForWidth:availableWidth];
-    CGFloat y = 0;
+    NSRect bounds = self.bounds;
+    if (!NSEqualRects(_verticalStack.frame, bounds))
+        _verticalStack.frame = bounds;
+    if (std::fabs(_verticalStack.spacing - _verticalSpacing) > 0.001)
+        _verticalStack.spacing = _verticalSpacing;
 
+    NSArray<NSArray<NSView*>*>* rows = [self rowsForWidth:availableWidth];
+    while (_rowStacks.count < rows.count)
+    {
+        NSStackView* rowStack = [[NSStackView alloc] init];
+        rowStack.orientation = NSUserInterfaceLayoutOrientationHorizontal;
+        rowStack.alignment = NSLayoutAttributeCenterY;
+        rowStack.distribution = NSStackViewDistributionGravityAreas;
+        rowStack.spacing = _horizontalSpacing;
+        [_rowStacks addObject:rowStack];
+    }
+    NSUInteger r = 0;
     for (NSArray<NSView*>* row in rows)
     {
-        CGFloat x = 0;
-        CGFloat rowHeight = 0;
-        for (NSView* view in row)
+        NSStackView* rowStack = _rowStacks[r++];
+        if (![rowStack.arrangedSubviews isEqualToArray:row])
         {
-            NSSize size = [self sizeForView:view];
-            size.width = MIN(size.width, availableWidth);
-            view.frame = NSMakeRect(x, y, size.width, size.height);
-            x += size.width + _horizontalSpacing;
-            rowHeight = MAX(rowHeight, size.height);
+            for (NSView* v in [rowStack.arrangedSubviews copy])
+            {
+                [rowStack removeArrangedSubview:v];
+                [self addSubview:v];
+            }
+            for (NSView* v in row)
+            {
+                [v removeFromSuperview];
+                [rowStack addArrangedSubview:v];
+            }
         }
-        y += rowHeight + _verticalSpacing;
+    }
+    for (NSUInteger i = rows.count; i < _rowStacks.count; i++)
+    {
+        NSStackView* rowStack = _rowStacks[i];
+        for (NSView* v in [rowStack.arrangedSubviews copy])
+        {
+            [rowStack removeArrangedSubview:v];
+            [self addSubview:v];
+        }
+    }
+    // Vertical stack must show first row at top: arranged order = _rowStacks[0], _rowStacks[1], ...
+    NSArray* currentStacks = _verticalStack.arrangedSubviews;
+    BOOL orderMatches = currentStacks.count == rows.count;
+    if (orderMatches)
+        for (NSUInteger i = 0; i < rows.count; i++)
+            if (currentStacks[i] != _rowStacks[i])
+            {
+                orderMatches = NO;
+                break;
+            }
+    if (!orderMatches)
+    {
+        for (NSView* v in currentStacks)
+            [v removeFromSuperview];
+        for (NSUInteger i = 0; i < rows.count; i++)
+            [_verticalStack addArrangedSubview:_rowStacks[i]];
     }
 
-    _lastLayoutHeight = rows.count > 0 ? y - _verticalSpacing : 0;
-    _layoutDirty = NO;
-    _lastLayoutWidth = availableWidth;
-}
-
-- (CGFloat)heightForWidth:(CGFloat)availableWidth
-{
-    if (availableWidth <= 0)
-        return 0;
-    if (!_layoutDirty && std::fabs(availableWidth - _lastLayoutWidth) < 0.001)
-        return _lastLayoutHeight;
-
-    NSArray<NSArray<NSView*>*>* rows = [self rowsForWidth:availableWidth];
     CGFloat y = 0;
     for (NSArray<NSView*>* row in rows)
     {
@@ -296,8 +339,33 @@
             rowHeight = MAX(rowHeight, [self sizeForView:view].height);
         y += rowHeight + _verticalSpacing;
     }
-    _lastLayoutWidth = availableWidth;
     _lastLayoutHeight = rows.count > 0 ? y - _verticalSpacing : 0;
+    _layoutDirty = NO;
+    _lastLayoutWidth = availableWidth;
+}
+
+- (CGFloat)lastLayoutHeight
+{
+    return _lastLayoutHeight;
+}
+
+- (CGFloat)lastLayoutWidth
+{
+    return _lastLayoutWidth;
+}
+
+- (BOOL)hasValidLayoutForWidth:(CGFloat)width
+{
+    return !_layoutDirty && width > 0 && std::fabs(width - _lastLayoutWidth) < 0.001;
+}
+
+- (CGFloat)heightForWidth:(CGFloat)availableWidth
+{
+    if (availableWidth <= 0)
+        return 0;
+    if (!_layoutDirty && std::fabs(availableWidth - _lastLayoutWidth) < 0.001)
+        return _lastLayoutHeight;
+    [self syncStackRowsForWidth:availableWidth];
     return _lastLayoutHeight;
 }
 
@@ -305,13 +373,11 @@
 {
     BOOL hasVisible = NO;
     for (NSView* view in [self visibleArrangedSubviews])
-    {
-        if (!view.hidden && ![view isKindOfClass:[FlowLineBreak class]])
+        if (![view isKindOfClass:[FlowLineBreak class]])
         {
             hasVisible = YES;
             break;
         }
-    }
     if (!hasVisible)
         return NSMakeSize(NSViewNoIntrinsicMetric, 0);
 

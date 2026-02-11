@@ -4,14 +4,16 @@
 
 #import <AppKit/AppKit.h>
 
-/// A view that arranges its subviews as a vertical stack of horizontal rows (left to right, wrapping or line breaks start a new row).
-/// Buttons size to their content with minimum padding.
+/// Arranges subviews as a vertical stack of horizontal stacks (rows). Line breaks force a new row;
+/// otherwise items fill rows left-to-right and wrap when width is exceeded. Layout is done by NSStackView.
 @interface FlowLayoutView : NSView
 
 @property(nonatomic) CGFloat horizontalSpacing;
 @property(nonatomic) CGFloat verticalSpacing;
 /// Minimum width for buttons (default 50)
 @property(nonatomic) CGFloat minimumButtonWidth;
+/// Max items per row (0 = no cap)
+@property(nonatomic) NSUInteger maximumColumnCount;
 
 - (void)addArrangedSubview:(NSView*)view;
 - (void)addArrangedSubviewBatched:(NSView*)view;
@@ -22,6 +24,11 @@
 
 /// Returns height for given width. Uses cached sizes for subviews.
 - (CGFloat)heightForWidth:(CGFloat)width;
+/// Last computed height (valid when layout not dirty and width matches lastLayoutWidth). Use to avoid redraw when reusing.
+@property(nonatomic, readonly) CGFloat lastLayoutHeight;
+@property(nonatomic, readonly) CGFloat lastLayoutWidth;
+/// YES when lastLayoutHeight can be used for this width without recomputing (avoids layout/redraw).
+- (BOOL)hasValidLayoutForWidth:(CGFloat)width;
 
 /// Removes all arranged subviews efficiently.
 - (void)removeAllArrangedSubviews;
