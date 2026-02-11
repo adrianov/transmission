@@ -584,8 +584,23 @@ static BOOL isResolutionOnlyTitle(NSString* s)
     static dispatch_once_t once;
     dispatch_once(&once, ^{
         resolutionTags = [NSSet setWithArray:@[
-            @"1080p", @"720p", @"480p", @"2160p", @"1920p", @"4K", @"8K", @"UHD",
-            @"DVD5", @"DVD9", @"DVD", @"BD25", @"BD50", @"BD66", @"BD100", @"XviD", @"DivX"
+            @"1080p",
+            @"720p",
+            @"480p",
+            @"2160p",
+            @"1920p",
+            @"4K",
+            @"8K",
+            @"UHD",
+            @"DVD5",
+            @"DVD9",
+            @"DVD",
+            @"BD25",
+            @"BD50",
+            @"BD66",
+            @"BD100",
+            @"XviD",
+            @"DivX"
         ]];
     });
     return [resolutionTags containsObject:t] || [resolutionTags containsObject:t.lowercaseString];
@@ -626,11 +641,9 @@ static NSString* normalizeTitleForTokenization(NSString* s)
         return s;
     NSString* leading = [s substringToIndex:i];
     NSMutableString* rest = [[s substringFromIndex:i] mutableCopy];
-    [rest replaceOccurrencesOfString:@"."
-                           withString:@" "
-                              options:0
-                                range:NSMakeRange(0, rest.length)];
-    return [[leading stringByAppendingString:@" "] stringByAppendingString:[rest stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet]];
+    [rest replaceOccurrencesOfString:@"." withString:@" " options:0 range:NSMakeRange(0, rest.length)];
+    return [[leading stringByAppendingString:@" "]
+        stringByAppendingString:[rest stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet]];
 }
 
 static NSArray<NSString*>* wordTokensFromString(NSString* s)
@@ -1068,19 +1081,19 @@ static NSDictionary<NSString*, NSString*>* commonPrefixAndSuffixForStrings(NSArr
         }
         [titlesInParent addObject:displayName];
         [playable addObject:[@{
-            @"type" : isDocument ? (opensInBooks ? @"document-books" : @"document") : @"file",
-            @"category" : category ?: @"",
-            @"index" : @(i),
-            @"name" : displayName,
-            @"path" : path,
-            @"relativePath" : originalFileName,
-            @"season" : season,
-            @"episode" : episode,
-            @"progress" : @(progress),
-            @"sortKey" : fileName.lastPathComponent,
-            @"originalExt" : ext,
-            @"isCompanion" : @(useCompanionPdf || useCompanionEpub)
-        } mutableCopy]];
+                      @"type" : isDocument ? (opensInBooks ? @"document-books" : @"document") : @"file",
+                      @"category" : category ?: @"",
+                      @"index" : @(i),
+                      @"name" : displayName,
+                      @"path" : path,
+                      @"relativePath" : originalFileName,
+                      @"season" : season,
+                      @"episode" : episode,
+                      @"progress" : @(progress),
+                      @"sortKey" : fileName.lastPathComponent,
+                      @"originalExt" : ext,
+                      @"isCompanion" : @(useCompanionPdf || useCompanionEpub)
+                  } mutableCopy]];
     }
 
     for (NSString* cueBaseName in cueBaseNames)
@@ -1108,19 +1121,19 @@ static NSDictionary<NSString*, NSString*>* commonPrefixAndSuffixForStrings(NSArr
             NSString* displayName = cueDisplayName;
 
             [playable addObject:[@{
-                @"type" : @"album",
-                @"category" : @"audio",
-                @"index" : cueIndex,
-                @"name" : displayName,
-                @"path" : path,
-                @"relativePath" : cueFileName,
-                @"season" : @0,
-                @"episode" : cueIndex,
-                @"progress" : @(progress),
-                @"sortKey" : cueFileName,
-                @"originalExt" : @"cue",
-                @"isCompanion" : @NO
-            } mutableCopy]];
+                          @"type" : @"album",
+                          @"category" : @"audio",
+                          @"index" : cueIndex,
+                          @"name" : displayName,
+                          @"path" : path,
+                          @"relativePath" : cueFileName,
+                          @"season" : @0,
+                          @"episode" : cueIndex,
+                          @"progress" : @(progress),
+                          @"sortKey" : cueFileName,
+                          @"originalExt" : @"cue",
+                          @"isCompanion" : @NO
+                      } mutableCopy]];
         }
     }
 
@@ -1139,8 +1152,11 @@ static NSDictionary<NSString*, NSString*>* commonPrefixAndSuffixForStrings(NSArr
 
     // Entries in playable must be NSMutableDictionary: we update @"name" in place (common prefix/suffix stripping).
     // Using immutable NSDictionary here caused -[__NSDictionaryI setObject:forKeyedSubscript:]: unrecognized selector crash.
+    // Skip document-books: per-parent strip can truncate PDF titles (e.g. "In The Court Of The Crimson King..." → "In").
     for (NSMutableDictionary* fileInfo in playable)
     {
+        if ([fileInfo[@"type"] isEqualToString:@"document-books"])
+            continue;
         NSString* relativePath = fileInfo[@"relativePath"];
         if (relativePath.length == 0)
             continue;
@@ -1177,7 +1193,11 @@ static NSDictionary<NSString*, NSString*>* commonPrefixAndSuffixForStrings(NSArr
                 // it was intentionally produced by the "all same remainder" logic (lines 425-434). Reject only resolution-only
                 // titles (e.g. "1080p") which indicate over-stripping. Do not add isBareTrackNumberOnly check here, as it
                 // would break the intended "01", "02", "03" behavior for albums/tracks with identical suffixes.
-                if ([s isKindOfClass:[NSString class]] && s.length > 0 && !isResolutionOnlyTitle(s))
+                // Do not apply global strip to document-books: token-based strip is for episodes/tracks; applying it
+                // to a single book mixed with audio can over-strip the book title (e.g. "In The Court Of The Crimson King..."
+                // → "In" when tracks share tokens like "The Court Of The Crimson King").
+                NSString* type = playable[i][@"type"];
+                if ([s isKindOfClass:[NSString class]] && s.length > 0 && !isResolutionOnlyTitle(s) && ![type isEqualToString:@"document-books"])
                     ((NSMutableDictionary*)playable[i])[@"name"] = s;
             }
         }
