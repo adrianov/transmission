@@ -1,0 +1,88 @@
+#!/bin/sh
+# Build Release and create 'Transmission Enhanced.dmg' for distribution. Run from repo root.
+# Uses bundled static libs (no Homebrew .dylibs) so the app runs on any Mac.
+# Output: dist/Transmission Enhanced.dmg with installer-style window (app + Applications).
+set -e
+root="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$root"
+
+build_dir="${root}/build"
+app_path="${build_dir}/macosx/Transmission.app"
+
+# Force bundled static libs so the app does not depend on Homebrew on target machines
+static_args="-DUSE_SYSTEM_B64=OFF -DUSE_SYSTEM_CRC32C=OFF -DUSE_SYSTEM_DEFLATE=OFF \
+-DUSE_SYSTEM_DHT=OFF -DUSE_SYSTEM_EVENT2=OFF -DUSE_SYSTEM_MINIUPNPC=OFF \
+-DUSE_SYSTEM_NATPMP=OFF -DUSE_SYSTEM_PSL=OFF -DUSE_SYSTEM_UTP=OFF"
+
+if cmake -B "${build_dir}" -G Ninja -DCMAKE_BUILD_TYPE=Release $static_args 2>&1 | grep -q "generator.*does not match"; then
+    rm -rf "${build_dir}"
+    cmake -B "${build_dir}" -G Ninja -DCMAKE_BUILD_TYPE=Release $static_args
+fi
+cmake --build "${build_dir}" -t transmission-mac
+
+[ -d "$app_path" ] || { echo "App not found: $app_path" >&2; exit 1; }
+
+dist_dir="${root}/dist"
+stage_dir="${dist_dir}/stage"
+vol_name="Transmission Enhanced"
+dmg_name="Transmission Enhanced.dmg"
+dmg_path="${dist_dir}/${dmg_name}"
+
+mkdir -p "$stage_dir"
+rm -rf "${stage_dir}"/* "${stage_dir}/.DS_Store" 2>/dev/null || true
+
+cp -R "$app_path" "$stage_dir/"
+osascript -e 'tell application "Finder"' \
+  -e "set a to make new alias file at (POSIX file \"$stage_dir\") to (POSIX file \"/Applications\")" \
+  -e 'set name of a to "Applications"' \
+  -e 'end tell'
+
+VENV_DIR="/tmp/dsstore_venv"
+if [ ! -f "$VENV_DIR/bin/python3" ]; then
+  python3 -m venv "$VENV_DIR"
+  "$VENV_DIR/bin/pip" install -q ds_store
+fi
+"$VENV_DIR/bin/python3" - "$stage_dir" <<'PYEOF'
+import sys
+from ds_store import DSStore
+
+stage = sys.argv[1]
+win_w, win_h = 660, 400
+icon_sz = 160.0
+cy = win_h / 2 - 20
+
+with DSStore.open(stage + "/.DS_Store", "w+") as d:
+    d["Transmission.app"]["Iloc"] = (int(win_w * 0.27), int(cy))
+    d["Applications"]["Iloc"] = (int(win_w * 0.73), int(cy))
+    d["."]["bwsp"] = {
+        "ShowStatusBar": False,
+        "ShowToolbar": False,
+        "ShowPathbar": False,
+        "ShowSidebar": False,
+        "WindowBounds": "{{200, 200}, {%d, %d}}" % (win_w, win_h),
+    }
+    d["."]["icvp"] = {
+        "viewStyleVersion": 1,
+        "backgroundType": 1,
+        "backgroundColorRed": 0.93,
+        "backgroundColorGreen": 0.93,
+        "backgroundColorBlue": 0.96,
+        "gridOffsetX": 0.0,
+        "gridOffsetY": 0.0,
+        "gridSpacing": 100.0,
+        "iconSize": icon_sz,
+        "labelOnBottom": True,
+        "showIconPreview": True,
+        "showItemInfo": False,
+        "textSize": 13.0,
+        "arrangeBy": "none",
+    }
+print("DS_Store generated: %dx%d window, %.0fpx icons" % (win_w, win_h, icon_sz))
+PYEOF
+
+rm -f "$dmg_path"
+hdiutil create -volname "$vol_name" -srcfolder "$stage_dir" -ov -format UDZO "$dmg_path"
+rm -rf "$stage_dir"
+
+echo "Created: $dmg_path"
+open -R "$dmg_path"

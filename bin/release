@@ -1,12 +1,17 @@
 #!/usr/bin/env bash
+# Release build using bundled static libs (no Homebrew .dylibs). Run from repo root.
 set -euo pipefail
 
 root_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 build_dir="${root_dir}/build"
 
-if cmake -B "${build_dir}" -G Ninja -DCMAKE_BUILD_TYPE=Release 2>&1 | grep -q "generator.*does not match"; then
+static_args=(-DUSE_SYSTEM_B64=OFF -DUSE_SYSTEM_CRC32C=OFF -DUSE_SYSTEM_DEFLATE=OFF
+    -DUSE_SYSTEM_DHT=OFF -DUSE_SYSTEM_EVENT2=OFF -DUSE_SYSTEM_MINIUPNPC=OFF
+    -DUSE_SYSTEM_NATPMP=OFF -DUSE_SYSTEM_PSL=OFF -DUSE_SYSTEM_UTP=OFF)
+
+if cmake -B "${build_dir}" -G Ninja -DCMAKE_BUILD_TYPE=Release "${static_args[@]}" 2>&1 | grep -q "generator.*does not match"; then
     rm -rf "${build_dir}"
-    cmake -B "${build_dir}" -G Ninja -DCMAKE_BUILD_TYPE=Release
+    cmake -B "${build_dir}" -G Ninja -DCMAKE_BUILD_TYPE=Release "${static_args[@]}"
 fi
 cmake --build "${build_dir}" -t transmission-mac -j"$(sysctl -n hw.ncpu)"
 
