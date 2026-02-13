@@ -392,9 +392,9 @@ extern char const kPlayButtonRepresentedKey = '\0';
         if (minimal)
         {
             torrentCell = [outlineView makeViewWithIdentifier:@"SmallTorrentCell" owner:self];
-            BOOL const sameTorrentMinimal = [torrentCell.fTorrentHash isEqualToString:torrentHash];
+            BOOL const sameTorrent = [torrentCell.fTorrentHash isEqualToString:torrentHash];
 
-            if (!sameTorrentMinimal)
+            if (!sameTorrent)
             {
                 torrentCell.fTorrentHash = torrentHash;
                 torrentCell.fIconView.image = error ? [NSImage imageNamed:NSImageNameCaution] : torrent.icon;
@@ -404,24 +404,22 @@ extern char const kPlayButtonRepresentedKey = '\0';
             if (torrentCell.fPlayButtonsView)
                 torrentCell.fPlayButtonsView.hidden = YES;
 
-            [self applyDynamicContentToTorrentCell:torrentCell torrent:torrent row:[self rowForItem:item]];
+            [self applyDynamicContentToTorrentCell:torrentCell torrent:torrent row:[self rowForItem:item] sameTorrent:sameTorrent];
         }
         else
         {
             torrentCell = [outlineView makeViewWithIdentifier:@"TorrentCell" owner:self];
-            BOOL const sameTorrentFull = [torrentCell.fTorrentHash isEqualToString:torrentHash];
+            BOOL const sameTorrent = [torrentCell.fTorrentHash isEqualToString:torrentHash];
 
-            if (!sameTorrentFull && torrentCell.fPlayButtonsView)
+            if (!sameTorrent && torrentCell.fPlayButtonsView)
                 [self recycleFlowViewForCellReuse:torrentCell];
-            if (!sameTorrentFull)
+            if (!sameTorrent)
                 torrentCell.fTorrentHash = torrentHash;
             if ([self cellNeedsContentButtonsConfigForCell:torrentCell torrent:torrent])
                 [self configurePlayButtonsForCell:torrentCell torrent:torrent];
 
-            // Static content - only update when torrent changes
-            if (!sameTorrentFull)
+            if (!sameTorrent)
             {
-                // set torrent icon and error badge
                 NSImage* fileImage = torrent.icon;
                 if (error)
                 {
@@ -429,11 +427,9 @@ extern char const kPlayButtonRepresentedKey = '\0';
                     if (frame.size.width > 0 && frame.size.height > 0)
                     {
                         torrentCell.fIconView.image = [NSImage imageWithSize:frame.size flipped:NO drawingHandler:^BOOL(NSRect dstRect) {
-                            // draw fileImage
                             [fileImage drawInRect:dstRect fromRect:NSZeroRect operation:NSCompositingOperationSourceOver
                                          fraction:1.0];
 
-                            // overlay error badge
                             NSImage* errorImage = [NSImage imageNamed:NSImageNameCaution];
                             NSRect const errorRect = NSMakeRect(0, 0, kErrorImageSize, kErrorImageSize);
                             [errorImage drawInRect:errorRect fromRect:NSZeroRect operation:NSCompositingOperationSourceOver
@@ -453,28 +449,23 @@ extern char const kPlayButtonRepresentedKey = '\0';
                     torrentCell.fIconView.image = fileImage;
                 }
 
-                // set icon subtitle label (e.g., "8 videos" for multi-file media torrents)
                 NSString* iconSubtitle = torrent.iconSubtitle;
                 torrentCell.fIconSubtitleField.stringValue = iconSubtitle ?: @"";
                 torrentCell.fIconSubtitleField.hidden = (iconSubtitle == nil);
 
-                // set torrent title
                 torrentCell.fTorrentTitleField.stringValue = torrent.displayName;
+
+                torrentCell.fURLButton.hidden = (torrent.commentURL == nil);
             }
 
-            torrentCell.fURLButton.hidden = (torrent.commentURL == nil);
             torrentCell.fTorrentStatusField.hidden = NO;
             torrentCell.fIconView.hidden = NO;
-            [self applyDynamicContentToTorrentCell:torrentCell torrent:torrent row:[self rowForItem:item]];
-            [self resetContentButtonsForTorrentCell:torrentCell];
+            [self applyDynamicContentToTorrentCell:torrentCell torrent:torrent row:[self rowForItem:item] sameTorrent:sameTorrent];
         }
 
         torrentCell.fTorrentTableView = self;
-
-        // set this so that we can draw bar in torrentCell drawRect
         torrentCell.objectValue = torrent;
 
-        // Actions need to be set (they reference the cell's objectValue)
         torrentCell.fActionButton.action = @selector(displayTorrentActionPopover:);
         torrentCell.fControlButton.action = @selector(toggleControlForTorrent:);
         torrentCell.fRevealButton.action = @selector(revealTorrentFile:);
@@ -571,7 +562,7 @@ extern char const kPlayButtonRepresentedKey = '\0';
 }
 
 /// Updates status, progress, and hover state for a torrent cell. Does not touch flow view (play buttons).
-- (void)applyDynamicContentToTorrentCell:(TorrentCell*)torrentCell torrent:(Torrent*)torrent row:(NSInteger)row
+- (void)applyDynamicContentToTorrentCell:(TorrentCell*)torrentCell torrent:(Torrent*)torrent row:(NSInteger)row sameTorrent:(BOOL)sameTorrent
 {
     BOOL const minimal = [torrentCell isKindOfClass:[SmallTorrentCell class]];
 
@@ -586,13 +577,16 @@ extern char const kPlayButtonRepresentedKey = '\0';
         torrentCell.fRevealButton.hidden = !rowHover;
         torrentCell.fURLButton.hidden = !rowHover || (torrent.commentURL == nil);
         torrentCell.fActionButton.hidden = !rowHover;
-        if (iconHover)
-            torrentCell.fIconView.hidden = YES;
-        else
-            torrentCell.fIconView.hidden = NO;
+        torrentCell.fIconView.hidden = iconHover;
     }
     else
     {
+        if (!sameTorrent)
+        {
+            torrentCell.fControlButton.hidden = NO;
+            torrentCell.fRevealButton.hidden = NO;
+        }
+
         NSString* progressString = torrent.progressString;
         if (![torrentCell.fTorrentProgressField.stringValue isEqualToString:progressString])
             torrentCell.fTorrentProgressField.stringValue = progressString;
@@ -605,14 +599,16 @@ extern char const kPlayButtonRepresentedKey = '\0';
         if (![torrentCell.fTorrentStatusField.stringValue isEqualToString:statusString])
             torrentCell.fTorrentStatusField.stringValue = statusString;
 
-        torrentCell.fTorrentStatusField.hidden = NO;
-        torrentCell.fControlButton.hidden = NO;
-        torrentCell.fRevealButton.hidden = NO;
-        torrentCell.fURLButton.hidden = (torrent.commentURL == nil);
         BOOL iconHover = self.fHoverEventDict && [self.fHoverEventDict[@"row"] integerValue] == row &&
                          [self.fHoverEventDict[@"iconHover"] boolValue];
-        torrentCell.fActionButton.hidden = !iconHover;
+        if (torrentCell.fActionButton.hidden != !iconHover)
+            torrentCell.fActionButton.hidden = !iconHover;
     }
+}
+
+- (void)applyDynamicContentToTorrentCell:(TorrentCell*)torrentCell torrent:(Torrent*)torrent row:(NSInteger)row
+{
+    [self applyDynamicContentToTorrentCell:torrentCell torrent:torrent row:row sameTorrent:NO];
 }
 
 /// Resets content button images when cell is configured. Ensures correct state after scroll/reuse.

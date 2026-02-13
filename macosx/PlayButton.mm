@@ -147,7 +147,6 @@
     self.toolTip = nil;
     self.state = NSControlStateValueOff;
     self.highlighted = NO;
-    [self setNeedsDisplay:YES];
 }
 
 - (void)setupTrackingArea

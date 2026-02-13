@@ -76,42 +76,39 @@
         Torrent* torrent = [self.objectValue isKindOfClass:[Torrent class]] ? (Torrent*)self.objectValue : nil;
         if (torrent)
         {
-            // draw progress bar - use cached image when possible
             NSRect barRect = self.fTorrentProgressBarView.frame;
             if (barRect.size.width > 0 && barRect.size.height > 0)
             {
-                // Cache key must include piecesBarPercent so toggling View → Pieces Bar invalidates cache (regression fix).
                 CGFloat const piecesPercent = self.fTorrentTableView.piecesBarPercent;
-                NSString* cacheKey = [NSString stringWithFormat:@"%@_%f_%d_%d_%f_%f_%d_%f_%d_%f",
-                                                                torrent.hashString,
-                                                                torrent.progress,
-                                                                torrent.active,
-                                                                torrent.checking,
-                                                                torrent.progressLeft,
-                                                                torrent.availableDesired,
-                                                                torrent.seeding,
-                                                                torrent.progressStopRatio,
-                                                                torrent.allDownloaded,
-                                                                piecesPercent];
+                CGFloat const progress = torrent.progress;
+                BOOL const active = torrent.active;
+                BOOL const checking = torrent.checking;
 
-                // Check if we need to regenerate the progress bar image
-                if (!self.fCachedProgressBarImage || ![self.fProgressBarCacheKey isEqualToString:cacheKey] ||
-                    !NSEqualSizes(self.fCachedProgressBarImage.size, barRect.size))
+                BOOL cacheValid = self.fCachedProgressBarImage != nil &&
+                                  NSEqualSizes(self.fCachedBarSize, barRect.size) &&
+                                  self.fCachedProgress == progress &&
+                                  self.fCachedActive == active &&
+                                  self.fCachedChecking == checking &&
+                                  self.fCachedPiecesPercent == piecesPercent;
+
+                if (!cacheValid)
                 {
                     self.fCachedProgressBarImage = [NSImage imageWithSize:barRect.size flipped:NO drawingHandler:^BOOL(NSRect dstRect) {
                         ProgressBarView* progressBar = [[ProgressBarView alloc] init];
                         [progressBar drawBarInRect:dstRect forTableView:self.fTorrentTableView withTorrent:torrent];
                         return YES;
                     }];
-                    self.fProgressBarCacheKey = cacheKey;
+                    self.fCachedProgress = progress;
+                    self.fCachedActive = active;
+                    self.fCachedChecking = checking;
+                    self.fCachedPiecesPercent = piecesPercent;
+                    self.fCachedBarSize = barRect.size;
                 }
 
-                // Draw cached progress bar image
                 [self.fCachedProgressBarImage drawInRect:barRect fromRect:NSZeroRect operation:NSCompositingOperationSourceOver
                                                 fraction:1.0];
             }
 
-            // set priority icon
             if (torrent.priority != TR_PRI_NORMAL)
             {
                 NSColor* priorityColor = self.backgroundStyle == NSBackgroundStyleEmphasized ? NSColor.whiteColor : NSColor.labelColor;
@@ -175,14 +172,13 @@
 - (void)invalidateProgressBarCache
 {
     self.fCachedProgressBarImage = nil;
-    self.fProgressBarCacheKey = nil;
+    self.fCachedBarSize = NSZeroSize;
 }
 
 - (void)setObjectValue:(id)objectValue
 {
     [super setObjectValue:objectValue];
 
-    // Invalidate cache when cell is reused for different torrent
     Torrent* torrent = (Torrent*)objectValue;
     if (torrent && ![torrent.hashString isEqualToString:self.fTorrentHash])
     {

@@ -42,8 +42,16 @@
 
 /// Cached progress bar image to avoid redrawing during scroll
 @property(nonatomic) NSImage* fCachedProgressBarImage;
-/// Cache key to determine when progress bar needs to be redrawn
-@property(nonatomic) NSString* fProgressBarCacheKey;
+/// Cached progress value for cache invalidation
+@property(nonatomic) CGFloat fCachedProgress;
+/// Cached active state for cache invalidation
+@property(nonatomic) BOOL fCachedActive;
+/// Cached checking state for cache invalidation
+@property(nonatomic) BOOL fCachedChecking;
+/// Cached pieces bar percent for cache invalidation
+@property(nonatomic) CGFloat fCachedPiecesPercent;
+/// Cached bar size for cache invalidation
+@property(nonatomic) NSSize fCachedBarSize;
 - (void)invalidateProgressBarCache;
 
 @end

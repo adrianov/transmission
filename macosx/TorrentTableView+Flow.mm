@@ -299,14 +299,16 @@ static NSString* flowViewTorrentHash(FlowLayoutView* flowView)
         [self hideFlowViewAndResetRowHeightForCell:cell torrent:torrent];
         return;
     }
+
+    [CATransaction begin];
+    [CATransaction setDisableActions:YES];
     for (NSDictionary* entry in layout)
         [self addPlayButtonLayoutEntry:entry toFlowView:flowView torrent:torrent];
     [flowView finishBatchUpdates];
     [self updatePlayButtonProgressForCell:cell torrent:torrent forceLayout:YES];
     flowView.hidden = NO;
     [cell setBackgroundStyle:cell.backgroundStyle];
-    [flowView setNeedsDisplay:YES];
-    [cell setNeedsDisplay:YES];
+    [CATransaction commit];
 }
 
 - (void)addPlayButtonLayoutEntry:(NSDictionary*)entry toFlowView:(FlowLayoutView*)flowView torrent:(Torrent*)torrent
@@ -332,7 +334,18 @@ static NSString* flowViewTorrentHash(FlowLayoutView* flowView)
     if (self.fSmallView || ![self showContentButtonsPref])
         return;
     if (cell.fPlayButtonsView)
+    {
+        FlowLayoutView* flowView = (FlowLayoutView*)cell.fPlayButtonsView;
+        NSString* flowHash = flowViewTorrentHash(flowView);
+        CGFloat const availableWidth = [self playButtonsAvailableWidthForCell:cell];
+
+        if ([flowHash isEqualToString:torrent.hashString] && [flowView hasValidLayoutForWidth:availableWidth] &&
+            torrent.cachedPlayButtonProgressGeneration == torrent.statsGeneration)
+        {
+            return;
+        }
         [self updatePlayButtonProgressForCell:cell torrent:torrent];
+    }
     else if (torrent.playableFiles.count > 0)
         [self configurePlayButtonsForCell:cell torrent:torrent];
 }
@@ -361,6 +374,7 @@ static NSString* flowViewTorrentHash(FlowLayoutView* flowView)
         }
         return;
     }
+
     BOOL anyVisible = NO;
     for (NSDictionary* e in state)
     {
@@ -381,6 +395,10 @@ static NSString* flowViewTorrentHash(FlowLayoutView* flowView)
         [self configurePlayButtonsForCell:cell torrent:torrent];
         return;
     }
+
+    [CATransaction begin];
+    [CATransaction setDisableActions:YES];
+
     NSInteger row = [self rowForItem:torrent];
     NSMutableDictionary* stateMap = [NSMutableDictionary dictionaryWithCapacity:state.count];
     for (NSDictionary* entry in state)
@@ -467,8 +485,6 @@ static NSString* flowViewTorrentHash(FlowLayoutView* flowView)
                         button.iinaUnwatched = iinaUnwatched;
                         layoutNeeded = YES;
                     }
-                    // Only rebuild attributedTitle when title or color actually changed,
-                    // avoiding NSMutableAttributedString allocation on every scroll update.
                     if (titleChanged || watchedChanged)
                     {
                         NSColor* titleColor = [PlayButton titleColorUnwatched:button.iinaUnwatched];
@@ -514,11 +530,16 @@ static NSString* flowViewTorrentHash(FlowLayoutView* flowView)
         {
             [self queueHeightUpdateForRow:row];
             if (buttonHeight > 0)
-                [self noteHeightOfRowsWithIndexesChanged:[NSIndexSet indexSetWithIndex:(NSUInteger)row]];
+                [self noteHeightUpdateForRow:row];
         }
-        if (!useSavedHeight)
-            [flowView setNeedsDisplay:YES];
     }
+
+    [CATransaction commit];
+}
+
+- (void)noteHeightUpdateForRow:(NSInteger)row
+{
+    [self noteHeightOfRowsWithIndexesChanged:[NSIndexSet indexSetWithIndex:(NSUInteger)row]];
 }
 
 @end
