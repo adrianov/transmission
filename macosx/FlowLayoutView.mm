@@ -194,8 +194,10 @@
             NSSize sz = [self sizeForView:v];
             v.hidden = NO;
             CGFloat vY = y + (rowH - sz.height) / 2.0;
-            v.frame = NSMakeRect(x, vY, sz.width, sz.height);
-            [v setNeedsDisplay:YES];
+            NSRect newFrame = NSMakeRect(x, vY, sz.width, sz.height);
+            // Only mark dirty if frame actually changed; avoids redundant redraws during scroll.
+            if (!NSEqualRects(v.frame, newFrame))
+                v.frame = newFrame;
             x += sz.width + _horizontalSpacing;
         }
         y += rowH + _verticalSpacing;

@@ -451,7 +451,8 @@ static NSString* flowViewTorrentHash(FlowLayoutView* flowView)
                     }
                     if (!shouldBeHidden)
                         anyButtonVisibleInSection = YES;
-                    if (![button.title isEqualToString:title])
+                    BOOL titleChanged = ![button.title isEqualToString:title];
+                    if (titleChanged)
                     {
                         button.title = title;
                         [button invalidateIntrinsicContentSize];
@@ -460,19 +461,25 @@ static NSString* flowViewTorrentHash(FlowLayoutView* flowView)
                     }
                     NSNumber* iinaUnwatchedNum = entry[@"iinaUnwatched"];
                     BOOL iinaUnwatched = iinaUnwatchedNum ? iinaUnwatchedNum.boolValue : NO;
-                    if (button.iinaUnwatched != iinaUnwatched)
+                    BOOL watchedChanged = (button.iinaUnwatched != iinaUnwatched);
+                    if (watchedChanged)
                     {
                         button.iinaUnwatched = iinaUnwatched;
                         layoutNeeded = YES;
                     }
-                    NSColor* titleColor = [PlayButton titleColorUnwatched:button.iinaUnwatched];
-                    NSString* currentTitle = button.title ?: @"";
-                    NSMutableAttributedString* attr = [[NSMutableAttributedString alloc] initWithString:currentTitle];
-                    [attr addAttribute:NSForegroundColorAttributeName value:titleColor range:NSMakeRange(0, currentTitle.length)];
-                    [attr addAttribute:NSFontAttributeName value:[NSFont systemFontOfSize:11]
-                                 range:NSMakeRange(0, currentTitle.length)];
-                    button.attributedTitle = attr;
-                    [button setNeedsDisplay:YES];
+                    // Only rebuild attributedTitle when title or color actually changed,
+                    // avoiding NSMutableAttributedString allocation on every scroll update.
+                    if (titleChanged || watchedChanged)
+                    {
+                        NSColor* titleColor = [PlayButton titleColorUnwatched:button.iinaUnwatched];
+                        NSString* currentTitle = button.title ?: @"";
+                        NSMutableAttributedString* attr = [[NSMutableAttributedString alloc] initWithString:currentTitle];
+                        [attr addAttribute:NSForegroundColorAttributeName value:titleColor range:NSMakeRange(0, currentTitle.length)];
+                        [attr addAttribute:NSFontAttributeName value:[NSFont systemFontOfSize:11]
+                                     range:NSMakeRange(0, currentTitle.length)];
+                        button.attributedTitle = attr;
+                        [button setNeedsDisplay:YES];
+                    }
                 }
             }
             continue;

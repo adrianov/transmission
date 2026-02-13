@@ -34,13 +34,23 @@
         color = NSColor.whiteColor;
     else
         color = button ? [PlayButton titleColorUnwatched:button.iinaUnwatched] : NSColor.controlTextColor;
-    NSString* str = title.string ?: @"";
+    // Use the button's attributedTitle directly when color matches, avoiding per-draw allocation.
+    NSAttributedString* attrTitle = button ? button.attributedTitle : title;
+    NSString* str = attrTitle.string ?: @"";
     if (str.length > 0)
     {
-        NSMutableAttributedString* attr = [[NSMutableAttributedString alloc] initWithString:str];
-        [attr addAttribute:NSForegroundColorAttributeName value:color range:NSMakeRange(0, str.length)];
-        [attr addAttribute:NSFontAttributeName value:self.font ?: [NSFont systemFontOfSize:11] range:NSMakeRange(0, str.length)];
-        [attr drawInRect:frame];
+        NSDictionary* attrs = (str.length > 0) ? [attrTitle attributesAtIndex:0 effectiveRange:nil] : nil;
+        NSColor* existingColor = attrs[NSForegroundColorAttributeName];
+        if (existingColor && [existingColor isEqual:color])
+        {
+            [attrTitle drawInRect:frame];
+        }
+        else
+        {
+            NSMutableAttributedString* attr = [attrTitle mutableCopy];
+            [attr addAttribute:NSForegroundColorAttributeName value:color range:NSMakeRange(0, str.length)];
+            [attr drawInRect:frame];
+        }
     }
     return frame;
 }
@@ -51,23 +61,46 @@
 
 + (NSColor*)fillColorUnwatched:(BOOL)unwatched hovered:(BOOL)hovered
 {
+    // Cached static colors avoid repeated NSColor allocation on every draw.
+    static NSColor* unwatchedHover;
+    static NSColor* unwatchedNormal;
+    static NSColor* watchedDarkHover;
+    static NSColor* watchedDarkNormal;
+    static NSColor* watchedLightHover;
+    static NSColor* watchedLightNormal;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        unwatchedHover = [NSColor colorWithCalibratedRed:0.2 green:0.54 blue:0.2 alpha:0.65];
+        unwatchedNormal = [NSColor colorWithCalibratedRed:0.16 green:0.44 blue:0.16 alpha:0.6];
+        watchedDarkHover = [NSColor colorWithCalibratedWhite:0.15 alpha:0.6];
+        watchedDarkNormal = [NSColor colorWithCalibratedWhite:0.1 alpha:0.5];
+        watchedLightHover = [NSColor colorWithCalibratedWhite:0.88 alpha:0.9];
+        watchedLightNormal = [NSColor colorWithCalibratedWhite:0.82 alpha:0.85];
+    });
     if (unwatched)
-        return hovered ? [NSColor colorWithCalibratedRed:0.2 green:0.54 blue:0.2 alpha:0.65] :
-                         [NSColor colorWithCalibratedRed:0.16 green:0.44 blue:0.16 alpha:0.6];
-    // Watched (played): theme-adaptive. Dark = dark gray; light = very light gray so buttons read clearly on white.
+        return hovered ? unwatchedHover : unwatchedNormal;
     if (NSApp.darkMode)
-        return hovered ? [NSColor colorWithCalibratedWhite:0.15 alpha:0.6] : [NSColor colorWithCalibratedWhite:0.1 alpha:0.5];
-    return hovered ? [NSColor colorWithCalibratedWhite:0.88 alpha:0.9] : [NSColor colorWithCalibratedWhite:0.82 alpha:0.85];
+        return hovered ? watchedDarkHover : watchedDarkNormal;
+    return hovered ? watchedLightHover : watchedLightNormal;
 }
 
 + (NSColor*)titleColorUnwatched:(BOOL)unwatched
 {
+    // Cached static colors avoid repeated NSColor allocation on every draw.
+    static NSColor* unwatchedTitle;
+    static NSColor* watchedDarkTitle;
+    static NSColor* watchedLightTitle;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        unwatchedTitle = [NSColor colorWithCalibratedWhite:1.0 alpha:0.95];
+        watchedDarkTitle = [NSColor colorWithCalibratedWhite:0.92 alpha:1.0];
+        watchedLightTitle = [NSColor colorWithCalibratedWhite:0.15 alpha:1.0];
+    });
     if (unwatched)
-        return [NSColor colorWithCalibratedWhite:1.0 alpha:0.95];
-    // Watched (gray button): explicit colors so text is consistent in light and dark themes.
+        return unwatchedTitle;
     if (NSApp.darkMode)
-        return [NSColor colorWithCalibratedWhite:0.92 alpha:1.0];
-    return [NSColor colorWithCalibratedWhite:0.15 alpha:1.0];
+        return watchedDarkTitle;
+    return watchedLightTitle;
 }
 
 + (Class)cellClass
@@ -126,27 +159,7 @@
     [self addTrackingArea:trackingArea];
 }
 
-- (void)updateTrackingAreas
-{
-    [super updateTrackingAreas];
-    NSTrackingArea* toReplace = nil;
-    for (NSTrackingArea* area in self.trackingAreas)
-    {
-        if (area.owner == self && (area.options & NSTrackingInVisibleRect))
-        {
-            toReplace = area;
-            break;
-        }
-    }
-    if (toReplace)
-    {
-        [self removeTrackingArea:toReplace];
-        [self addTrackingArea:[[NSTrackingArea alloc] initWithRect:NSZeroRect
-                                                           options:NSTrackingMouseEnteredAndExited | NSTrackingActiveAlways | NSTrackingInVisibleRect
-                                                             owner:self
-                                                          userInfo:nil]];
-    }
-}
+// NSTrackingInVisibleRect tracking areas auto-update; no need to recreate in updateTrackingAreas.
 
 - (void)mouseEntered:(NSEvent*)event
 {
