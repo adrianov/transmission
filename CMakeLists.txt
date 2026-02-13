@@ -518,7 +518,8 @@ tr_add_external_auto_library(EVENT2 libevent event
         -DEVENT__DISABLE_TESTS:BOOL=ON
         -DEVENT__DISABLE_REGRESS:BOOL=ON
         -DEVENT__DISABLE_SAMPLES:BOOL=ON
-        -DEVENT__LIBRARY_TYPE:STRING=STATIC)
+        -DEVENT__LIBRARY_TYPE:STRING=STATIC
+        "-DCMAKE_C_FLAGS:STRING=${CMAKE_C_FLAGS} -Wno-strict-prototypes -Wno-deprecated-declarations -Wno-array-parameter")
 
 tr_add_external_auto_library(NATPMP libnatpmp natpmp
     TARGET natpmp::natpmp

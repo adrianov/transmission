@@ -282,6 +282,11 @@ target_include_directories(${TR_NAME}
         ${CMAKE_CURRENT_BINARY_DIR}/..
         ${Intl_INCLUDE_DIRS})
 
+# Suppress warnings from external headers (fmt float-equal, miniupnpc zero-length-array)
+if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|AppleClang|GNU")
+    target_compile_options(${TR_NAME} PRIVATE -Wno-float-equal -Wno-zero-length-array)
+endif()
+
 if(ANDROID)
     find_library(log-lib log)
 endif()
