@@ -6,84 +6,50 @@
 #import "TorrentTableView.h"
 #import "TorrentCell.h"
 
-@interface TorrentCellRevealButton ()
-@property(nonatomic, copy) NSString* revealImageString;
-@property(nonatomic) IBOutlet TorrentCell* torrentCell;
-@property(nonatomic, readonly) TorrentTableView* torrentTableView;
-@end
-
 @implementation TorrentCellRevealButton
 
-- (TorrentTableView*)torrentTableView
++ (void)initialize
 {
-    return self.torrentCell.fTorrentTableView;
+    if (self == [TorrentCellRevealButton class])
+    {
+        [self setCachedImages:@{
+            @"RevealOff" : [NSImage imageNamed:@"RevealOff"],
+            @"RevealHover" : [NSImage imageNamed:@"RevealHover"],
+            @"RevealOn" : [NSImage imageNamed:@"RevealOn"],
+        }];
+    }
+}
+
++ (NSString*)defaultImageKey
+{
+    return @"RevealOff";
 }
 
 - (void)awakeFromNib
 {
     [super awakeFromNib];
-
-    self.wantsLayer = YES;
-    self.layerContentsRedrawPolicy = NSViewLayerContentsRedrawOnSetNeedsDisplay;
-
-    self.revealImageString = @"RevealOff";
-    [self updateImage];
+    [self resetImage];
 }
 
 - (void)mouseEntered:(NSEvent*)event
 {
     [super mouseEntered:event];
-    self.revealImageString = @"RevealHover";
+    self.imageKey = @"RevealHover";
     [self updateImage];
-
-    [self.torrentTableView hoverEventBeganForView:self];
 }
 
 - (void)mouseExited:(NSEvent*)event
 {
     [super mouseExited:event];
-    self.revealImageString = @"RevealOff";
-    [self updateImage];
-
-    [self.torrentTableView hoverEventEndedForView:self];
+    [self resetImage];
 }
 
 - (void)mouseDown:(NSEvent*)event
 {
     [self.window makeFirstResponder:self.torrentTableView];
     [super mouseDown:event];
-    self.revealImageString = @"RevealOn";
+    self.imageKey = @"RevealOn";
     [self updateImage];
-}
-
-- (void)resetImage
-{
-    self.revealImageString = @"RevealOff";
-    [self updateImage];
-}
-
-- (void)updateImage
-{
-    NSImage* revealImage = [NSImage imageNamed:self.revealImageString];
-    self.image = revealImage;
-    self.needsDisplay = YES;
-}
-
-- (void)updateTrackingAreas
-{
-    [super updateTrackingAreas];
-    for (NSTrackingArea* area in self.trackingAreas)
-    {
-        if (area.owner == self && (area.options & NSTrackingInVisibleRect))
-        {
-            [self removeTrackingArea:area];
-            break;
-        }
-    }
-    [self addTrackingArea:[[NSTrackingArea alloc] initWithRect:NSZeroRect
-                                                       options:NSTrackingMouseEnteredAndExited | NSTrackingActiveAlways | NSTrackingInVisibleRect
-                                                         owner:self
-                                                      userInfo:nil]];
 }
 
 @end

@@ -9,25 +9,28 @@
 
 @interface TorrentCellControlButton ()
 @property(nonatomic, copy) NSString* controlImageSuffix;
-@property(nonatomic) IBOutlet TorrentCell* torrentCell;
-@property(nonatomic, readonly) TorrentTableView* torrentTableView;
 @end
 
 @implementation TorrentCellControlButton
 
-- (TorrentTableView*)torrentTableView
+/// Cached control button images. Pre-loaded to avoid string concatenation per draw call.
+static NSDictionary<NSString*, NSImage*>* sControlImages;
+
++ (void)initialize
 {
-    return self.torrentCell.fTorrentTableView;
+    if (self == [TorrentCellControlButton class])
+    {
+        NSMutableDictionary* cache = [NSMutableDictionary dictionaryWithCapacity:9];
+        for (NSString* prefix in @[ @"Pause", @"Resume", @"ResumeNoWait" ])
+            for (NSString* suffix in @[ @"Off", @"Hover", @"On" ])
+                cache[[prefix stringByAppendingString:suffix]] = [NSImage imageNamed:[prefix stringByAppendingString:suffix]];
+        sControlImages = [cache copy];
+    }
 }
 
 - (void)awakeFromNib
 {
     [super awakeFromNib];
-
-    // Layer-backed to match FlowLayoutView/PlayButton hierarchy; avoids blank rectangles during scroll.
-    self.wantsLayer = YES;
-    self.layerContentsRedrawPolicy = NSViewLayerContentsRedrawOnSetNeedsDisplay;
-
     self.controlImageSuffix = @"Off";
     [self updateImage];
 }
@@ -43,8 +46,6 @@
     [super mouseEntered:event];
     self.controlImageSuffix = @"Hover";
     [self updateImage];
-
-    [self.torrentTableView hoverEventBeganForView:self];
 }
 
 - (void)mouseExited:(NSEvent*)event
@@ -52,63 +53,31 @@
     [super mouseExited:event];
     self.controlImageSuffix = @"Off";
     [self updateImage];
-
-    [self.torrentTableView hoverEventEndedForView:self];
 }
 
 - (void)mouseDown:(NSEvent*)event
 {
-    //when filterbar is shown, we need to remove focus otherwise action fails
     [self.window makeFirstResponder:self.torrentTableView];
-
     [super mouseDown:event];
     self.controlImageSuffix = @"On";
     [self updateImage];
-
     [self.torrentTableView hoverEventEndedForView:self];
 }
 
 - (void)updateImage
 {
-    NSImage* controlImage;
     Torrent* torrent = [self.torrentTableView itemAtRow:[self.torrentTableView rowForView:self]];
+    NSString* prefix;
     if (torrent.active)
-    {
-        controlImage = [NSImage imageNamed:[@"Pause" stringByAppendingString:self.controlImageSuffix]];
-    }
+        prefix = @"Pause";
+    else if (NSApp.currentEvent.modifierFlags & NSEventModifierFlagOption)
+        prefix = @"ResumeNoWait";
+    else if (torrent.waitingToStart)
+        prefix = @"Pause";
     else
-    {
-        if (NSApp.currentEvent.modifierFlags & NSEventModifierFlagOption)
-        {
-            controlImage = [NSImage imageNamed:[@"ResumeNoWait" stringByAppendingString:self.controlImageSuffix]];
-        }
-        else if (torrent.waitingToStart)
-        {
-            controlImage = [NSImage imageNamed:[@"Pause" stringByAppendingString:self.controlImageSuffix]];
-        }
-        else
-        {
-            controlImage = [NSImage imageNamed:[@"Resume" stringByAppendingString:self.controlImageSuffix]];
-        }
-    }
+        prefix = @"Resume";
+    NSImage* controlImage = sControlImages[[prefix stringByAppendingString:self.controlImageSuffix]];
     self.image = controlImage;
-}
-
-- (void)updateTrackingAreas
-{
-    [super updateTrackingAreas];
-    for (NSTrackingArea* area in self.trackingAreas)
-    {
-        if (area.owner == self && (area.options & NSTrackingInVisibleRect))
-        {
-            [self removeTrackingArea:area];
-            break;
-        }
-    }
-    [self addTrackingArea:[[NSTrackingArea alloc] initWithRect:NSZeroRect
-                                                       options:NSTrackingMouseEnteredAndExited | NSTrackingActiveAlways | NSTrackingInVisibleRect
-                                                         owner:self
-                                                      userInfo:nil]];
 }
 
 @end

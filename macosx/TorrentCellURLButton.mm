@@ -6,84 +6,50 @@
 #import "TorrentTableView.h"
 #import "TorrentCell.h"
 
-@interface TorrentCellURLButton ()
-@property(nonatomic, copy) NSString* urlImageString;
-@property(nonatomic) IBOutlet TorrentCell* torrentCell;
-@property(nonatomic, readonly) TorrentTableView* torrentTableView;
-@end
-
 @implementation TorrentCellURLButton
 
-- (TorrentTableView*)torrentTableView
++ (void)initialize
 {
-    return self.torrentCell.fTorrentTableView;
+    if (self == [TorrentCellURLButton class])
+    {
+        [self setCachedImages:@{
+            @"URLOff" : [NSImage imageNamed:@"URLOff"],
+            @"URLHover" : [NSImage imageNamed:@"URLHover"],
+            @"URLOn" : [NSImage imageNamed:@"URLOn"],
+        }];
+    }
+}
+
++ (NSString*)defaultImageKey
+{
+    return @"URLOff";
 }
 
 - (void)awakeFromNib
 {
     [super awakeFromNib];
-
-    self.wantsLayer = YES;
-    self.layerContentsRedrawPolicy = NSViewLayerContentsRedrawOnSetNeedsDisplay;
-
-    self.urlImageString = @"URLOff";
-    [self updateImage];
+    [self resetImage];
 }
 
 - (void)mouseEntered:(NSEvent*)event
 {
     [super mouseEntered:event];
-    self.urlImageString = @"URLHover";
+    self.imageKey = @"URLHover";
     [self updateImage];
-
-    [self.torrentTableView hoverEventBeganForView:self];
 }
 
 - (void)mouseExited:(NSEvent*)event
 {
     [super mouseExited:event];
-    self.urlImageString = @"URLOff";
-    [self updateImage];
-
-    [self.torrentTableView hoverEventEndedForView:self];
+    [self resetImage];
 }
 
 - (void)mouseDown:(NSEvent*)event
 {
     [self.window makeFirstResponder:self.torrentTableView];
     [super mouseDown:event];
-    self.urlImageString = @"URLOn";
+    self.imageKey = @"URLOn";
     [self updateImage];
-}
-
-- (void)resetImage
-{
-    self.urlImageString = @"URLOff";
-    [self updateImage];
-}
-
-- (void)updateImage
-{
-    NSImage* urlImage = [NSImage imageNamed:self.urlImageString];
-    self.image = urlImage;
-    self.needsDisplay = YES;
-}
-
-- (void)updateTrackingAreas
-{
-    [super updateTrackingAreas];
-    for (NSTrackingArea* area in self.trackingAreas)
-    {
-        if (area.owner == self && (area.options & NSTrackingInVisibleRect))
-        {
-            [self removeTrackingArea:area];
-            break;
-        }
-    }
-    [self addTrackingArea:[[NSTrackingArea alloc] initWithRect:NSZeroRect
-                                                       options:NSTrackingMouseEnteredAndExited | NSTrackingActiveAlways | NSTrackingInVisibleRect
-                                                         owner:self
-                                                      userInfo:nil]];
 }
 
 @end

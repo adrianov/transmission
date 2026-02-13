@@ -211,6 +211,8 @@ target_sources(${TR_NAME}-mac
         PlayButtonStateBuilder.mm
         FlowLayoutView.h
         FlowLayoutView.mm
+        TorrentCellButton.h
+        TorrentCellButton.mm
         TorrentCellActionButton.h
         TorrentCellActionButton.mm
         TorrentCellControlButton.h
