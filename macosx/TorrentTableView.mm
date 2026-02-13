@@ -645,6 +645,32 @@ extern char const kPlayButtonRepresentedKey = '\0';
     [cell setNeedsDisplay:YES];
 }
 
+/// Lightweight status-only refresh for button hover tooltips. Avoids play button refresh and full redraw.
+- (void)refreshTorrentStatusOnly:(NSInteger)row
+{
+    id item = [self itemAtRow:row];
+    if (![item isKindOfClass:[Torrent class]])
+        return;
+    Torrent* torrent = (Torrent*)item;
+    NSView* cellView = [self viewAtColumn:0 row:row makeIfNecessary:NO];
+    if (![cellView isKindOfClass:[TorrentCell class]])
+        return;
+    TorrentCell* cell = (TorrentCell*)cellView;
+
+    NSString* statusString = nil;
+    if (self.fHoverEventDict && [self.fHoverEventDict[@"row"] integerValue] == row)
+        statusString = self.fHoverEventDict[@"string"];
+    if (!statusString)
+        statusString = torrent.statusString;
+    if (![cell.fTorrentStatusField.stringValue isEqualToString:statusString])
+        cell.fTorrentStatusField.stringValue = statusString;
+
+    BOOL iconHover = self.fHoverEventDict && [self.fHoverEventDict[@"row"] integerValue] == row &&
+                     [self.fHoverEventDict[@"iconHover"] boolValue];
+    if (cell.fActionButton.hidden != !iconHover)
+        cell.fActionButton.hidden = !iconHover;
+}
+
 - (NSString*)outlineView:(NSOutlineView*)outlineView typeSelectStringForTableColumn:(NSTableColumn*)tableColumn item:(id)item
 {
     if ([item isKindOfClass:[Torrent class]])
@@ -1004,11 +1030,13 @@ extern char const kPlayButtonRepresentedKey = '\0';
             SmallTorrentCell* smallCell = [self viewAtColumn:0 row:row makeIfNecessary:NO];
             smallCell.fIconView.hidden = YES;
         }
+        [self refreshTorrentRowInPlace:row];
     }
     else
     {
         NSString* statusString;
-        if ([view isKindOfClass:[TorrentCell class]] || [view isKindOfClass:[TorrentCellActionButton class]])
+        BOOL isCellOrActionButton = [view isKindOfClass:[TorrentCell class]] || [view isKindOfClass:[TorrentCellActionButton class]];
+        if (isCellOrActionButton)
         {
             statusString = torrent.statusString;
         }
@@ -1047,24 +1075,31 @@ extern char const kPlayButtonRepresentedKey = '\0';
 
         if (statusString)
         {
-            BOOL iconHover = [view isKindOfClass:[TorrentCell class]] || [view isKindOfClass:[TorrentCellActionButton class]];
+            BOOL iconHover = isCellOrActionButton;
             self.fHoverEventDict = @{
                 @"string" : statusString,
                 @"row" : [NSNumber numberWithInteger:row],
                 @"iconHover" : @(iconHover)
             };
         }
-    }
 
-    [self refreshTorrentRowInPlace:row];
+        if (isCellOrActionButton)
+            [self refreshTorrentRowInPlace:row];
+        else
+            [self refreshTorrentStatusOnly:row];
+    }
 }
 
 - (void)performDelayedHoverHide
 {
     self.fHoverEventDict = nil;
     NSIndexSet* visible = [self visibleRowIndexSet];
+    BOOL minimal = self.fSmallView;
     [visible enumerateIndexesUsingBlock:^(NSUInteger row, BOOL*) {
-        [self refreshTorrentRowInPlace:(NSInteger)row];
+        if (minimal)
+            [self refreshTorrentRowInPlace:(NSInteger)row];
+        else
+            [self refreshTorrentStatusOnly:(NSInteger)row];
     }];
 }
 
