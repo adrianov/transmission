@@ -4,6 +4,7 @@
 
 /beta
 /build
+/dist
 Transmission.xcodeproj/*.xcworkspace
 Transmission.xcodeproj/xcuserdata
 /cli/transmissioncli
