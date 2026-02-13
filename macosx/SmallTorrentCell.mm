@@ -8,8 +8,12 @@
 #import "TorrentTableView.h"
 #import "Torrent.h"
 
+static NSString* const kTrackingAreaRow = @"row";
+static NSString* const kTrackingAreaIcon = @"icon";
+
 @interface SmallTorrentCell ()
-@property(nonatomic) NSTrackingArea* fTrackingArea;
+@property(nonatomic) NSTrackingArea* fRowTrackingArea;
+@property(nonatomic) NSTrackingArea* fIconTrackingArea;
 @end
 
 @implementation SmallTorrentCell
@@ -17,47 +21,63 @@
 - (void)mouseEntered:(NSEvent*)event
 {
     [super mouseEntered:event];
-    NSPoint p = [self.window mouseLocationOutsideOfEventStream];
-    p = [self convertPoint:p fromView:nil];
-    NSRect iconRect = self.fIconView ? self.fIconView.frame : NSZeroRect;
-    self.fIconHover = !NSIsEmptyRect(iconRect) && NSPointInRect(p, iconRect);
-    [self.fTorrentTableView hoverEventBeganForView:self];
+
+    NSTrackingArea* area = event.trackingArea;
+    NSDictionary* info = area.userInfo;
+
+    if ([kTrackingAreaIcon isEqualToString:info[@"type"]])
+    {
+        self.fIconHover = YES;
+        if (self.fTorrentTableView)
+        {
+            NSInteger row = [self.fTorrentTableView rowForView:self];
+            [self.fTorrentTableView refreshTorrentRowInPlace:row];
+        }
+    }
+    else if ([kTrackingAreaRow isEqualToString:info[@"type"]])
+    {
+        if (self.fTorrentTableView)
+            [self.fTorrentTableView hoverEventBeganForView:self];
+    }
 }
 
 - (void)mouseExited:(NSEvent*)event
 {
     [super mouseExited:event];
-    self.fIconHover = NO;
-    [self.fTorrentTableView hoverEventEndedForView:self];
-}
 
-- (void)mouseMoved:(NSEvent*)event
-{
-    NSPoint p = [self.window mouseLocationOutsideOfEventStream];
-    p = [self convertPoint:p fromView:nil];
-    NSRect iconRect = self.fIconView ? self.fIconView.frame : NSZeroRect;
-    BOOL inIcon = !NSIsEmptyRect(iconRect) && NSPointInRect(p, iconRect);
-    if (inIcon != self.fIconHover)
+    NSTrackingArea* area = event.trackingArea;
+    NSDictionary* info = area.userInfo;
+
+    if ([kTrackingAreaIcon isEqualToString:info[@"type"]])
     {
-        self.fIconHover = inIcon;
-        NSInteger row = [self.fTorrentTableView rowForView:self];
-        [self.fTorrentTableView refreshTorrentRowInPlace:row];
+        self.fIconHover = NO;
+        if (self.fTorrentTableView)
+        {
+            NSInteger row = [self.fTorrentTableView rowForView:self];
+            [self.fTorrentTableView refreshTorrentRowInPlace:row];
+        }
     }
-}
-
-- (void)mouseUp:(NSEvent*)event
-{
-    [super mouseUp:event];
-    [self updateTrackingAreas];
+    else if ([kTrackingAreaRow isEqualToString:info[@"type"]])
+    {
+        self.fIconHover = NO;
+        if (self.fTorrentTableView)
+            [self.fTorrentTableView hoverEventEndedForView:self];
+    }
 }
 
 - (void)updateTrackingAreas
 {
     [super updateTrackingAreas];
 
-    if (self.fTrackingArea != nil)
+    if (self.fRowTrackingArea != nil)
     {
-        [self removeTrackingArea:self.fTrackingArea];
+        [self removeTrackingArea:self.fRowTrackingArea];
+        self.fRowTrackingArea = nil;
+    }
+    if (self.fIconTrackingArea != nil)
+    {
+        [self removeTrackingArea:self.fIconTrackingArea];
+        self.fIconTrackingArea = nil;
     }
 
     NSRect rowRect = self.bounds;
@@ -70,16 +90,34 @@
             rowRect = [self convertRect:tableRowRect fromView:self.fTorrentTableView];
         }
     }
-    NSTrackingAreaOptions opts = (NSTrackingMouseEnteredAndExited | NSTrackingMouseMoved | NSTrackingActiveInKeyWindow);
-    self.fTrackingArea = [[NSTrackingArea alloc] initWithRect:rowRect options:opts owner:self userInfo:nil];
-    [self addTrackingArea:self.fTrackingArea];
 
-    NSPoint mouseLocation = [self.window mouseLocationOutsideOfEventStream];
-    mouseLocation = [self convertPoint:mouseLocation fromView:nil];
-    if (NSPointInRect(mouseLocation, rowRect))
-        [self mouseEntered:[[NSEvent alloc] init]];
-    else
-        [self mouseExited:[[NSEvent alloc] init]];
+    if (!NSIsEmptyRect(rowRect))
+    {
+        NSDictionary* rowInfo = @{ @"type" : kTrackingAreaRow };
+        self.fRowTrackingArea = [[NSTrackingArea alloc] initWithRect:rowRect
+                                                              options:NSTrackingMouseEnteredAndExited | NSTrackingActiveInKeyWindow
+                                                                owner:self
+                                                             userInfo:rowInfo];
+        [self addTrackingArea:self.fRowTrackingArea];
+    }
+
+    NSRect iconRect = self.fIconView ? self.fIconView.frame : NSZeroRect;
+    if (!NSIsEmptyRect(iconRect))
+    {
+        NSDictionary* iconInfo = @{ @"type" : kTrackingAreaIcon };
+        self.fIconTrackingArea = [[NSTrackingArea alloc] initWithRect:iconRect
+                                                               options:NSTrackingMouseEnteredAndExited | NSTrackingActiveInKeyWindow
+                                                                 owner:self
+                                                              userInfo:iconInfo];
+        [self addTrackingArea:self.fIconTrackingArea];
+    }
+
+    if (self.window != nil)
+    {
+        NSPoint mouseLocation = [self.window mouseLocationOutsideOfEventStream];
+        mouseLocation = [self convertPoint:mouseLocation fromView:nil];
+        self.fIconHover = !NSIsEmptyRect(iconRect) && NSPointInRect(mouseLocation, iconRect);
+    }
 }
 
 @end
