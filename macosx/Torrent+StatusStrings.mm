@@ -186,34 +186,7 @@ static NSDateComponentsFormatter* etaFormatter()
         switch (self.fStat->activity)
         {
         case TR_STATUS_STOPPED:
-            if (self.finishedSeeding)
-            {
-                string = NSLocalizedString(@"Seeding complete", "Torrent -> status string");
-            }
-            else if (self.pausedForDiskSpace)
-            {
-                NSTimeInterval now = [NSDate timeIntervalSinceReferenceDate];
-                if (now - self.fLastDiskSpaceCheckTime > kDiskSpaceCheckThrottleSeconds)
-                {
-                    [self alertForRemainingDiskSpace];
-                    self.fLastDiskSpaceCheckTime = now;
-                }
-
-                NSString* usedString = [NSString stringForFileSizeOneDecimal:self.fDiskSpaceUsedByTorrents];
-                NSString* neededString = [NSString stringForFileSizeOneDecimal:self.diskSpaceNeeded];
-                NSString* availableString = [NSString stringForFileSizeOneDecimal:self.diskSpaceAvailable];
-                NSString* totalString = [NSString stringForFileSizeOneDecimal:self.diskSpaceTotal];
-                string = [NSString
-                    stringWithFormat:NSLocalizedString(@"Not enough disk space. Used for torrents %@, Need %@, Available %@ of %@", "Torrent -> status string"),
-                                     usedString,
-                                     neededString,
-                                     availableString,
-                                     totalString];
-            }
-            else
-            {
-                string = NSLocalizedString(@"Paused", "Torrent -> status string");
-            }
+            string = [self stoppedStatusString];
             break;
 
         case TR_STATUS_DOWNLOAD_WAIT:
@@ -291,6 +264,34 @@ static NSDateComponentsFormatter* etaFormatter()
     return string;
 }
 
+- (NSString*)stoppedStatusString
+{
+    if (self.finishedSeeding)
+    {
+        return NSLocalizedString(@"Seeding complete", "Torrent -> status string");
+    }
+    if (self.pausedForDiskSpace)
+    {
+        NSTimeInterval now = [NSDate timeIntervalSinceReferenceDate];
+        if (now - self.fLastDiskSpaceCheckTime > kDiskSpaceCheckThrottleSeconds)
+        {
+            [self alertForRemainingDiskSpace];
+            self.fLastDiskSpaceCheckTime = now;
+        }
+        NSString* usedString = [NSString stringForFileSizeOneDecimal:self.fDiskSpaceUsedByTorrents];
+        NSString* neededString = [NSString stringForFileSizeOneDecimal:self.diskSpaceNeeded];
+        NSString* availableString = [NSString stringForFileSizeOneDecimal:self.diskSpaceAvailable];
+        NSString* totalString = [NSString stringForFileSizeOneDecimal:self.diskSpaceTotal];
+        return [NSString
+            stringWithFormat:NSLocalizedString(@"Not enough disk space. Used for torrents %@, Need %@, Available %@ of %@", "Torrent -> status string"),
+                             usedString,
+                             neededString,
+                             availableString,
+                             totalString];
+    }
+    return NSLocalizedString(@"Paused", "Torrent -> status string");
+}
+
 - (NSString*)shortStatusString
 {
     NSString* string;
@@ -298,14 +299,7 @@ static NSDateComponentsFormatter* etaFormatter()
     switch (self.fStat->activity)
     {
     case TR_STATUS_STOPPED:
-        if (self.finishedSeeding)
-        {
-            string = NSLocalizedString(@"Seeding complete", "Torrent -> status string");
-        }
-        else
-        {
-            string = NSLocalizedString(@"Paused", "Torrent -> status string");
-        }
+        string = [self stoppedStatusString];
         break;
 
     case TR_STATUS_DOWNLOAD_WAIT:
