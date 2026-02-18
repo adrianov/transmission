@@ -228,6 +228,42 @@
 
     NSString* title = self;
 
+    // Remove year ellipsis pattern (e.g. "1971...1977", "1971..1977") at start so later processing cannot alter it
+    NSRegularExpression* yearEllipsisRemoveAtStartRegex = [NSRegularExpression regularExpressionWithPattern:@"(?:19|20)\\d{2}(?:\\.{2,}|\u2026)(?:19|20)\\d{2}"
+                                                                                                    options:0
+                                                                                                      error:nil];
+    if (yearEllipsisRemoveAtStartRegex != nil)
+    {
+        title = [yearEllipsisRemoveAtStartRegex stringByReplacingMatchesInString:title options:0
+                                                                           range:NSMakeRange(0, title.length)
+                                                                    withTemplate:@" "];
+    }
+
+    // Detect year range with ellipsis (e.g. "1971...1977" or "1971..1977") on original string before any processing that might alter dots
+    NSString* earlyYearInterval = nil;
+    NSRegularExpression* yearEllipsisEarlyRegex = [NSRegularExpression regularExpressionWithPattern:@"((?:19|20)\\d{2})(?:\\.{2,}|\u2026)((?:19|20)\\d{2})"
+                                                                                            options:0
+                                                                                              error:nil];
+    NSTextCheckingResult* earlyEllipsisMatch = [yearEllipsisEarlyRegex firstMatchInString:self options:0
+                                                                                    range:NSMakeRange(0, self.length)];
+    if (earlyEllipsisMatch && earlyEllipsisMatch.numberOfRanges > 2)
+    {
+        NSRange fullRange = [earlyEllipsisMatch rangeAtIndex:0];
+        NSInteger start = (NSInteger)fullRange.location;
+        NSInteger end = (NSInteger)(fullRange.location + fullRange.length);
+        BOOL atWordBoundary = (start == 0 ||
+                               ![[NSCharacterSet decimalDigitCharacterSet]
+                                   characterIsMember:[self characterAtIndex:(NSUInteger)(start - 1)]]) &&
+            (end >= (NSInteger)self.length ||
+             ![[NSCharacterSet decimalDigitCharacterSet] characterIsMember:[self characterAtIndex:(NSUInteger)end]]);
+        if (atWordBoundary)
+        {
+            NSString* startYear = [self substringWithRange:[earlyEllipsisMatch rangeAtIndex:1]];
+            NSString* endYear = [self substringWithRange:[earlyEllipsisMatch rangeAtIndex:2]];
+            earlyYearInterval = [NSString stringWithFormat:@"%@-%@", startYear, endYear];
+        }
+    }
+
     // Always replace underscores with spaces and collapse multiple whitespaces
     title = [title stringByReplacingOccurrencesOfString:@"_" withString:@" "];
 
@@ -543,7 +579,7 @@
         date = [title substringWithRange:[dateMatch rangeAtIndex:1]];
     }
 
-    // Year interval pattern (e.g., "2000 - 2003" or "2000-2003")
+    // Year interval: hyphen (e.g. "2000-2003") or ellipsis (e.g. "1971...1977")
     NSRegularExpression* yearIntervalRegex = [NSRegularExpression regularExpressionWithPattern:@"\\b((?:19|20)\\d{2})\\s*-\\s*((?:19|20)\\d{2})\\b"
                                                                                        options:0
                                                                                          error:nil];
@@ -555,6 +591,23 @@
         NSString* startYear = [title substringWithRange:[yearIntervalMatch rangeAtIndex:1]];
         NSString* endYear = [title substringWithRange:[yearIntervalMatch rangeAtIndex:2]];
         yearInterval = [NSString stringWithFormat:@"%@-%@", startYear, endYear];
+    }
+    if (!yearInterval)
+    {
+        // Two or more dots or Unicode ellipsis (U+2026) between years, e.g. "1971...1977", "1971..1977", "1971…1977"
+        NSRegularExpression* yearEllipsisRegex = [NSRegularExpression regularExpressionWithPattern:@"\\b((?:19|20)\\d{2})(?:\\.{2,}|\u2026)((?:19|20)\\d{2})\\b"
+                                                                                           options:0
+                                                                                             error:nil];
+        NSTextCheckingResult* ellipsisMatch = [yearEllipsisRegex firstMatchInString:title options:0
+                                                                              range:NSMakeRange(0, title.length)];
+        if (ellipsisMatch && ellipsisMatch.numberOfRanges > 2)
+        {
+            NSString* startYear = [title substringWithRange:[ellipsisMatch rangeAtIndex:1]];
+            NSString* endYear = [title substringWithRange:[ellipsisMatch rangeAtIndex:2]];
+            yearInterval = [NSString stringWithFormat:@"%@-%@", startYear, endYear];
+        }
+        if (!yearInterval && earlyYearInterval)
+            yearInterval = earlyYearInterval;
     }
 
     // Extract year (1900-2099) - but not if it's part of a date or interval
@@ -1368,6 +1421,17 @@
                                                                                                    error:nil];
         result = [yearIntervalRemoveRegex stringByReplacingMatchesInString:result options:0 range:NSMakeRange(0, result.length)
                                                               withTemplate:@""];
+        NSRegularExpression* yearEllipsisRemoveRegex = [NSRegularExpression regularExpressionWithPattern:@"(?:19|20)\\d{2}(?:\\.{2,}|\u2026)(?:19|20)\\d{2}"
+                                                                                                 options:0
+                                                                                                   error:nil];
+        result = [yearEllipsisRemoveRegex stringByReplacingMatchesInString:result options:0 range:NSMakeRange(0, result.length)
+                                                              withTemplate:@""];
+        // Remove orphaned year-with-dots (e.g. "1971.." or "1971...") when second year was in different format
+        NSRegularExpression* orphanYearDotsRegex = [NSRegularExpression regularExpressionWithPattern:@"\\b(?:19|20)\\d{2}\\.{2,}"
+                                                                                             options:0
+                                                                                               error:nil];
+        result = [orphanYearDotsRegex stringByReplacingMatchesInString:result options:0 range:NSMakeRange(0, result.length)
+                                                          withTemplate:@""];
     }
     if (year.length > 0)
         result = [result tr_stringByRemovingOneYear:year];

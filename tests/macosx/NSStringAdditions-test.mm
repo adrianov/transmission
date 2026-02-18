@@ -194,6 +194,21 @@ TEST_F(NSStringAdditionsTest, HumanReadableTitle_YearInterval)
     EXPECT_TRUE([result containsString:@"(2000-2003)"]) << "Should contain year interval, got: " << [result UTF8String];
 }
 
+TEST_F(NSStringAdditionsTest, HumanReadableTitle_YearIntervalEllipsis)
+{
+    NSString* input = @"T. Rex - 1971...1977";
+    NSString* result = input.humanReadableTitle;
+    EXPECT_STREQ([result UTF8String], "T. Rex (1971-1977)") << "Should show artist and year range, got: " << [result UTF8String];
+}
+
+TEST_F(NSStringAdditionsTest, HumanReadableTitle_YearIntervalTwoDots)
+{
+    NSString* input = @"T. Rex - 1971..1977";
+    NSString* result = input.humanReadableTitle;
+    EXPECT_STREQ([result UTF8String], "T. Rex (1971-1977)")
+        << "Two-dot year range should format as (1971-1977), got: " << [result UTF8String];
+}
+
 TEST_F(NSStringAdditionsTest, HumanReadableTitle_MergedResolutionPattern)
 {
     NSString* input = @"Sting - Live At The Olympia Paris.2017.BDRip1080p";

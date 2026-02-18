@@ -67,6 +67,7 @@ Four-digit years (1900-2099) are extracted and shown in parentheses.
 
 **Year intervals:**
 - `2000 - 2003` or `2000-2003` → `(2000-2003)`
+- `1971...1977` or `1971..1977` (dots or ellipsis between years) → `(1971-1977)`
 - Intervals take precedence over single years
 
 **Handling existing parentheses:**
@@ -158,6 +159,7 @@ Parts are assembled with specific formatting:
 | `Kinds of Kindness (2024) WEB-DL SDR 2160p.mkv` | `Kinds of Kindness (2024) #2160p` |
 | `Movie.Name.2004.XviD.avi` | `Movie Name (2004) #xvid` |
 | `Golden Disco Hits - 2000 - 2003` | `Golden Disco Hits (2000-2003)` |
+| `T. Rex - 1971...1977` | `T. Rex (1971-1977)` |
 | `Artist - Album Name (2020) [FLAC]` | `Artist - Album Name (2020) #flac` |
 | `Artist.Album.2019.MP3` | `Artist Album (2019) #mp3` |
 | `The.White.Lotus.S03E05.Full-Moon.Party.1080p.AMZN.WEB-DL.H.264-EniaHD.mkv` | Episode button: `▶ S3 E5 - Full-Moon Party` |

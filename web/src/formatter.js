@@ -145,6 +145,20 @@ function formatHumanTitle(name) {
     .replaceAll(/\s+/g, ' ')
     .trim();
 
+  // Extract year ellipsis interval (e.g. "1971...1977", "1971..1977") before removing it
+  const earlyYearEllipsisMatch = title.match(
+    /\b((?:19|20)\d{2})(?:\.{2,}|\u2026)((?:19|20)\d{2})\b/,
+  );
+  const earlyYearInterval = earlyYearEllipsisMatch
+    ? `${earlyYearEllipsisMatch[1]}-${earlyYearEllipsisMatch[2]}`
+    : null;
+
+  // Remove year ellipsis pattern (e.g. "1971...1977", "1971..1977") early so later processing cannot alter dots
+  title = title.replaceAll(
+    /(?:19|20)\d{2}(?:\.{2,}|\u2026)(?:19|20)\d{2}/g,
+    ' ',
+  );
+
   // Ensure no space after '(' and no space before ')'
   title = title.replaceAll(/\(\s+/g, '(').replaceAll(/\s+\)/g, ')');
   // Ensure space before '(' when it follows a word character (e.g. NaughtyAmerica(NaughtyBookworms) -> NaughtyAmerica (NaughtyBookworms))
@@ -225,13 +239,13 @@ function formatHumanTitle(name) {
   const dateMatch = fullDateMatch || shortDateMatch;
   const date = dateMatch ? dateMatch[1] : null;
 
-  // Year interval pattern (e.g., "2000 - 2003" or "2000-2003")
-  const yearIntervalMatch = title.match(
+  // Year interval: hyphen (e.g. "2000-2003") or ellipsis (e.g. "1971...1977", "1971..1977")
+  const yearIntervalHyphenMatch = title.match(
     /\b((?:19|20)\d{2})\s*-\s*((?:19|20)\d{2})\b/,
   );
-  const yearInterval = yearIntervalMatch
-    ? `${yearIntervalMatch[1]}-${yearIntervalMatch[2]}`
-    : null;
+  const yearInterval = yearIntervalHyphenMatch
+    ? `${yearIntervalHyphenMatch[1]}-${yearIntervalHyphenMatch[2]}`
+    : earlyYearInterval;
 
   // Year pattern (standalone 4-digit year between 1900-2099) - but not if it's part of a date or interval
   const year =
@@ -277,9 +291,15 @@ function formatHumanTitle(name) {
     )
     .replaceAll(/\(?\(?(МР3|МРЗ)\)?/gi, '')
     .replaceAll(/\.?S\d{1,2}(E\d+)?\b/gi, '');
-  // Remove year interval (and preceding dot or surrounding parentheses)
+  // Remove year interval (hyphen or ellipsis) and preceding dot or surrounding parentheses
   if (yearInterval) {
     title = title.replace(/\.?\(?(?:19|20)\d{2}\s*-\s*(?:19|20)\d{2}\)?/, '');
+    title = title.replaceAll(
+      /(?:19|20)\d{2}(?:\.{2,}|\u2026)(?:19|20)\d{2}/g,
+      '',
+    );
+    // Remove orphaned year-with-dots (e.g. "1971.." or "1971...") when second year was in different format
+    title = title.replaceAll(/\b(?:19|20)\d{2}\.{2,}/g, '');
   }
   // Remove year only if not part of a full date or interval (and preceding dot or surrounding parentheses)
   if (year) {
@@ -324,7 +344,9 @@ function formatHumanTitle(name) {
   /* eslint-enable sonarjs/slow-regex */
 
   // Remove empty parentheses and parentheticals that only contain HD/SD (artifacts from resolution/tag removal)
-  title = title.replaceAll(/\(\s*\)/g, '').replaceAll(/\(\s*(?:HD|SD)\s*\)/gi, '');
+  title = title
+    .replaceAll(/\(\s*\)/g, '')
+    .replaceAll(/\(\s*(?:HD|SD)\s*\)/gi, '');
 
   // Remove trailing/leading hyphens and spaces (but not dots - they may be ellipsis)
   while (title.startsWith(' ') || title.startsWith('-')) {
