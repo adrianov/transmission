@@ -343,7 +343,7 @@ Gw
                             <constraint firstAttribute="height" constant="96" id="t7f-gh-h0k"/>
                         </constraints>
                     </box>
-                    <searchField wantsLayer="YES" focusRingType="none" verticalHuggingPriority="750" allowsCharacterPickerTouchBarItem="YES" translatesAutoresizingMaskIntoConstraints="NO" id="112">
+                    <searchField verticalHuggingPriority="750" allowsCharacterPickerTouchBarItem="YES" translatesAutoresizingMaskIntoConstraints="NO" id="112">
                         <rect key="frame" x="20" y="167" width="110" height="20"/>
                         <constraints>
                             <constraint firstAttribute="width" constant="110" id="Qk0-yA-JHe"/>

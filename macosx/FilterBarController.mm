@@ -6,7 +6,6 @@
 #import "FilterButton.h"
 #import "GroupsController.h"
 #import "NSStringAdditions.h"
-
 FilterType const FilterTypeNone = @"None";
 FilterType const FilterTypeActive = @"Active";
 FilterType const FilterTypeDownload = @"Download";
@@ -62,7 +61,7 @@ NSInteger const kGroupFilterAllTag = -2;
 
     [self.fGroupsButton.menu itemWithTag:kGroupFilterAllTag].title = NSLocalizedString(@"All Groups", "Filter Bar -> group filter menu");
 
-    self.fSearchField.placeholderString = NSLocalizedString(@"Press Enter to Search on the rutracker.org...", "Filter Bar -> search field");
+    self.fSearchField.placeholderString = NSLocalizedString(@"Filter...", "Filter Bar -> search field placeholder");
 
     //localize search menu
     NSMenuItem* nameItem = [self.fSearchField.searchMenuTemplate itemWithTag:0];

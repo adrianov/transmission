@@ -12,7 +12,8 @@ target_sources(macosx-test
         ${CMAKE_SOURCE_DIR}/macosx/NSDataAdditions.h
         ${CMAKE_SOURCE_DIR}/macosx/NSDataAdditions.mm
         ${CMAKE_SOURCE_DIR}/macosx/NSStringAdditions.h
-        ${CMAKE_SOURCE_DIR}/macosx/NSStringAdditions.mm)
+        ${CMAKE_SOURCE_DIR}/macosx/NSStringAdditions.mm
+)
 
 set_property(
     TARGET macosx-test

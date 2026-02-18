@@ -148,7 +148,7 @@
                             <autoresizingMask key="autoresizingMask"/>
                         </tableHeaderView>
                     </scrollView>
-                    <searchField wantsLayer="YES" verticalHuggingPriority="750" allowsCharacterPickerTouchBarItem="YES" translatesAutoresizingMaskIntoConstraints="NO" id="72">
+                    <searchField verticalHuggingPriority="750" allowsCharacterPickerTouchBarItem="YES" translatesAutoresizingMaskIntoConstraints="NO" id="72">
                         <rect key="frame" x="353" y="4" width="184" height="22"/>
                         <constraints>
                             <constraint firstAttribute="width" constant="184" id="DIT-6d-IWt"/>

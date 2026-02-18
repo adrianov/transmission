@@ -2,7 +2,7 @@
 // It may be used under the MIT (SPDX: MIT) license.
 // License text can be found in the licenses/ folder.
 
-// NSSearchFieldDelegate: toolbar/filter search sync, Enter-to-search, placeholder and external search.
+// NSSearchFieldDelegate: toolbar/filter search sync, Enter-to-search, focus, preload, placeholder and external search.
 
 #import "ControllerPrivate.h"
 #import "FilterBarController.h"
@@ -49,18 +49,38 @@
     NSSearchField* searchField = notification.object;
     if ([searchField isKindOfClass:[NSSearchField class]])
     {
-        if (searchField == self.fToolbarSearchField)
-            self.fFilterBar.fSearchField.stringValue = searchField.stringValue;
-        else if (searchField == self.fFilterBar.fSearchField)
-            self.fToolbarSearchField.stringValue = searchField.stringValue;
-
+        [self syncSearchField:searchField];
         [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(applyFilter) object:nil];
         [self performSelector:@selector(applyFilter) withObject:nil afterDelay:0.12];
     }
 }
 
+- (void)searchFieldDidEndSearching:(NSSearchField*)searchField
+{
+    [self syncSearchField:searchField];
+    [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(applyFilter) object:nil];
+    [self applyFilter];
+}
+
+- (void)syncSearchField:(NSSearchField*)searchField
+{
+    if (searchField == self.fToolbarSearchField)
+        self.fFilterBar.fSearchField.stringValue = searchField.stringValue;
+    else if (searchField == self.fFilterBar.fSearchField)
+        self.fToolbarSearchField.stringValue = searchField.stringValue;
+}
+
 - (void)updateSearchPlaceholder
 {
+    static NSTimeInterval lastUpdate = 0;
+    static NSUInteger lastTorrentCount = NSUIntegerMax;
+    NSUInteger const currentCount = self.fTorrents.count;
+    NSTimeInterval const now = [NSDate timeIntervalSinceReferenceDate];
+    if (currentCount == lastTorrentCount && (now - lastUpdate) < 30.0)
+        return;
+    lastUpdate = now;
+    lastTorrentCount = currentCount;
+
     NSMutableSet<NSString*>* searchDomains = [NSMutableSet setWithArray:@[ @"rutracker.org", @"kinozal.tv", @"nnmclub.to" ]];
 
     NSError* error = nil;
@@ -107,8 +127,10 @@
         stringWithFormat:NSLocalizedString(@"Press Enter to Search on %@...", "Search toolbar item -> placeholder"), topDomain];
     if (![self.fToolbarSearchField.placeholderString isEqualToString:placeholder])
         self.fToolbarSearchField.placeholderString = placeholder;
-    if (![self.fFilterBar.fSearchField.placeholderString isEqualToString:placeholder])
-        self.fFilterBar.fSearchField.placeholderString = placeholder;
+
+    NSString* shortPlaceholder = NSLocalizedString(@"Filter...", "Filter Bar -> search field placeholder");
+    if (![self.fFilterBar.fSearchField.placeholderString isEqualToString:shortPlaceholder])
+        self.fFilterBar.fSearchField.placeholderString = shortPlaceholder;
 }
 
 - (void)searchTorrentsWithQuery:(NSString*)query
@@ -166,6 +188,33 @@
         NSURL* url = [NSURL URLWithString:[NSString stringWithFormat:urlTemplate, encodedQuery]];
         [NSWorkspace.sharedWorkspace openURL:url configuration:configuration completionHandler:nil];
     }
+}
+
+- (void)focusFilterField
+{
+    if (self.fFilterBar && !self.fFilterBar.hidden)
+    {
+        [self.fWindow makeFirstResponder:self.fFilterBar.fSearchField];
+    }
+    else
+    {
+        [self.fWindow makeFirstResponder:self.fToolbarSearchField];
+    }
+}
+
+/// One-time preload of AppKit text input / NSTextInputContext stack so first user click in a search field does not hang on dlopen.
+- (void)preloadSearchFieldTextInput
+{
+    static BOOL didPreload = NO;
+    if (didPreload)
+        return;
+    NSSearchField* field = (self.fFilterBar && !self.fFilterBar.hidden) ? self.fFilterBar.fSearchField : self.fToolbarSearchField;
+    if (!field || field.window != self.fWindow)
+        return;
+    id const previous = self.fWindow.firstResponder;
+    [self.fWindow makeFirstResponder:field];
+    [self.fWindow makeFirstResponder:previous ?: self.fTableView];
+    didPreload = YES;
 }
 
 @end

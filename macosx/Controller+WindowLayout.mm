@@ -38,15 +38,17 @@
         self.fFilterBar.automaticallyAdjustsSize = NO;
 
         [self.fWindow addTitlebarAccessoryViewController:self.fFilterBar];
+        self.fFilterBar.fSearchField.delegate = (id<NSSearchFieldDelegate>)self;
     }
 
     if ([self.fDefaults boolForKey:@"FilterBar"])
     {
         self.fFilterBar.hidden = NO;
-        [self focusFilterField];
     }
     else
+    {
         self.fFilterBar.hidden = YES;
+    }
 
     [self fullUpdateUI];
     [self updateForAutoSize];
@@ -138,7 +140,11 @@
 - (void)hideToolBarBezels:(BOOL)hide
 {
     for (NSToolbarItem* item in self.fWindow.toolbar.items)
+    {
+        if ([item isKindOfClass:[NSSearchToolbarItem class]])
+            continue;
         item.view.hidden = hide;
+    }
 }
 
 - (void)removeHeightConstraints

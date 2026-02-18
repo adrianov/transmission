@@ -99,7 +99,9 @@
 
 - (void)insertTorrentAtTop:(Torrent*)torrent;
 - (void)refreshVisibleTransferRows;
+- (void)reloadTransfersTableContent;
 - (void)selectAndScrollToTorrent:(Torrent*)torrent;
 - (void)updateSearchPlaceholder;
+- (void)preloadSearchFieldTextInput;
 
 @end
