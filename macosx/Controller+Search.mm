@@ -5,6 +5,7 @@
 // NSSearchFieldDelegate: toolbar/filter search sync, Enter-to-search, focus, preload, placeholder and external search.
 
 #import "ControllerPrivate.h"
+#import <objc/runtime.h>
 #import "FilterBarController.h"
 #import "Torrent.h"
 #import "TorrentTableView.h"
@@ -41,7 +42,37 @@
 
     self.fToolbarSearchField.stringValue = @"";
     self.fFilterBar.fSearchField.stringValue = @"";
+    [self updateSearchFieldClearButtonVisibility:self.fToolbarSearchField];
+    [self updateSearchFieldClearButtonVisibility:self.fFilterBar.fSearchField];
     [self applyFilter];
+}
+
+static void* TRSearchFieldCancelCellKey = &TRSearchFieldCancelCellKey;
+
+- (void)updateSearchFieldClearButtonVisibility:(NSSearchField*)field
+{
+    if (!field || ![field.cell isKindOfClass:[NSSearchFieldCell class]])
+        return;
+
+    NSSearchFieldCell* cell = (NSSearchFieldCell*)field.cell;
+    NSButtonCell* originalCancelCell = objc_getAssociatedObject(field, TRSearchFieldCancelCellKey);
+    if (originalCancelCell == nil && cell.cancelButtonCell != nil)
+    {
+        originalCancelCell = cell.cancelButtonCell;
+        objc_setAssociatedObject(field, TRSearchFieldCancelCellKey, originalCancelCell, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    }
+
+    if (field.stringValue.length == 0)
+    {
+        if (cell.cancelButtonCell != nil)
+            cell.cancelButtonCell = nil;
+    }
+    else if (cell.cancelButtonCell == nil && originalCancelCell != nil)
+    {
+        cell.cancelButtonCell = originalCancelCell;
+    }
+
+    [field setNeedsDisplay:YES];
 }
 
 - (void)controlTextDidChange:(NSNotification*)notification
@@ -49,7 +80,13 @@
     NSSearchField* searchField = notification.object;
     if ([searchField isKindOfClass:[NSSearchField class]])
     {
+        if (self.fSyncingSearchFields)
+            return;
         [self syncSearchField:searchField];
+        [self updateSearchFieldClearButtonVisibility:searchField];
+        NSSearchField* peer = [self peerSearchFieldForSearchField:searchField];
+        if (peer)
+            [self updateSearchFieldClearButtonVisibility:peer];
         [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(applyFilter) object:nil];
         [self performSelector:@selector(applyFilter) withObject:nil afterDelay:0.12];
     }
@@ -57,6 +94,8 @@
 
 - (void)searchFieldDidEndSearching:(NSSearchField*)searchField
 {
+    if (self.fSyncingSearchFields)
+        return;
     [self syncSearchField:searchField];
     [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(applyFilter) object:nil];
     [self applyFilter];
@@ -64,10 +103,26 @@
 
 - (void)syncSearchField:(NSSearchField*)searchField
 {
+    NSSearchField* peerField = [self peerSearchFieldForSearchField:searchField];
+    if (peerField == nil || [peerField.stringValue isEqualToString:searchField.stringValue])
+        return;
+
+    // Keep this guarded update: without it, mirrored stringValue writes bounce through both delegates and cause UI lag/hangs while typing.
+    // Do not replace search/cancel button cells here: that caused a painted clear-button dot and made the clear button unclickable.
+    self.fSyncingSearchFields = YES;
+    peerField.stringValue = searchField.stringValue;
+    self.fSyncingSearchFields = NO;
+    [self updateSearchFieldClearButtonVisibility:searchField];
+    [self updateSearchFieldClearButtonVisibility:peerField];
+}
+
+- (NSSearchField*)peerSearchFieldForSearchField:(NSSearchField*)searchField
+{
     if (searchField == self.fToolbarSearchField)
-        self.fFilterBar.fSearchField.stringValue = searchField.stringValue;
-    else if (searchField == self.fFilterBar.fSearchField)
-        self.fToolbarSearchField.stringValue = searchField.stringValue;
+        return self.fFilterBar.fSearchField;
+    if (searchField == self.fFilterBar.fSearchField)
+        return self.fToolbarSearchField;
+    return nil;
 }
 
 - (void)updateSearchPlaceholder
@@ -127,6 +182,8 @@
         stringWithFormat:NSLocalizedString(@"Press Enter to Search on %@...", "Search toolbar item -> placeholder"), topDomain];
     if (![self.fToolbarSearchField.placeholderString isEqualToString:placeholder])
         self.fToolbarSearchField.placeholderString = placeholder;
+    [self updateSearchFieldClearButtonVisibility:self.fToolbarSearchField];
+    [self updateSearchFieldClearButtonVisibility:self.fFilterBar.fSearchField];
 
     NSString* shortPlaceholder = NSLocalizedString(@"Filter...", "Filter Bar -> search field placeholder");
     if (![self.fFilterBar.fSearchField.placeholderString isEqualToString:shortPlaceholder])

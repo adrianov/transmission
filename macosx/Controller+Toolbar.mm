@@ -266,6 +266,7 @@
         searchField.placeholderString = NSLocalizedString(@"Press Enter to Search on the rutracker.org...", "Search toolbar item -> placeholder");
         searchField.delegate = self;
         self.fToolbarSearchField = searchField;
+        [self updateSearchFieldClearButtonVisibility:searchField];
 
         item.label = NSLocalizedString(@"Search", "Search toolbar item -> label");
         item.preferredWidthForSearchField = 240;

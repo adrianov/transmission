@@ -71,6 +71,7 @@
 
 @property(nonatomic) FilterBarController* fFilterBar;
 @property(nonatomic) NSSearchField* fToolbarSearchField;
+@property(nonatomic) BOOL fSyncingSearchFields;
 
 @property(nonatomic) QLPreviewPanel* fPreviewPanel;
 @property(nonatomic) BOOL fQuitting;
@@ -103,5 +104,6 @@
 - (void)selectAndScrollToTorrent:(Torrent*)torrent;
 - (void)updateSearchPlaceholder;
 - (void)preloadSearchFieldTextInput;
+- (void)updateSearchFieldClearButtonVisibility:(NSSearchField*)field;
 
 @end
