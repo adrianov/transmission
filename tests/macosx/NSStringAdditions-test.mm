@@ -8,7 +8,7 @@
 
 #import "macosx/NSStringAdditions.h"
 
-// Mock class to test icon logic without full TorrentTableView dependencies. Uses pathToOpen when provided (DRY with app: icon follows what we open).
+// Mock class to test icon logic without full TorrentTableView dependencies. Icon follows what opens: pathToOpen .cue = album.
 @interface PlayButtonIconTester : NSObject
 - (NSString*)symbolNameForType:(NSString*)type category:(NSString*)category path:(NSString*)path;
 - (NSString*)symbolNameForType:(NSString*)type
@@ -24,15 +24,15 @@
                           path:(NSString*)path
                     pathToOpen:(NSString*)pathToOpen
 {
-    BOOL const isCueFile = [path.pathExtension.lowercaseString isEqualToString:@"cue"] ||
-        (pathToOpen.length > 0 && [pathToOpen.pathExtension.lowercaseString isEqualToString:@"cue"]);
+    NSString* effectivePath = pathToOpen.length > 0 ? pathToOpen : path;
+    BOOL const opensAsCue = effectivePath.length > 0 && [effectivePath.pathExtension.lowercaseString isEqualToString:@"cue"];
     NSString* symbolName = @"play";
 
     if ([type isEqualToString:@"document-books"] || [category isEqualToString:@"books"])
     {
         symbolName = @"book";
     }
-    else if ([type isEqualToString:@"album"] || isCueFile)
+    else if (opensAsCue || [type isEqualToString:@"album"])
     {
         symbolName = @"music.note.list";
     }
@@ -289,11 +289,18 @@ TEST_F(PlayButtonIconTest, IconForCueFileUppercase)
     EXPECT_TRUE([symbolName isEqualToString:@"music.note.list"]) << "CUE file (uppercase) should show album icon";
 }
 
-TEST_F(PlayButtonIconTest, IconForAudioWithCueCompanion)
+TEST_F(PlayButtonIconTest, IconForOpensAsCue)
 {
-    // 1 FLAC + 1 CUE in same folder (e.g. different base names): play opens .cue → show album icon, not song
-    NSString* symbolName = [tester symbolNameForType:@"file" category:@"audio" path:@"Album.flac" pathToOpen:@"Album 2005.cue"];
-    EXPECT_TRUE([symbolName isEqualToString:@"music.note.list"]) << "Audio with pathToOpen .cue should show album icon";
+    // Opens .cue (album) → album icon
+    NSString* symbolName = [tester symbolNameForType:@"file" category:@"audio" path:@"Album.flac" pathToOpen:@"Album.cue"];
+    EXPECT_TRUE([symbolName isEqualToString:@"music.note.list"]) << "Opens as CUE should show album icon";
+}
+
+TEST_F(PlayButtonIconTest, IconForOpensAsTrack)
+{
+    // Opens audio file directly (individual track) → track icon
+    NSString* symbolName = [tester symbolNameForType:@"file" category:@"audio" path:@"Track.flac" pathToOpen:@"Track.flac"];
+    EXPECT_TRUE([symbolName isEqualToString:@"music.note"]) << "Opens as track should show track icon";
 }
 
 TEST_F(PlayButtonIconTest, IconForVideoFile)

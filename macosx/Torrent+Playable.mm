@@ -104,12 +104,38 @@ static NSString* normalizeTitleForTokenization(NSString* s);
     return NO;
 }
 
+/// Counts audio files (excluding CUE) and CUE files. For icon subtitle: tracks > cues → audios, else → albums.
+- (void)audioAndCueCount:(NSUInteger*)outAudioCount cueCount:(NSUInteger*)outCueCount
+{
+    static NSSet<NSString*>* audioExts;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        audioExts = [NSSet setWithArray:@[ @"mp3", @"flac", @"wav", @"aac", @"ogg", @"wma", @"m4a", @"ape", @"alac", @"aiff", @"opus", @"wv" ]];
+    });
+    NSUInteger audioCount = 0, cueCount = 0;
+    NSUInteger const n = self.fileCount;
+    for (NSUInteger i = 0; i < n; i++)
+    {
+        auto const file = tr_torrentFile(self.fHandle, (tr_file_index_t)i);
+        NSString* name = [NSString convertedStringFromCString:file.name];
+        NSString* ext = name.pathExtension.lowercaseString;
+        if ([ext isEqualToString:@"cue"])
+            cueCount++;
+        else if ([audioExts containsObject:ext])
+            audioCount++;
+    }
+    if (outAudioCount)
+        *outAudioCount = audioCount;
+    if (outCueCount)
+        *outCueCount = cueCount;
+}
+
 /// Count to show in file-based icon subtitle. Used by iconSubtitle.
 - (NSUInteger)iconSubtitleCountForFileBased
 {
-    if ([self isFileBasedAudioCueBased])
-        return self.playableFiles.count;
-    return self.fMediaFileCount;
+    NSUInteger audioCount = 0, cueCount = 0;
+    [self audioAndCueCount:&audioCount cueCount:&cueCount];
+    return (audioCount > cueCount) ? audioCount : cueCount;
 }
 
 /// Label for file-based icon subtitle. Nil if no label. Used by iconSubtitle.
@@ -120,7 +146,11 @@ static NSString* normalizeTitleForTokenization(NSString* s);
     case TorrentMediaTypeVideo:
         return @"videos";
     case TorrentMediaTypeAudio:
-        return [self isFileBasedAudioCueBased] ? @"albums" : @"audios";
+    {
+        NSUInteger audioCount = 0, cueCount = 0;
+        [self audioAndCueCount:&audioCount cueCount:&cueCount];
+        return (audioCount > cueCount) ? @"audios" : @"albums";
+    }
     case TorrentMediaTypeBooks:
         return @"books";
     case TorrentMediaTypeSoftware:
