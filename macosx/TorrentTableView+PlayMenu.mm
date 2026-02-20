@@ -36,7 +36,13 @@
             [type isEqualToString:@"album"] && !isCueFile && torrent && [self tracksForAlbumItem:fileItem torrent:torrent].count == 1);
         NSString* pathToOpen = torrent ? [torrent pathToOpenForPlayableItem:fileItem] : nil;
         BOOL opensAsCue = pathToOpen.length > 0 && [pathToOpen.pathExtension.lowercaseString isEqualToString:@"cue"];
-        NSString* cacheKey = [NSString stringWithFormat:@"%@:%@:%d:%d", type, category ?: @"", singleTrackAlbum ? 1 : 0, opensAsCue ? 1 : 0];
+        NSUInteger audioCount = 0, cueCount = 0;
+        if (torrent)
+            [torrent audioAndCueCount:&audioCount cueCount:&cueCount];
+        BOOL useAlbumsIcon = opensAsCue || [type isEqualToString:@"album"] ||
+            ([type isEqualToString:@"file"] && [category isEqualToString:@"audio"] && audioCount <= cueCount);
+        NSString* cacheKey = [NSString stringWithFormat:@"%@:%@:%d:%d:%d", type, category ?: @"", singleTrackAlbum ? 1 : 0, opensAsCue ? 1 : 0,
+            useAlbumsIcon ? 1 : 0];
         NSImage* cached = [self.fIconCache objectForKey:cacheKey];
         if (cached)
             return cached;
@@ -46,9 +52,7 @@
             symbolName = @"book";
         else if (singleTrackAlbum)
             symbolName = @"music.note";
-        else if (opensAsCue)
-            symbolName = @"music.note.list";
-        else if ([type isEqualToString:@"album"])
+        else if (useAlbumsIcon)
             symbolName = @"music.note.list";
         else if ([type isEqualToString:@"track"] || [category isEqualToString:@"audio"])
             symbolName = @"music.note";

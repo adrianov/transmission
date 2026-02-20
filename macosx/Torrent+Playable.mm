@@ -133,9 +133,13 @@ static NSString* normalizeTitleForTokenization(NSString* s);
 /// Count to show in file-based icon subtitle. Used by iconSubtitle.
 - (NSUInteger)iconSubtitleCountForFileBased
 {
-    NSUInteger audioCount = 0, cueCount = 0;
-    [self audioAndCueCount:&audioCount cueCount:&cueCount];
-    return (audioCount > cueCount) ? audioCount : cueCount;
+    if (self.fMediaType == TorrentMediaTypeAudio)
+    {
+        NSUInteger audioCount = 0, cueCount = 0;
+        [self audioAndCueCount:&audioCount cueCount:&cueCount];
+        return (audioCount > cueCount) ? audioCount : cueCount;
+    }
+    return self.fMediaFileCount;
 }
 
 /// Label for file-based icon subtitle. Nil if no label. Used by iconSubtitle.

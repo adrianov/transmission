@@ -192,6 +192,8 @@ extern NSString* const kTorrentDidChangeGroupNotification;
 
 // Returns .cue file path for a given audio file path, or nil if no matching .cue file found
 - (NSString*)cueFilePathForAudioPath:(NSString*)audioPath;
+/// Counts audio files and CUE files. Used for icon subtitle and icon selection (tracks > cues → audios).
+- (void)audioAndCueCount:(NSUInteger*)outAudioCount cueCount:(NSUInteger*)outCueCount;
 
 // Returns .cue file path for a given folder, or nil if no .cue file found in the folder
 - (NSString*)cueFilePathForFolder:(NSString*)folder;
