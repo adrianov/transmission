@@ -76,6 +76,31 @@ static NSString* const kGithubURL = @"https://github.com/transmission/transmissi
 static NSString* const kDonateURL = @"https://transmissionbt.com/donate/";
 
 static NSTimeInterval const kDonateNagTime = 60 * 60 * 24 * 7;
+static uint64_t sAutoImportScanCounter = 0;
+
+static BOOL autoImportDebugLoggingEnabled()
+{
+    return [NSUserDefaults.standardUserDefaults boolForKey:@"AutoImportDebugLogging"];
+}
+
+#define AUTOIMPORT_LOG(...)        \
+    do                             \
+    {                              \
+        if (autoImportDebugLoggingEnabled()) \
+        {                          \
+            NSLog(__VA_ARGS__);    \
+        }                          \
+    } while (0)
+
+static dispatch_queue_t autoImportQueue()
+{
+    static dispatch_queue_t queue;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        queue = dispatch_queue_create("com.transmissionbt.autoimport", DISPATCH_QUEUE_SERIAL);
+    });
+    return queue;
+}
 
 static void initUnits()
 {
@@ -843,7 +868,7 @@ void onTorrentCompletenessChanged(tr_torrent* tor, tr_completeness status, bool 
     }
 
     //auto importing
-    [self checkAutoImportDirectory];
+    [self checkAutoImportDirectoryWithReason:@"launch"];
 
     //registering the Web UI to Bonjour
     if ([self.fDefaults boolForKey:@"RPC"] && [self.fDefaults boolForKey:@"RPCWebDiscovery"])
@@ -1578,18 +1603,25 @@ void onTorrentCompletenessChanged(tr_torrent* tor, tr_completeness status, bool 
         return;
     }
 
+    AUTOIMPORT_LOG(@"AutoImport watcher event: note=%@ path=%@", notification ?: @"(null)", fpath ?: @"(null)");
+
     if (self.fAutoImportTimer.valid)
     {
+        AUTOIMPORT_LOG(@"AutoImport: invalidating pending delayed scan timer");
         [self.fAutoImportTimer invalidate];
     }
 
     //check again in 10 seconds in case torrent file wasn't complete
     self.fAutoImportTimer = [NSTimer scheduledTimerWithTimeInterval:10.0 target:self
-                                                           selector:@selector(checkAutoImportDirectory)
-                                                           userInfo:nil
+                                                           selector:@selector(checkAutoImportDirectoryFromTimer:)
+                                                           userInfo:@{
+                                                               @"notification" : notification ?: @"(null)",
+                                                               @"path" : fpath ?: @"(null)"
+                                                           }
                                                             repeats:NO];
+    AUTOIMPORT_LOG(@"AutoImport: scheduled delayed scan in 10s");
 
-    [self checkAutoImportDirectory];
+    [self checkAutoImportDirectoryWithReason:@"watcher-immediate"];
 }
 
 - (void)changeAutoImport
@@ -1602,82 +1634,203 @@ void onTorrentCompletenessChanged(tr_torrent* tor, tr_completeness status, bool 
 
     self.fAutoImportedNames = nil;
 
-    [self checkAutoImportDirectory];
+    [self checkAutoImportDirectoryWithReason:@"settings-change"];
+}
+
+- (void)checkAutoImportDirectoryFromTimer:(NSTimer*)timer
+{
+    NSDictionary* userInfo = timer.userInfo;
+    NSString* reason = [NSString
+        stringWithFormat:@"watcher-delayed note=%@ path=%@",
+                         userInfo[@"notification"] ?: @"(null)",
+                         userInfo[@"path"] ?: @"(null)"];
+    [self checkAutoImportDirectoryWithReason:reason];
 }
 
 - (void)checkAutoImportDirectory
 {
+    [self checkAutoImportDirectoryWithReason:@"unspecified"];
+}
+
+- (void)checkAutoImportDirectoryWithReason:(NSString*)reason
+{
+    uint64_t const scanId = ++sAutoImportScanCounter;
+    CFAbsoluteTime const requestStart = CFAbsoluteTimeGetCurrent();
+
     NSString* path;
     if (![self.fDefaults boolForKey:@"AutoImport"] || !(path = [self.fDefaults stringForKey:@"AutoImportDirectory"]))
     {
+        AUTOIMPORT_LOG(@"AutoImport[%llu] skip reason=%@: disabled or path missing", (unsigned long long)scanId, reason ?: @"(null)");
         return;
     }
 
-    path = path.stringByExpandingTildeInPath;
+    NSString* const pathSnapshot = path.stringByExpandingTildeInPath;
+    NSString* const reasonSnapshot = [reason copy] ?: @"(null)";
+    AUTOIMPORT_LOG(@"AutoImport[%llu] queued reason=%@ path=%@", (unsigned long long)scanId, reasonSnapshot, pathSnapshot);
 
-    NSArray<NSString*>* importedNames;
-    if (!(importedNames = [NSFileManager.defaultManager contentsOfDirectoryAtPath:path error:NULL]))
-    {
-        return;
-    }
-
-    //only check files that have not been checked yet
-    NSMutableArray* newNames = [importedNames mutableCopy];
-
-    if (self.fAutoImportedNames)
-    {
-        [newNames removeObjectsInArray:self.fAutoImportedNames];
-    }
-    else
-    {
-        self.fAutoImportedNames = [[NSMutableArray alloc] init];
-    }
-    [self.fAutoImportedNames setArray:importedNames];
-
-    for (NSString* file in newNames)
-    {
-        if ([file hasPrefix:@"."])
+    __weak typeof(self) weakSelf = self;
+    dispatch_async(autoImportQueue(), ^{
+        CFAbsoluteTime const bgStart = CFAbsoluteTimeGetCurrent();
+        NSArray<NSString*>* importedNames = [NSFileManager.defaultManager contentsOfDirectoryAtPath:pathSnapshot error:NULL];
+        if (!importedNames)
         {
-            continue;
+            AUTOIMPORT_LOG(@"AutoImport[%llu] list failed reason=%@ path=%@ after %.3fs",
+                           (unsigned long long)scanId,
+                           reasonSnapshot,
+                           pathSnapshot,
+                           CFAbsoluteTimeGetCurrent() - bgStart);
+            return;
         }
 
-        NSString* fullFile = [path stringByAppendingPathComponent:file];
-        NSURL* fileURL = [NSURL fileURLWithPath:fullFile];
-        NSString* contentType = nil;
-        [fileURL getResourceValue:&contentType forKey:NSURLContentTypeKey error:NULL];
+        __block BOOL shouldContinue = NO;
+        __block NSArray<NSString*>* previousImportedNames = @[];
+        dispatch_sync(dispatch_get_main_queue(), ^{
+            __strong typeof(self) strongSelf = weakSelf;
+            if (!strongSelf)
+            {
+                return;
+            }
 
-        if (!([contentType isEqualToString:@"org.bittorrent.torrent"] || [fullFile.pathExtension caseInsensitiveCompare:@"torrent"] == NSOrderedSame))
+            NSString* currentPath = nil;
+            if ([strongSelf.fDefaults boolForKey:@"AutoImport"] &&
+                (currentPath = [strongSelf.fDefaults stringForKey:@"AutoImportDirectory"]) != nil &&
+                [currentPath.stringByExpandingTildeInPath isEqualToString:pathSnapshot])
+            {
+                previousImportedNames = [strongSelf.fAutoImportedNames copy] ?: @[];
+                shouldContinue = YES;
+            }
+        });
+
+        if (!shouldContinue)
         {
-            continue;
+            AUTOIMPORT_LOG(@"AutoImport[%llu] stale scan ignored reason=%@ path=%@",
+                           (unsigned long long)scanId,
+                           reasonSnapshot,
+                           pathSnapshot);
+            return;
         }
 
-        NSDictionary<NSFileAttributeKey, id>* fileAttributes = [NSFileManager.defaultManager attributesOfItemAtPath:fullFile
-                                                                                                              error:nil];
-        if (fileAttributes.fileSize == 0)
+        NSMutableArray<NSString*>* newNames = [importedNames mutableCopy];
+        [newNames removeObjectsInArray:previousImportedNames];
+
+        NSMutableArray<NSDictionary<NSString*, NSString*>*>* filesToImport = [NSMutableArray array];
+        NSMutableArray<NSString*>* emptyFiles = [NSMutableArray array];
+        NSUInteger hiddenCount = 0;
+        NSUInteger typeMismatchCount = 0;
+        NSUInteger parseFailCount = 0;
+
+        for (NSString* file in newNames)
         {
-            // Workaround for Firefox downloads happening in two steps: first time being an empty file
-            [self.fAutoImportedNames removeObject:file];
-            continue;
+            if ([file hasPrefix:@"."])
+            {
+                ++hiddenCount;
+                continue;
+            }
+
+            NSString* fullFile = [pathSnapshot stringByAppendingPathComponent:file];
+            BOOL const hasTorrentExtension = [fullFile.pathExtension caseInsensitiveCompare:@"torrent"] == NSOrderedSame;
+            if (!hasTorrentExtension)
+            {
+                NSURL* fileURL = [NSURL fileURLWithPath:fullFile];
+                NSString* contentType = nil;
+                [fileURL getResourceValue:&contentType forKey:NSURLContentTypeKey error:NULL];
+                if (![contentType isEqualToString:@"org.bittorrent.torrent"])
+                {
+                    ++typeMismatchCount;
+                    continue;
+                }
+            }
+
+            NSDictionary<NSFileAttributeKey, id>* fileAttributes = [NSFileManager.defaultManager attributesOfItemAtPath:fullFile
+                                                                                                                  error:nil];
+            if (fileAttributes.fileSize == 0)
+            {
+                // Workaround for Firefox downloads happening in two steps: first time being an empty file
+                [emptyFiles addObject:file];
+                continue;
+            }
+
+            auto metainfo = tr_torrent_metainfo{};
+            if (!metainfo.parse_torrent_file(fullFile.UTF8String))
+            {
+                ++parseFailCount;
+                continue;
+            }
+
+            [filesToImport addObject:@{ @"name" : file, @"path" : fullFile }];
         }
 
-        auto metainfo = tr_torrent_metainfo{};
-        if (!metainfo.parse_torrent_file(fullFile.UTF8String))
-        {
-            continue;
-        }
+        AUTOIMPORT_LOG(@"AutoImport[%llu] scan done reason=%@ path=%@ listed=%lu previous=%lu new=%lu importable=%lu hidden=%lu type_skip=%lu empty=%lu parse_fail=%lu bg=%.3fs",
+                       (unsigned long long)scanId,
+                       reasonSnapshot,
+                       pathSnapshot,
+                       (unsigned long)importedNames.count,
+                       (unsigned long)previousImportedNames.count,
+                       (unsigned long)newNames.count,
+                       (unsigned long)filesToImport.count,
+                       (unsigned long)hiddenCount,
+                       (unsigned long)typeMismatchCount,
+                       (unsigned long)emptyFiles.count,
+                       (unsigned long)parseFailCount,
+                       CFAbsoluteTimeGetCurrent() - bgStart);
 
-        [self openFiles:@[ fullFile ] addType:AddTypeAuto forcePath:nil];
+        dispatch_async(dispatch_get_main_queue(), ^{
+            __strong typeof(self) strongSelf = weakSelf;
+            if (!strongSelf)
+            {
+                return;
+            }
 
-        NSString* notificationTitle = NSLocalizedString(@"Torrent File Auto Added", "notification title");
+            NSString* currentPath = nil;
+            if (![strongSelf.fDefaults boolForKey:@"AutoImport"] ||
+                (currentPath = [strongSelf.fDefaults stringForKey:@"AutoImportDirectory"]) == nil ||
+                ![currentPath.stringByExpandingTildeInPath isEqualToString:pathSnapshot])
+            {
+                AUTOIMPORT_LOG(@"AutoImport[%llu] apply skipped (stale settings) reason=%@ path=%@",
+                               (unsigned long long)scanId,
+                               reasonSnapshot,
+                               pathSnapshot);
+                return;
+            }
 
-        NSString* identifier = [@"Torrent File Auto Added " stringByAppendingString:file];
-        UNMutableNotificationContent* content = [UNMutableNotificationContent new];
-        content.title = notificationTitle;
-        content.body = file;
+            if (!strongSelf.fAutoImportedNames)
+            {
+                strongSelf.fAutoImportedNames = [[NSMutableArray alloc] init];
+            }
 
-        UNNotificationRequest* request = [UNNotificationRequest requestWithIdentifier:identifier content:content trigger:nil];
-        [UNUserNotificationCenter.currentNotificationCenter addNotificationRequest:request withCompletionHandler:nil];
-    }
+            [strongSelf.fAutoImportedNames setArray:importedNames];
+            if (emptyFiles.count > 0)
+            {
+                [strongSelf.fAutoImportedNames removeObjectsInArray:emptyFiles];
+            }
+
+            NSUInteger importedCount = 0;
+            for (NSDictionary<NSString*, NSString*>* fileToImport in filesToImport)
+            {
+                NSString* file = fileToImport[@"name"];
+                NSString* fullFile = fileToImport[@"path"];
+                [strongSelf openFiles:@[ fullFile ] addType:AddTypeAuto forcePath:nil];
+                ++importedCount;
+                AUTOIMPORT_LOG(@"AutoImport[%llu] imported %@", (unsigned long long)scanId, file);
+
+                NSString* notificationTitle = NSLocalizedString(@"Torrent File Auto Added", "notification title");
+
+                NSString* identifier = [@"Torrent File Auto Added " stringByAppendingString:file];
+                UNMutableNotificationContent* content = [UNMutableNotificationContent new];
+                content.title = notificationTitle;
+                content.body = file;
+
+                UNNotificationRequest* request = [UNNotificationRequest requestWithIdentifier:identifier content:content trigger:nil];
+                [UNUserNotificationCenter.currentNotificationCenter addNotificationRequest:request withCompletionHandler:nil];
+            }
+
+            AUTOIMPORT_LOG(@"AutoImport[%llu] apply complete reason=%@ imported=%lu total=%.3fs",
+                           (unsigned long long)scanId,
+                           reasonSnapshot,
+                           (unsigned long)importedCount,
+                           CFAbsoluteTimeGetCurrent() - requestStart);
+        });
+    });
 }
 
 - (void)beginCreateFile:(NSNotification*)notification
