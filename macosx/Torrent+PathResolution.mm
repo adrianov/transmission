@@ -132,22 +132,27 @@
         }
     }
 
-    // Same folder, single CUE: when base names differ (e.g. Album.flac + Album 2005.cue), treat as album and open .cue
+    // Same folder, single CUE fallback: only for single-file albums where base names differ
+    // (e.g. Album.flac + Album 2005.cue). For multi-track folders, keep per-track behavior.
     NSMutableArray<NSString*>* cuePathsInDir = [NSMutableArray array];
+    NSUInteger audioCompanionCountInDir = 0;
     for (NSUInteger i = 0; i < count; i++)
     {
         auto const file = tr_torrentFile(self.fHandle, i);
         NSString* fileName = [NSString convertedStringFromCString:file.name];
         NSString* fileExt = fileName.pathExtension.lowercaseString;
-        if (![fileExt isEqualToString:@"cue"])
-            continue;
         NSString* fileDir = fileName.stringByDeletingLastPathComponent;
         if (fileDir.length == 0 || [fileDir isEqualToString:@"."] || [fileDir isEqualToString:@"/"])
             fileDir = @"";
-        if ([fileDir isEqualToString:directory])
+        if (![fileDir isEqualToString:directory])
+            continue;
+
+        if ([fileExt isEqualToString:@"cue"])
             [cuePathsInDir addObject:[self.currentDirectory stringByAppendingPathComponent:fileName]];
+        else if ([cueCompanionExtensions containsObject:fileExt])
+            audioCompanionCountInDir++;
     }
-    if (cuePathsInDir.count == 1)
+    if (cuePathsInDir.count == 1 && audioCompanionCountInDir == 1)
         return cuePathsInDir.firstObject;
 
     return nil;

@@ -283,6 +283,8 @@
         item.target = self;
         item.action = @selector(playRandomAudio:);
         item.visibilityPriority = NSToolbarItemVisibilityPriorityLow;
+        // Avoid main-thread autovalidation path scans during startup/login.
+        item.autovalidates = NO;
         return item;
     }
     else
@@ -321,8 +323,8 @@
     }
 }
 
-/// Candidates for Play Random Audio: only items that have a visible content button (same visibility as flow) and an existing path.
-- (NSArray<NSArray*>*)transferredAudioCandidates
+/// Candidates for Play Random Audio: visible audio items, with optional existing-path verification.
+- (NSArray<NSArray*>*)transferredAudioCandidatesCheckingPathExistence:(BOOL)checkPathExistence
 {
     NSMutableArray<NSArray*>* result = [NSMutableArray array];
     for (Torrent* torrent in self.fTorrents)
@@ -345,7 +347,7 @@
             if (![category isEqualToString:@"audio"])
                 continue;
             NSDictionary* item = playableFiles[i];
-            if (![torrent pathToOpenForPlayableItemIfExists:item])
+            if (checkPathExistence && ![torrent pathToOpenForPlayableItemIfExists:item])
                 continue;
             [result addObject:@[ torrent, item ]];
         }
@@ -353,14 +355,9 @@
     return result;
 }
 
-- (BOOL)hasAnyTransferredAudioPlayable
-{
-    return [self transferredAudioCandidates].count > 0;
-}
-
 - (void)playRandomAudio:(id)sender
 {
-    NSArray<NSArray*>* candidates = [self transferredAudioCandidates];
+    NSArray<NSArray*>* candidates = [self transferredAudioCandidatesCheckingPathExistence:YES];
     if (candidates.count == 0)
         return;
     NSMutableArray<NSArray*>* zeroPlays = [NSMutableArray array];
@@ -488,7 +485,7 @@
         return self.fTableView.numberOfSelectedRows > 0;
 
     if ([ident isEqualToString:ToolbarItemIdentifierPlayRandomAudio])
-        return [self hasAnyTransferredAudioPlayable];
+        return YES;
 
     return YES;
 }

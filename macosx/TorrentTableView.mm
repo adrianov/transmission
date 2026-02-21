@@ -183,6 +183,13 @@ extern char const kPlayButtonRepresentedKey = '\0';
     Torrent* torrent = notification.object;
     if (![torrent isKindOfClass:[Torrent class]])
         return;
+
+    if ([notification.userInfo[@"refreshOnly"] boolValue])
+    {
+        [self updateVisiblePlayButtons];
+        return;
+    }
+
     torrent.cachedPlayButtonState = nil;
     torrent.cachedPlayButtonLayout = nil;
     [self updateVisiblePlayButtons];

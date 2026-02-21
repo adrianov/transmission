@@ -19,6 +19,7 @@ static char const kFlowViewTorrentHashKey = '\0';
 extern char const kPlayButtonTypeKey;
 extern char const kPlayButtonFolderKey;
 extern char const kPlayButtonRepresentedKey;
+static char const kPlayButtonPathUiTokenKey = '\0';
 static CGFloat const kFlowPlayButtonRightMargin = 55.0;
 static CGFloat const kFlowPlayButtonRowHeight = 18.0;
 static CGFloat const kFlowPlayButtonVerticalPadding = 4.0;
@@ -191,7 +192,7 @@ static NSString* flowViewTorrentHash(FlowLayoutView* flowView)
     return field;
 }
 
-/// Applies path-derived UI (identifier, tooltip, icon, type/folder) so button stays correct after progress/visibility updates (e.g. .cue+.flac when download completes).
+/// Applies metadata-only UI for play buttons. No filesystem/path probing here.
 - (void)applyPathDerivedUIToPlayButton:(PlayButton*)playButton forEntry:(NSDictionary*)entry torrent:(Torrent*)torrent
 {
     NSString* type = entry[@"type"] ?: @"file";
@@ -199,19 +200,71 @@ static NSString* flowViewTorrentHash(FlowLayoutView* flowView)
     NSString* folder = entry[@"folder"] ?: @"";
     if (path.length > 0)
         playButton.identifier = path;
-    NSString* tooltipPath = [torrent tooltipPathForItemPath:path ?: @"" type:type folder:folder];
     NSString* openLabel = [torrent openCountLabelForPlayableItem:entry];
-    NSString* tip = openLabel.length > 0 ? [NSString stringWithFormat:@"%@\n%@", tooltipPath, openLabel] : tooltipPath;
-    if (tip.length == 0)
-        tip = playButton.title.length > 0 ? playButton.title : NSLocalizedString(@"Play", "Play button tooltip fallback");
-    playButton.toolTip = tip;
+    NSString* tooltip = playButton.title.length > 0 ? playButton.title : NSLocalizedString(@"Play", "Play button tooltip fallback");
+    playButton.toolTip = openLabel.length > 0 ? [NSString stringWithFormat:@"%@\n%@", tooltip, openLabel] : tooltip;
     objc_setAssociatedObject(playButton, &kPlayButtonTypeKey, type, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     objc_setAssociatedObject(playButton, &kPlayButtonFolderKey, folder.length > 0 ? folder : nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     NSDictionary* represented = @{ @"torrent" : torrent, @"item" : entry };
     objc_setAssociatedObject(playButton, &kPlayButtonRepresentedKey, represented, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    NSImage* icon = [self iconForPlayableFileItem:entry torrent:torrent];
+    NSImage* icon = [self flowIconForEntry:entry torrent:torrent];
     playButton.image = icon;
     playButton.imagePosition = icon ? NSImageLeft : NSNoImage;
+}
+
+- (NSImage*)flowIconForEntry:(NSDictionary*)entry torrent:(Torrent*)torrent
+{
+    if (@available(macOS 11.0, *))
+    {
+        NSString* type = entry[@"type"] ?: @"file";
+        NSString* category = entry[@"category"] ?: @"";
+        NSString* path = [entry[@"path"] isKindOfClass:[NSString class]] ? entry[@"path"] : nil;
+        BOOL useAlbumIcon = [type isEqualToString:@"album"];
+        if (!useAlbumIcon && [type isEqualToString:@"file"] && [category isEqualToString:@"audio"] && path.length > 0)
+        {
+            // Metadata-only cue detection: no filesystem probing.
+            useAlbumIcon = ([torrent cueFilePathForAudioPath:path] != nil);
+        }
+
+        NSString* symbolName = @"play";
+        if ([type isEqualToString:@"document-books"] || [category isEqualToString:@"books"])
+            symbolName = @"book";
+        else if (useAlbumIcon)
+            symbolName = @"music.note.list";
+        else if ([type isEqualToString:@"track"] || [category isEqualToString:@"audio"])
+            symbolName = @"music.note";
+        else if ([category isEqualToString:@"software"])
+            symbolName = @"gearshape";
+
+        NSString* cacheKey = [NSString stringWithFormat:@"flow:%@:%@:%d", type, category, useAlbumIcon ? 1 : 0];
+        NSImage* cached = [self.fIconCache objectForKey:cacheKey];
+        if (cached)
+            return cached;
+
+        NSImage* icon = [NSImage imageWithSystemSymbolName:symbolName accessibilityDescription:nil];
+        if (!icon)
+            icon = [NSImage imageWithSystemSymbolName:@"play" accessibilityDescription:nil];
+        if (icon)
+        {
+            NSImageSymbolConfiguration* cfg = [NSImageSymbolConfiguration configurationWithPointSize:11 weight:NSFontWeightMedium
+                                                                                                scale:NSImageSymbolScaleSmall];
+            icon = [icon imageWithSymbolConfiguration:cfg];
+            [icon setTemplate:YES];
+            [self.fIconCache setObject:icon forKey:cacheKey];
+        }
+        return icon;
+    }
+
+    return nil;
+}
+
+- (NSString*)pathUiTokenForEntry:(NSDictionary*)entry
+{
+    NSString* type = entry[@"type"] ?: @"";
+    NSString* path = entry[@"path"] ?: @"";
+    NSString* folder = entry[@"folder"] ?: @"";
+    NSString* category = entry[@"category"] ?: @"";
+    return [NSString stringWithFormat:@"%@|%@|%@|%@", type, path, folder, category];
 }
 
 - (PlayButton*)setupPlayButtonWithItem:(NSDictionary*)item torrent:(Torrent*)torrent
@@ -222,6 +275,7 @@ static NSString* flowViewTorrentHash(FlowLayoutView* flowView)
     playButton.title = [self menuTitleForPlayableItem:item torrent:torrent includeProgress:YES];
     playButton.tag = [item[@"index"] integerValue];
     [self applyPathDerivedUIToPlayButton:playButton forEntry:item torrent:torrent];
+    objc_setAssociatedObject(playButton, &kPlayButtonPathUiTokenKey, [self pathUiTokenForEntry:item], OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 
     NSNumber* visible = item[@"visible"];
     if (visible != nil)
@@ -287,7 +341,6 @@ static NSString* flowViewTorrentHash(FlowLayoutView* flowView)
     NSDictionary* result = [PlayButtonStateBuilder stateAndLayoutFromSnapshot:snapshot];
     NSMutableArray* state = result[@"state"];
     NSArray* layout = result[@"layout"];
-    [PlayButtonStateBuilder enrichStateWithIinaUnwatched:state forTorrent:torrent];
 
     torrent.cachedPlayButtonSource = playableFilesForApply;
     torrent.cachedPlayButtonState = state;
@@ -456,12 +509,12 @@ static NSString* flowViewTorrentHash(FlowLayoutView* flowView)
                                                      (stateMap[[self folderForPlayButton:button torrent:torrent]] ?: nil);
             if (entry)
             {
-                [self applyPathDerivedUIToPlayButton:button forEntry:entry torrent:torrent];
                 NSNumber* visibleNum = entry[@"visible"];
                 NSString* title = entry[@"title"];
                 if (visibleNum && title)
                 {
                     BOOL const shouldBeHidden = !visibleNum.boolValue;
+                    BOOL const becameVisible = button.hidden && !shouldBeHidden;
                     if (button.hidden != shouldBeHidden)
                     {
                         button.hidden = shouldBeHidden;
@@ -495,6 +548,16 @@ static NSString* flowViewTorrentHash(FlowLayoutView* flowView)
                                      range:NSMakeRange(0, currentTitle.length)];
                         button.attributedTitle = attr;
                         [button setNeedsDisplay:YES];
+                    }
+
+                    // Path-derived UI is expensive (filesystem/path checks); refresh only when needed.
+                    NSString* token = [self pathUiTokenForEntry:entry];
+                    NSString* cachedToken = objc_getAssociatedObject(button, &kPlayButtonPathUiTokenKey);
+                    BOOL needsPathUi = forceLayout || becameVisible || ![cachedToken isEqualToString:token];
+                    if (needsPathUi)
+                    {
+                        [self applyPathDerivedUIToPlayButton:button forEntry:entry torrent:torrent];
+                        objc_setAssociatedObject(button, &kPlayButtonPathUiTokenKey, token, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
                     }
                 }
             }

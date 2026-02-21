@@ -5,6 +5,7 @@
 #include <cmath>
 
 #import "PlayButtonStateBuilder.h"
+#import "IINAWatchHelper.h"
 #import "NSStringAdditions.h"
 #import "Torrent.h"
 #import "TorrentPrivate.h"
@@ -159,6 +160,17 @@ static NSDictionary* stateAndLayoutFromSnapshotImpl(NSArray<NSDictionary*>* snap
     return @{ @"state" : state, @"layout" : layout };
 }
 
+static dispatch_queue_t iinaStateQueue()
+{
+    static dispatch_queue_t queue;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        dispatch_queue_attr_t attrs = dispatch_queue_attr_make_with_qos_class(DISPATCH_QUEUE_SERIAL, QOS_CLASS_UTILITY, 0);
+        queue = dispatch_queue_create("com.transmissionbt.playbutton.iina", attrs);
+    });
+    return queue;
+}
+
 @implementation PlayButtonStateBuilder
 
 + (NSDictionary*)buildSnapshotForTorrent:(Torrent*)torrent
@@ -200,15 +212,6 @@ static NSDictionary* stateAndLayoutFromSnapshotImpl(NSArray<NSDictionary*>* snap
         entry[@"wanted"] = @(wanted);
         [snapshot addObject:entry];
     }
-    for (NSMutableDictionary* entry in snapshot)
-    {
-        NSString* category = entry[@"category"];
-        if (![category isEqualToString:@"video"] && ![category isEqualToString:@"adult"])
-            continue;
-        NSString* pathToOpen = [torrent pathToOpenForPlayableItem:entry];
-        BOOL const isUnwatched = (pathToOpen.length > 0) ? [torrent iinaUnwatchedForVideoPath:pathToOpen] : NO;
-        entry[@"iinaUnwatched"] = @(isUnwatched);
-    }
     return @{ @"snapshot" : snapshot, @"playableFiles" : playableFiles };
 }
 
@@ -219,15 +222,69 @@ static NSDictionary* stateAndLayoutFromSnapshotImpl(NSArray<NSDictionary*>* snap
 
 + (void)enrichStateWithIinaUnwatched:(NSMutableArray<NSMutableDictionary*>*)state forTorrent:(Torrent*)torrent
 {
+    if (state.count == 0 || torrent == nil)
+        return;
+
+    NSMutableArray<NSDictionary*>* targets = [NSMutableArray array];
     for (NSMutableDictionary* entry in state)
     {
         NSString* category = entry[@"category"];
         if (![category isEqualToString:@"video"] && ![category isEqualToString:@"adult"])
             continue;
-        NSString* pathToOpen = [torrent pathToOpenForPlayableItem:entry];
-        BOOL const isUnwatched = (pathToOpen.length > 0) ? [torrent iinaUnwatchedForVideoPath:pathToOpen] : NO;
-        entry[@"iinaUnwatched"] = @(isUnwatched);
+
+        if (entry[@"iinaUnwatched"] != nil || [entry[@"iinaPending"] boolValue])
+            continue;
+
+        NSString* path = [entry[@"path"] isKindOfClass:[NSString class]] ? entry[@"path"] : nil;
+        if (path.length == 0)
+        {
+            entry[@"iinaUnwatched"] = @NO;
+            continue;
+        }
+
+        entry[@"iinaPending"] = @YES;
+        [targets addObject:@{ @"entry" : entry, @"path" : path }];
     }
+
+    if (targets.count == 0)
+        return;
+
+    __weak Torrent* weakTorrent = torrent;
+    dispatch_async(iinaStateQueue(), ^{
+        NSMutableArray<NSNumber*>* values = [NSMutableArray arrayWithCapacity:targets.count];
+        for (NSDictionary* target in targets)
+        {
+            NSString* path = target[@"path"];
+            [values addObject:@([IINAWatchHelper unwatchedForVideoPath:path completionObject:nil])];
+        }
+
+        dispatch_async(dispatch_get_main_queue(), ^{
+            Torrent* strongTorrent = weakTorrent;
+            if (!strongTorrent || strongTorrent.cachedPlayButtonState != state)
+                return;
+
+            BOOL changed = NO;
+            for (NSUInteger i = 0; i < targets.count; ++i)
+            {
+                NSMutableDictionary* entry = targets[i][@"entry"];
+                NSNumber* newValue = values[i];
+                NSNumber* oldValue = entry[@"iinaUnwatched"];
+                [entry removeObjectForKey:@"iinaPending"];
+                if (oldValue == nil || oldValue.boolValue != newValue.boolValue)
+                {
+                    entry[@"iinaUnwatched"] = newValue;
+                    changed = YES;
+                }
+            }
+
+            if (changed)
+            {
+                [NSNotificationCenter.defaultCenter postNotificationName:kIINAWatchCacheDidUpdateNotification
+                                                                  object:strongTorrent
+                                                                userInfo:@{ @"refreshOnly" : @YES }];
+            }
+        });
+    });
 }
 
 + (NSMutableArray<NSMutableDictionary*>*)stateForTorrent:(Torrent*)torrent
@@ -302,13 +359,6 @@ static NSDictionary* stateAndLayoutFromSnapshotImpl(NSArray<NSDictionary*>* snap
             entry[@"visible"] = @(visible);
             if (visible && ![type hasPrefix:@"document"] && progress < 1.0 && progressPct < 100)
                 entry[@"title"] = [NSString stringWithFormat:@"%@ (%d%%)", entry[@"baseTitle"], progressPct];
-            // IINA watch_later + playback history: existence-only check (no parsing). iinaUnwatched → green; watched (file or in history) or no path → gray.
-            if ([category isEqualToString:@"video"] || [category isEqualToString:@"adult"])
-            {
-                NSString* pathToOpen = [torrent pathToOpenForPlayableItem:entry];
-                BOOL const isUnwatched = (pathToOpen.length > 0) ? [torrent iinaUnwatchedForVideoPath:pathToOpen] : NO;
-                entry[@"iinaUnwatched"] = @(isUnwatched);
-            }
             [state addObject:entry];
         }
         if (state.count >= 2)
