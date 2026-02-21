@@ -249,13 +249,20 @@ NSString* const kIINAWatchCacheDidUpdateNotification = @"IINAWatchCacheDidUpdate
     NSString* key = normalizedPathForIINALookup(path, YES);
     if (!key)
         key = path;
-    NSNumber* cached = sIINAUnwatchedCache[key];
+    NSNumber* cached = nil;
+    @synchronized(sIINAUnwatchedCache)
+    {
+        cached = sIINAUnwatchedCache[key];
+    }
     if (cached != nil)
         return cached.boolValue;
     NSString* dir = iinaWatchLaterDir();
     if (!dir)
     {
-        sIINAUnwatchedCache[key] = @NO;
+        @synchronized(sIINAUnwatchedCache)
+        {
+            sIINAUnwatchedCache[key] = @NO;
+        }
         return NO;
     }
     NSString* watchFile = existingWatchLaterPath(dir, key);
@@ -268,7 +275,10 @@ NSString* const kIINAWatchCacheDidUpdateNotification = @"IINAWatchCacheDidUpdate
     }
     // When playback finishes IINA may remove the watch_later file; treat as watched if path is in IINA playback history.
     BOOL unwatched = (watchFile == nil) && !pathInIINAPlaybackHistory(key, keyNoResolve ?: @"");
-    sIINAUnwatchedCache[key] = @(unwatched);
+    @synchronized(sIINAUnwatchedCache)
+    {
+        sIINAUnwatchedCache[key] = @(unwatched);
+    }
     return unwatched;
 }
 
@@ -280,10 +290,18 @@ NSString* const kIINAWatchCacheDidUpdateNotification = @"IINAWatchCacheDidUpdate
         sIINAUnwatchedCache = [NSMutableDictionary dictionary];
     });
     NSString* key = normalizedPathForIINALookup(path, YES);
-    [sIINAUnwatchedCache removeObjectForKey:key ?: path];
+    @synchronized(sIINAUnwatchedCache)
+    {
+        [sIINAUnwatchedCache removeObjectForKey:key ?: path];
+    }
     NSString* keyNoResolve = normalizedPathForIINALookup(path, NO);
     if (keyNoResolve && ![keyNoResolve isEqualToString:key])
-        [sIINAUnwatchedCache removeObjectForKey:keyNoResolve];
+    {
+        @synchronized(sIINAUnwatchedCache)
+        {
+            [sIINAUnwatchedCache removeObjectForKey:keyNoResolve];
+        }
+    }
 }
 
 + (NSString*)watchLaterBasenameForPath:(NSString*)path resolveSymlinks:(BOOL)resolveSymlinks
