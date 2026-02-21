@@ -1409,9 +1409,11 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
     self.cachedPlayButtonState = nil;
     self.cachedPlayButtonSource = nil;
     self.cachedPlayButtonLayout = nil;
+    self.cachedPlayButtonProgressGeneration = 0;
 
     [self update];
     [NSNotificationCenter.defaultCenter postNotificationName:@"TorrentFileCheckChange" object:self];
+    [NSNotificationCenter.defaultCenter postNotificationName:@"UpdateUI" object:nil];
 }
 
 - (void)setFilePriority:(tr_priority_t)priority forIndexes:(NSIndexSet*)indexSet

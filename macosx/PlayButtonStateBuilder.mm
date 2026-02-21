@@ -55,15 +55,14 @@ static void disambiguateDuplicateTitles(NSMutableArray<NSMutableDictionary*>* st
 }
 
 /// Determines if a playable item should be visible based on type, progress, and wanted state.
-/// Show episode/video button as soon as the file is selected for download (wanted), so it appears in the
-/// inspector flow when user checks a new video file; previously it only appeared after progress >= 1%.
+/// Episode/video button appears only when the file has started downloading (progress >= 1%) or is complete.
 static BOOL isPlayableItemVisible(NSString* type, CGFloat progress, BOOL wanted)
 {
     if ([type isEqualToString:@"album"])
         return YES;
     if ([type hasPrefix:@"document"])
         return progress >= 1.0;
-    return (wanted && progress >= 0) || (progress >= 1.0);
+    return wanted && progress >= 0.01;
 }
 
 static NSDictionary* stateAndLayoutFromSnapshotImpl(NSArray<NSDictionary*>* snapshot)
