@@ -109,6 +109,11 @@
             tr_torrentStart(torrent.torrentStruct);
             continue;
         }
+        // Keep torrent if its data is on an external volume (/Volumes/...) so user can mount again
+        if ([torrent.currentDirectory hasPrefix:@"/Volumes/"])
+        {
+            continue;
+        }
         [toRemove addObject:torrent];
     }
     return toRemove;
