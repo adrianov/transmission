@@ -175,6 +175,8 @@ extern NSString* const kTorrentDidChangeGroupNotification;
 @property(nonatomic, readonly) NSString* dataLocation;
 /// Returns YES when none of the torrent's files exist on disk.
 @property(nonatomic, readonly) BOOL allFilesMissing;
+/// Returns YES when every file in the torrent exists under dir (or dir/name.part), using tr_torrentFile names.
+- (BOOL)allFilesExistAtPath:(NSString*)dir;
 @property(nonatomic, readonly) NSString* lastKnownDataLocation;
 - (NSString*)fileLocation:(FileListNode*)node;
 /// Path to open for this file/folder (prefers .cue for audio/album). Nil if location unknown.

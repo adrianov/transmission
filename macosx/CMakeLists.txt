@@ -77,9 +77,14 @@ target_sources(${TR_NAME}-mac
         Controller+Toolbar.mm
         Controller+Transfer.mm
         Controller+UpdateUI.mm
+        Controller+AutoImport.mm
+        Controller+DockLinks.mm
         Controller+FilterSort.mm
+        Controller+MissingDataLaunch.mm
         Controller+OpenAdd.mm
         Controller+Remove.mm
+        Controller+Startup.mm
+        Controller+ViewToggles.mm
         Controller+OutlineView.mm
         Controller+DragDrop.mm
         Controller+TorrentActions.mm

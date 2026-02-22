@@ -14,7 +14,6 @@
 #include <libtransmission/transmission.h>
 
 #include <libtransmission/log.h>
-#include <libtransmission/torrent-metainfo.h>
 #include <libtransmission/utils.h>
 #include <libtransmission/values.h>
 #include <libtransmission/variant.h>
@@ -63,44 +62,11 @@
 #import "DjvuConverter.h"
 #import "Fb2Converter.h"
 
-static CGFloat const kRowHeightRegular = 62.0;
-static CGFloat const kRowHeightSmall = 22.0;
-
 static NSTimeInterval const kUpdateUISeconds = 1.0;
 
 static NSString* const kTransferPlist = @"Transfers.plist";
 
-static NSString* const kWebsiteURL = @"https://transmissionbt.com/";
-static NSString* const kForumURL = @"https://forum.transmissionbt.com/";
-static NSString* const kGithubURL = @"https://github.com/transmission/transmission";
-static NSString* const kDonateURL = @"https://transmissionbt.com/donate/";
-
 static NSTimeInterval const kDonateNagTime = 60 * 60 * 24 * 7;
-static uint64_t sAutoImportScanCounter = 0;
-
-static BOOL autoImportDebugLoggingEnabled()
-{
-    return [NSUserDefaults.standardUserDefaults boolForKey:@"AutoImportDebugLogging"];
-}
-
-#define AUTOIMPORT_LOG(...)        \
-    do                             \
-    {                              \
-        if (autoImportDebugLoggingEnabled()) \
-        {                          \
-            NSLog(__VA_ARGS__);    \
-        }                          \
-    } while (0)
-
-static dispatch_queue_t autoImportQueue()
-{
-    static dispatch_queue_t queue;
-    static dispatch_once_t onceToken;
-    dispatch_once(&onceToken, ^{
-        queue = dispatch_queue_create("com.transmissionbt.autoimport", DISPATCH_QUEUE_SERIAL);
-    });
-    return queue;
-}
 
 static void initUnits()
 {
@@ -150,96 +116,6 @@ static tr_rpc_callback_status rpcCallback([[maybe_unused]] tr_session* handle, t
     return TR_RPC_NOREMOVE; //we'll do the remove manually
 }
 
-// 2.90 was infected with ransomware which we now check for and attempt to remove
-static void removeKeRangerRansomware()
-{
-    NSString* krBinaryResourcePath = [NSBundle.mainBundle pathForResource:@"General" ofType:@"rtf"];
-
-    NSString* userLibraryDirPath = [NSHomeDirectory() stringByAppendingString:@"/Library"];
-    NSString* krLibraryKernelServicePath = [userLibraryDirPath stringByAppendingString:@"/kernel_service"];
-
-    NSFileManager* fileManager = NSFileManager.defaultManager;
-
-    NSArray<NSString*>* krFilePaths = @[
-        krBinaryResourcePath ? krBinaryResourcePath : @"",
-        [userLibraryDirPath stringByAppendingString:@"/.kernel_pid"],
-        [userLibraryDirPath stringByAppendingString:@"/.kernel_time"],
-        [userLibraryDirPath stringByAppendingString:@"/.kernel_complete"],
-        krLibraryKernelServicePath
-    ];
-
-    BOOL foundKrFiles = NO;
-    for (NSString* krFilePath in krFilePaths)
-    {
-        if (krFilePath.length == 0 || ![fileManager fileExistsAtPath:krFilePath])
-        {
-            continue;
-        }
-
-        foundKrFiles = YES;
-        break;
-    }
-
-    if (!foundKrFiles)
-    {
-        return;
-    }
-
-    NSLog(@"Detected OSX.KeRanger.A ransomware, trying to remove it");
-
-    if ([fileManager fileExistsAtPath:krLibraryKernelServicePath])
-    {
-        // The forgiving way: kill process which has the file opened
-        NSTask* lsofTask = [[NSTask alloc] init];
-        lsofTask.launchPath = @"/usr/sbin/lsof";
-        lsofTask.arguments = @[ @"-F", @"pid", @"--", krLibraryKernelServicePath ];
-        lsofTask.standardOutput = [NSPipe pipe];
-        lsofTask.standardInput = [NSPipe pipe];
-        lsofTask.standardError = lsofTask.standardOutput;
-        [lsofTask launch];
-        NSData* lsofOutputData = [[lsofTask.standardOutput fileHandleForReading] readDataToEndOfFile];
-        [lsofTask waitUntilExit];
-        NSString* lsofOutput = [[NSString alloc] initWithData:lsofOutputData encoding:NSUTF8StringEncoding];
-        for (NSString* line in [lsofOutput componentsSeparatedByString:@"\n"])
-        {
-            if (![line hasPrefix:@"p"])
-            {
-                continue;
-            }
-            pid_t const krProcessId = [line substringFromIndex:1].intValue;
-            if (kill(krProcessId, SIGKILL) == -1)
-            {
-                NSLog(@"Unable to forcibly terminate ransomware process (kernel_service, pid %d), please do so manually", krProcessId);
-            }
-        }
-    }
-    else
-    {
-        // The harsh way: kill all processes with matching name
-        NSTask* killTask = [NSTask launchedTaskWithLaunchPath:@"/usr/bin/killall" arguments:@[ @"-9", @"kernel_service" ]];
-        [killTask waitUntilExit];
-        if (killTask.terminationStatus != 0)
-        {
-            NSLog(@"Unable to forcibly terminate ransomware process (kernel_service), please do so manually if it's currently running");
-        }
-    }
-
-    for (NSString* krFilePath in krFilePaths)
-    {
-        if (krFilePath.length == 0 || ![fileManager fileExistsAtPath:krFilePath])
-        {
-            continue;
-        }
-
-        if (![fileManager removeItemAtPath:krFilePath error:NULL])
-        {
-            NSLog(@"Unable to remove ransomware file at %@, please do so manually", krFilePath);
-        }
-    }
-
-    NSLog(@"OSX.KeRanger.A ransomware removal completed, proceeding to normal operation");
-}
-
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wincomplete-implementation"
 #pragma clang diagnostic ignored "-Wprotocol" // QLPreviewPanelDataSource/Delegate implemented in Controller+QuickLook.mm
@@ -250,7 +126,7 @@ static void removeKeRangerRansomware()
     if (self != [Controller self])
         return;
 
-    removeKeRangerRansomware();
+    [Controller runStartupChecks];
 
     //make sure another Transmission.app isn't running already
     NSArray* apps = [NSRunningApplication runningApplicationsWithBundleIdentifier:NSBundle.mainBundle.bundleIdentifier];
@@ -521,42 +397,6 @@ void onTorrentCompletenessChanged(tr_torrent* tor, tr_completeness status, bool 
         _fPauseOnLaunch = (GetCurrentKeyModifiers() & (optionKey | rightOptionKey)) != 0;
     }
     return self;
-}
-
-- (void)removeMissingDataTorrentsOnLaunch
-{
-    if (self.fTorrents.count == 0)
-    {
-        return;
-    }
-
-    // Run file checks asynchronously to avoid blocking UI on startup
-    NSArray<Torrent*>* torrents = [self.fTorrents copy];
-    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-        [Torrent updateTorrents:torrents];
-
-        NSMutableArray<Torrent*>* toRemove = [NSMutableArray array];
-        for (Torrent* torrent in torrents)
-        {
-            if (torrent.error && torrent.allFilesMissing)
-            {
-                [toRemove addObject:torrent];
-            }
-        }
-
-        if (toRemove.count == 0)
-        {
-            return;
-        }
-
-        dispatch_async(dispatch_get_main_queue(), ^{
-            for (Torrent* torrent in toRemove)
-            {
-                [self.fTorrentHashes removeObjectForKey:torrent.hashString];
-            }
-            [self confirmRemoveTorrents:toRemove deleteData:NO];
-        });
-    });
 }
 
 - (void)awakeFromNib
@@ -1594,332 +1434,10 @@ void onTorrentCompletenessChanged(tr_torrent* tor, tr_completeness status, bool 
     self.fSoundPlaying = NO;
 }
 
-- (void)VDKQueue:(VDKQueue*)queue receivedNotification:(NSString*)notification forPath:(NSString*)fpath
-{
-    //don't assume that just because we're watching for write notification, we'll only receive write notifications
-
-    if (![self.fDefaults boolForKey:@"AutoImport"] || ![self.fDefaults stringForKey:@"AutoImportDirectory"])
-    {
-        return;
-    }
-
-    AUTOIMPORT_LOG(@"AutoImport watcher event: note=%@ path=%@", notification ?: @"(null)", fpath ?: @"(null)");
-
-    if (self.fAutoImportTimer.valid)
-    {
-        AUTOIMPORT_LOG(@"AutoImport: invalidating pending delayed scan timer");
-        [self.fAutoImportTimer invalidate];
-    }
-
-    //check again in 10 seconds in case torrent file wasn't complete
-    self.fAutoImportTimer = [NSTimer scheduledTimerWithTimeInterval:10.0 target:self
-                                                           selector:@selector(checkAutoImportDirectoryFromTimer:)
-                                                           userInfo:@{
-                                                               @"notification" : notification ?: @"(null)",
-                                                               @"path" : fpath ?: @"(null)"
-                                                           }
-                                                            repeats:NO];
-    AUTOIMPORT_LOG(@"AutoImport: scheduled delayed scan in 10s");
-
-    [self checkAutoImportDirectoryWithReason:@"watcher-immediate"];
-}
-
-- (void)changeAutoImport
-{
-    if (self.fAutoImportTimer.valid)
-    {
-        [self.fAutoImportTimer invalidate];
-    }
-    self.fAutoImportTimer = nil;
-
-    self.fAutoImportedNames = nil;
-
-    [self checkAutoImportDirectoryWithReason:@"settings-change"];
-}
-
-- (void)checkAutoImportDirectoryFromTimer:(NSTimer*)timer
-{
-    NSDictionary* userInfo = timer.userInfo;
-    NSString* reason = [NSString
-        stringWithFormat:@"watcher-delayed note=%@ path=%@",
-                         userInfo[@"notification"] ?: @"(null)",
-                         userInfo[@"path"] ?: @"(null)"];
-    [self checkAutoImportDirectoryWithReason:reason];
-}
-
-- (void)checkAutoImportDirectory
-{
-    [self checkAutoImportDirectoryWithReason:@"unspecified"];
-}
-
-- (void)checkAutoImportDirectoryWithReason:(NSString*)reason
-{
-    uint64_t const scanId = ++sAutoImportScanCounter;
-    CFAbsoluteTime const requestStart = CFAbsoluteTimeGetCurrent();
-
-    NSString* path;
-    if (![self.fDefaults boolForKey:@"AutoImport"] || !(path = [self.fDefaults stringForKey:@"AutoImportDirectory"]))
-    {
-        AUTOIMPORT_LOG(@"AutoImport[%llu] skip reason=%@: disabled or path missing", (unsigned long long)scanId, reason ?: @"(null)");
-        return;
-    }
-
-    NSString* const pathSnapshot = path.stringByExpandingTildeInPath;
-    NSString* const reasonSnapshot = [reason copy] ?: @"(null)";
-    AUTOIMPORT_LOG(@"AutoImport[%llu] queued reason=%@ path=%@", (unsigned long long)scanId, reasonSnapshot, pathSnapshot);
-
-    __weak typeof(self) weakSelf = self;
-    dispatch_async(autoImportQueue(), ^{
-        CFAbsoluteTime const bgStart = CFAbsoluteTimeGetCurrent();
-        NSArray<NSString*>* importedNames = [NSFileManager.defaultManager contentsOfDirectoryAtPath:pathSnapshot error:NULL];
-        if (!importedNames)
-        {
-            AUTOIMPORT_LOG(@"AutoImport[%llu] list failed reason=%@ path=%@ after %.3fs",
-                           (unsigned long long)scanId,
-                           reasonSnapshot,
-                           pathSnapshot,
-                           CFAbsoluteTimeGetCurrent() - bgStart);
-            return;
-        }
-
-        __block BOOL shouldContinue = NO;
-        __block NSArray<NSString*>* previousImportedNames = @[];
-        dispatch_sync(dispatch_get_main_queue(), ^{
-            __strong typeof(self) strongSelf = weakSelf;
-            if (!strongSelf)
-            {
-                return;
-            }
-
-            NSString* currentPath = nil;
-            if ([strongSelf.fDefaults boolForKey:@"AutoImport"] &&
-                (currentPath = [strongSelf.fDefaults stringForKey:@"AutoImportDirectory"]) != nil &&
-                [currentPath.stringByExpandingTildeInPath isEqualToString:pathSnapshot])
-            {
-                previousImportedNames = [strongSelf.fAutoImportedNames copy] ?: @[];
-                shouldContinue = YES;
-            }
-        });
-
-        if (!shouldContinue)
-        {
-            AUTOIMPORT_LOG(@"AutoImport[%llu] stale scan ignored reason=%@ path=%@",
-                           (unsigned long long)scanId,
-                           reasonSnapshot,
-                           pathSnapshot);
-            return;
-        }
-
-        NSMutableArray<NSString*>* newNames = [importedNames mutableCopy];
-        [newNames removeObjectsInArray:previousImportedNames];
-
-        NSMutableArray<NSDictionary<NSString*, NSString*>*>* filesToImport = [NSMutableArray array];
-        NSMutableArray<NSString*>* emptyFiles = [NSMutableArray array];
-        NSUInteger hiddenCount = 0;
-        NSUInteger typeMismatchCount = 0;
-        NSUInteger parseFailCount = 0;
-
-        for (NSString* file in newNames)
-        {
-            if ([file hasPrefix:@"."])
-            {
-                ++hiddenCount;
-                continue;
-            }
-
-            NSString* fullFile = [pathSnapshot stringByAppendingPathComponent:file];
-            BOOL const hasTorrentExtension = [fullFile.pathExtension caseInsensitiveCompare:@"torrent"] == NSOrderedSame;
-            if (!hasTorrentExtension)
-            {
-                NSURL* fileURL = [NSURL fileURLWithPath:fullFile];
-                NSString* contentType = nil;
-                [fileURL getResourceValue:&contentType forKey:NSURLContentTypeKey error:NULL];
-                if (![contentType isEqualToString:@"org.bittorrent.torrent"])
-                {
-                    ++typeMismatchCount;
-                    continue;
-                }
-            }
-
-            NSDictionary<NSFileAttributeKey, id>* fileAttributes = [NSFileManager.defaultManager attributesOfItemAtPath:fullFile
-                                                                                                                  error:nil];
-            if (fileAttributes.fileSize == 0)
-            {
-                // Workaround for Firefox downloads happening in two steps: first time being an empty file
-                [emptyFiles addObject:file];
-                continue;
-            }
-
-            auto metainfo = tr_torrent_metainfo{};
-            if (!metainfo.parse_torrent_file(fullFile.UTF8String))
-            {
-                ++parseFailCount;
-                continue;
-            }
-
-            [filesToImport addObject:@{ @"name" : file, @"path" : fullFile }];
-        }
-
-        AUTOIMPORT_LOG(@"AutoImport[%llu] scan done reason=%@ path=%@ listed=%lu previous=%lu new=%lu importable=%lu hidden=%lu type_skip=%lu empty=%lu parse_fail=%lu bg=%.3fs",
-                       (unsigned long long)scanId,
-                       reasonSnapshot,
-                       pathSnapshot,
-                       (unsigned long)importedNames.count,
-                       (unsigned long)previousImportedNames.count,
-                       (unsigned long)newNames.count,
-                       (unsigned long)filesToImport.count,
-                       (unsigned long)hiddenCount,
-                       (unsigned long)typeMismatchCount,
-                       (unsigned long)emptyFiles.count,
-                       (unsigned long)parseFailCount,
-                       CFAbsoluteTimeGetCurrent() - bgStart);
-
-        dispatch_async(dispatch_get_main_queue(), ^{
-            __strong typeof(self) strongSelf = weakSelf;
-            if (!strongSelf)
-            {
-                return;
-            }
-
-            NSString* currentPath = nil;
-            if (![strongSelf.fDefaults boolForKey:@"AutoImport"] ||
-                (currentPath = [strongSelf.fDefaults stringForKey:@"AutoImportDirectory"]) == nil ||
-                ![currentPath.stringByExpandingTildeInPath isEqualToString:pathSnapshot])
-            {
-                AUTOIMPORT_LOG(@"AutoImport[%llu] apply skipped (stale settings) reason=%@ path=%@",
-                               (unsigned long long)scanId,
-                               reasonSnapshot,
-                               pathSnapshot);
-                return;
-            }
-
-            if (!strongSelf.fAutoImportedNames)
-            {
-                strongSelf.fAutoImportedNames = [[NSMutableArray alloc] init];
-            }
-
-            [strongSelf.fAutoImportedNames setArray:importedNames];
-            if (emptyFiles.count > 0)
-            {
-                [strongSelf.fAutoImportedNames removeObjectsInArray:emptyFiles];
-            }
-
-            NSUInteger importedCount = 0;
-            for (NSDictionary<NSString*, NSString*>* fileToImport in filesToImport)
-            {
-                NSString* file = fileToImport[@"name"];
-                NSString* fullFile = fileToImport[@"path"];
-                [strongSelf openFiles:@[ fullFile ] addType:AddTypeAuto forcePath:nil];
-                ++importedCount;
-                AUTOIMPORT_LOG(@"AutoImport[%llu] imported %@", (unsigned long long)scanId, file);
-
-                NSString* notificationTitle = NSLocalizedString(@"Torrent File Auto Added", "notification title");
-
-                NSString* identifier = [@"Torrent File Auto Added " stringByAppendingString:file];
-                UNMutableNotificationContent* content = [UNMutableNotificationContent new];
-                content.title = notificationTitle;
-                content.body = file;
-
-                UNNotificationRequest* request = [UNNotificationRequest requestWithIdentifier:identifier content:content trigger:nil];
-                [UNUserNotificationCenter.currentNotificationCenter addNotificationRequest:request withCompletionHandler:nil];
-            }
-
-            AUTOIMPORT_LOG(@"AutoImport[%llu] apply complete reason=%@ imported=%lu total=%.3fs",
-                           (unsigned long long)scanId,
-                           reasonSnapshot,
-                           (unsigned long)importedCount,
-                           CFAbsoluteTimeGetCurrent() - requestStart);
-        });
-    });
-}
-
-- (void)beginCreateFile:(NSNotification*)notification
-{
-    if (![self.fDefaults boolForKey:@"AutoImport"])
-    {
-        return;
-    }
-
-    NSString *location = ((NSURL*)notification.object).path, *path = [self.fDefaults stringForKey:@"AutoImportDirectory"];
-
-    if (location && path && [location.stringByDeletingLastPathComponent.stringByExpandingTildeInPath isEqualToString:path.stringByExpandingTildeInPath])
-    {
-        [self.fAutoImportedNames addObject:location.lastPathComponent];
-    }
-}
-
 - (void)torrentTableViewSelectionDidChange:(NSNotification*)notification
 {
     [self resetInfo];
     [self.fWindow.toolbar validateVisibleItems];
-}
-
-- (void)toggleSmallView:(id)sender
-{
-    BOOL makeSmall = ![self.fDefaults boolForKey:@"SmallView"];
-    [self.fDefaults setBool:makeSmall forKey:@"SmallView"];
-
-    //self.fTableView.usesAlternatingRowBackgroundColors = !makeSmall;
-
-    self.fTableView.rowHeight = makeSmall ? kRowHeightSmall : kRowHeightRegular;
-
-    [self.fTableView beginUpdates];
-    [self.fTableView
-        noteHeightOfRowsWithIndexesChanged:[NSIndexSet indexSetWithIndexesInRange:NSMakeRange(0, self.fTableView.numberOfRows)]];
-    [self.fTableView endUpdates];
-
-    [self reloadTransfersTableContent];
-    [self updateForAutoSize];
-}
-
-- (void)togglePiecesBar:(id)sender
-{
-    [self.fDefaults setBool:![self.fDefaults boolForKey:@"PiecesBar"] forKey:@"PiecesBar"];
-    [self.fTableView togglePiecesBar];
-}
-
-- (void)toggleAvailabilityBar:(id)sender
-{
-    [self.fDefaults setBool:![self.fDefaults boolForKey:@"DisplayProgressBarAvailable"] forKey:@"DisplayProgressBarAvailable"];
-    [self.fTableView display];
-}
-
-- (void)toggleShowContentButtons:(id)sender
-{
-    [self.fDefaults setBool:![self.fDefaults boolForKey:@"ShowContentButtons"] forKey:@"ShowContentButtons"];
-    [self.fTableView refreshContentButtonsVisibility];
-    [self refreshVisibleTransferRows];
-    [self updateForAutoSize];
-}
-
-- (void)toggleStatusBar:(id)sender
-{
-    BOOL const show = self.fStatusBar == nil || self.fStatusBar.isHidden;
-    [self.fDefaults setBool:show forKey:@"StatusBar"];
-    [self updateMainWindow];
-}
-
-- (void)toggleFilterBar:(id)sender
-{
-    BOOL const show = self.fFilterBar == nil || self.fFilterBar.isHidden;
-
-    if (!show)
-    {
-        [self.fFilterBar reset];
-    }
-
-    [self.fDefaults setBool:show forKey:@"FilterBar"];
-    [self updateMainWindow];
-
-    if (show)
-    {
-        [self focusFilterField];
-    }
-}
-
-- (IBAction)toggleToolbarShown:(id)sender
-{
-    [self.fWindow toggleToolbarShown:sender];
 }
 
 - (void)showToolbarShare:(id)sender
@@ -1975,53 +1493,6 @@ void onTorrentCompletenessChanged(tr_torrent* tor, tr_completeness status, bool 
     }
 }
 
-- (NSMenu*)applicationDockMenu:(NSApplication*)sender
-{
-    if (self.fQuitting)
-    {
-        return nil;
-    }
-
-    NSUInteger seeding = 0, downloading = 0;
-    for (Torrent* torrent in self.fTorrents)
-    {
-        if (torrent.seeding)
-        {
-            seeding++;
-        }
-        else if (torrent.active)
-        {
-            downloading++;
-        }
-    }
-
-    NSMenu* menu = [[NSMenu alloc] init];
-
-    if (seeding > 0)
-    {
-        NSString* title = [NSString localizedStringWithFormat:NSLocalizedString(@"%lu Seeding", "Dock item - Seeding"), seeding];
-        [menu addItemWithTitle:title action:nil keyEquivalent:@""];
-    }
-
-    if (downloading > 0)
-    {
-        NSString* title = [NSString localizedStringWithFormat:NSLocalizedString(@"%lu Downloading", "Dock item - Downloading"), downloading];
-        [menu addItemWithTitle:title action:nil keyEquivalent:@""];
-    }
-
-    if (seeding > 0 || downloading > 0)
-    {
-        [menu addItem:[NSMenuItem separatorItem]];
-    }
-
-    [menu addItemWithTitle:NSLocalizedString(@"Pause All", "Dock item") action:@selector(stopAllTorrents:) keyEquivalent:@""];
-    [menu addItemWithTitle:NSLocalizedString(@"Resume All", "Dock item") action:@selector(resumeAllTorrents:) keyEquivalent:@""];
-    [menu addItem:[NSMenuItem separatorItem]];
-    [menu addItemWithTitle:NSLocalizedString(@"Speed Limit", "Dock item") action:@selector(toggleSpeedLimit:) keyEquivalent:@""];
-
-    return menu;
-}
-
 - (void)toggleQuickLook:(id)sender
 {
     if ([QLPreviewPanel sharedPreviewPanel].visible)
@@ -2032,26 +1503,6 @@ void onTorrentCompletenessChanged(tr_torrent* tor, tr_completeness status, bool 
     {
         [[QLPreviewPanel sharedPreviewPanel] makeKeyAndOrderFront:nil];
     }
-}
-
-- (void)linkHomepage:(id)sender
-{
-    [NSWorkspace.sharedWorkspace openURL:[NSURL URLWithString:kWebsiteURL]];
-}
-
-- (void)linkForums:(id)sender
-{
-    [NSWorkspace.sharedWorkspace openURL:[NSURL URLWithString:kForumURL]];
-}
-
-- (void)linkGitHub:(id)sender
-{
-    [NSWorkspace.sharedWorkspace openURL:[NSURL URLWithString:kGithubURL]];
-}
-
-- (void)linkDonate:(id)sender
-{
-    [NSWorkspace.sharedWorkspace openURL:[NSURL URLWithString:kDonateURL]];
 }
 
 @end

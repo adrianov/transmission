@@ -38,6 +38,23 @@
         // This call may block waiting for session locks - now it won't freeze the UI
         [Torrent updateTorrents:torrents];
 
+        // On file access (local) error, try candidate download dirs and switch location if data found elsewhere
+        NSSet<NSString*>* candidateDirs = [self missingDataCandidateDownloadDirsFromTorrents:torrents];
+        BOOL anyFixed = NO;
+        for (Torrent* torrent in torrents)
+        {
+            BOOL didSwitch = NO;
+            if (torrent.error && [self setTorrentLocationFromCandidatesIfNeeded:torrent candidateDirs:candidateDirs didSwitch:&didSwitch] && didSwitch)
+            {
+                tr_torrentStart(torrent.torrentStruct);
+                anyFixed = YES;
+            }
+        }
+        if (anyFixed)
+        {
+            [Torrent updateTorrents:torrents];
+        }
+
         // Process results and update UI on main thread
         dispatch_async(dispatch_get_main_queue(), ^{
             CGFloat dlRate = 0.0, ulRate = 0.0;

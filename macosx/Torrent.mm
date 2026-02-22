@@ -858,6 +858,30 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
     return YES;
 }
 
+- (BOOL)allFilesExistAtPath:(NSString*)dir
+{
+    if (self.magnet || self.fileCount == 0 || dir.length == 0)
+    {
+        return NO;
+    }
+    NSFileManager* fm = NSFileManager.defaultManager;
+    for (NSUInteger i = 0; i < self.fileCount; ++i)
+    {
+        auto const fileView = tr_torrentFile(self.fHandle, static_cast<tr_file_index_t>(i));
+        if (fileView.name == nullptr || *fileView.name == '\0')
+        {
+            return NO;
+        }
+        NSString* subpath = @(fileView.name);
+        NSString* fullPath = [dir stringByAppendingPathComponent:subpath];
+        if (![fm fileExistsAtPath:fullPath] && ![fm fileExistsAtPath:[fullPath stringByAppendingString:@".part"]])
+        {
+            return NO;
+        }
+    }
+    return YES;
+}
+
 - (NSString*)lastKnownDataLocation
 {
     if (self.magnet)

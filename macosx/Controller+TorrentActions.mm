@@ -181,12 +181,29 @@
 
 - (void)verifyTorrents:(NSArray<Torrent*>*)torrents
 {
-    for (Torrent* torrent in torrents)
+    if (torrents.count == 0)
     {
-        [torrent resetCache];
+        return;
     }
-
-    [self applyFilter];
+    NSSet<NSString*>* candidateDirs = [self missingDataCandidateDownloadDirsFromTorrents:self.fTorrents];
+    NSArray<Torrent*>* torrentsCopy = [torrents copy];
+    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+        for (Torrent* torrent in torrentsCopy)
+        {
+            BOOL didSwitch = NO;
+            if (torrent.error && [self setTorrentLocationFromCandidatesIfNeeded:torrent candidateDirs:candidateDirs didSwitch:&didSwitch] && didSwitch)
+            {
+                tr_torrentStart(torrent.torrentStruct);
+            }
+        }
+        dispatch_async(dispatch_get_main_queue(), ^{
+            for (Torrent* torrent in torrentsCopy)
+            {
+                [torrent resetCache];
+            }
+            [self applyFilter];
+        });
+    });
 }
 
 - (NSArray<Torrent*>*)selectedTorrents

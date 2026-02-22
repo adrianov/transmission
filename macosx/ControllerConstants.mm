@@ -33,7 +33,13 @@ SortType const SortTypeSize = @"Size";
 SortType const SortTypeETA = @"ETA";
 
 NSString* const kTorrentTableViewDataType = @"TorrentTableViewDataType";
+NSString* const kWebsiteURL = @"https://transmissionbt.com/";
+NSString* const kForumURL = @"https://forum.transmissionbt.com/";
+NSString* const kGithubURL = @"https://github.com/transmission/transmission";
+NSString* const kDonateURL = @"https://transmissionbt.com/donate/";
 
 CGFloat const kStatusBarHeight = 24.0;
 CGFloat const kFilterBarHeight = 24.0;
 CGFloat const kBottomBarHeight = 24.0;
+CGFloat const kRowHeightRegular = 62.0;
+CGFloat const kRowHeightSmall = 22.0;

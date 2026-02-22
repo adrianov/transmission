@@ -55,7 +55,13 @@ typedef NS_ENUM(NSUInteger, SortTag) {
 typedef NS_ENUM(NSUInteger, SortOrderTag) { SortOrderTagAscending = 0, SortOrderTagDescending = 1 };
 
 extern NSString* const kTorrentTableViewDataType;
+extern NSString* const kWebsiteURL;
+extern NSString* const kForumURL;
+extern NSString* const kGithubURL;
+extern NSString* const kDonateURL;
 
 extern CGFloat const kStatusBarHeight;
 extern CGFloat const kFilterBarHeight;
 extern CGFloat const kBottomBarHeight;
+extern CGFloat const kRowHeightRegular;
+extern CGFloat const kRowHeightSmall;
