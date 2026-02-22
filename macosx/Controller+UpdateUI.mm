@@ -21,11 +21,16 @@
 
 - (void)updateUI
 {
-    // Skip heavy update if previous one still in progress, but still refresh visible rows so buttons/progress tick every second
+    // Skip heavy update if previous one still in progress; defer row refresh so window restore/close stay responsive
     if (self.fUpdatingUI)
     {
         if (self.fWindow.visible && !NSApp.hidden)
-            [self refreshVisibleTransferRows];
+        {
+            __weak typeof(self) weakSelf = self;
+            dispatch_async(dispatch_get_main_queue(), ^{
+                [weakSelf refreshVisibleTransferRows];
+            });
+        }
         return;
     }
     self.fUpdatingUI = YES;
@@ -55,33 +60,31 @@
             [Torrent updateTorrents:torrents];
         }
 
-        // Process results and update UI on main thread
-        dispatch_async(dispatch_get_main_queue(), ^{
-            CGFloat dlRate = 0.0, ulRate = 0.0;
-            BOOL anyCompleted = NO;
-            BOOL anyActive = NO;
+        // Aggregate stats and run converters off main thread so window restore/close stay responsive
+        CGFloat dlRate = 0.0, ulRate = 0.0;
+        BOOL anyCompleted = NO;
+        BOOL anyActive = NO;
+        BOOL autoConvertDjvu = [self.fDefaults boolForKey:@"AutoConvertDjvu"];
 
-            BOOL autoConvertDjvu = [self.fDefaults boolForKey:@"AutoConvertDjvu"];
+        for (Torrent* torrent in torrents)
+        {
+            dlRate += torrent.downloadRate;
+            ulRate += torrent.uploadRate;
+            anyCompleted |= torrent.finishedSeeding;
+            anyActive |= torrent.active && !torrent.stalled && !torrent.error;
 
-            for (Torrent* torrent in torrents)
+            if (autoConvertDjvu && (torrent.downloading || torrent.seeding))
             {
-                //pull the upload and download speeds - most consistent by using current stats
-                dlRate += torrent.downloadRate;
-                ulRate += torrent.uploadRate;
-
-                anyCompleted |= torrent.finishedSeeding;
-                anyActive |= torrent.active && !torrent.stalled && !torrent.error;
-
-                // Check for completed DJVU/FB2 files to convert
-                // Check both downloading and seeding torrents (files may complete while seeding)
-                if (autoConvertDjvu && (torrent.downloading || torrent.seeding))
-                {
-                    [DjvuConverter checkAndConvertCompletedFiles:torrent];
-                    [Fb2Converter checkAndConvertCompletedFiles:torrent];
-                }
+                [DjvuConverter checkAndConvertCompletedFiles:torrent];
+                [Fb2Converter checkAndConvertCompletedFiles:torrent];
             }
+        }
 
-            PowerManager.shared.shouldPreventSleep = anyActive && [self.fDefaults boolForKey:@"SleepPrevent"];
+        BOOL shouldPreventSleep = anyActive && [self.fDefaults boolForKey:@"SleepPrevent"];
+
+        // Update UI on main thread; defer row refresh to next run loop so restore/close are responsive
+        dispatch_async(dispatch_get_main_queue(), ^{
+            PowerManager.shared.shouldPreventSleep = shouldPreventSleep;
 
             if (!NSApp.hidden)
             {
@@ -94,18 +97,18 @@
                     self.fClearCompletedButton.hidden = !anyCompleted;
                 }
 
-                //update non-constant parts of info window
                 if (self.fInfoController.window.visible)
                 {
                     [self.fInfoController updateInfoStats];
                 }
 
-                [self refreshVisibleTransferRows];
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    [self refreshVisibleTransferRows];
+                });
             }
 
             [self updateSearchPlaceholder];
 
-            //badge dock
             [self.fBadger updateBadgeWithDownload:dlRate upload:ulRate];
 
             self.fUpdatingUI = NO;
