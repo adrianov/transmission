@@ -87,7 +87,7 @@ extern NSString* const kTorrentDidChangeGroupNotification;
 @property(nonatomic) tr_priority_t priority;
 
 + (BOOL)trashFile:(NSString*)path error:(NSError**)error;
-- (void)moveTorrentDataFileTo:(NSString*)folder;
+- (void)moveTorrentDataFileTo:(NSString*)folder completionHandler:(void (^ _Nullable)(void))completionHandler;
 - (void)copyTorrentFileTo:(NSString*)path;
 
 @property(nonatomic, readonly) BOOL alertForRemainingDiskSpace;

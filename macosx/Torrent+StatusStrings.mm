@@ -95,7 +95,10 @@ static NSDateComponentsFormatter* etaFormatter()
 
         if (self.shouldShowEta)
         {
-            string = [string stringByAppendingFormat:@" — %@", self.etaString];
+            if (self.downloading && self.downloadRate > 0.0)
+                string = [string stringByAppendingFormat:@" — %@ — %@", [NSString stringForSpeed:self.downloadRate], self.etaString];
+            else
+                string = [string stringByAppendingFormat:@" — %@", self.etaString];
         }
     }
 
@@ -154,6 +157,11 @@ static NSDateComponentsFormatter* etaFormatter()
         }
         return [NSString stringWithFormat:NSLocalizedString(@"Converting %@ to EPUB for compatibility reading…", "Torrent -> status string"),
                                           convertingFb2FileName];
+    }
+
+    if (self.fIsMovingData)
+    {
+        return [NSLocalizedString(@"Moving data", "Torrent -> status string") stringByAppendingEllipsis];
     }
 
     NSString* string;

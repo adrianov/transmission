@@ -58,6 +58,7 @@ typedef NS_ENUM(NSInteger, TorrentMediaType) {
 @property(nonatomic) TorrentDeterminationType fDownloadFolderDetermination;
 
 @property(nonatomic) BOOL fResumeOnWake;
+@property(nonatomic) BOOL fIsMovingData;
 @property(nonatomic) BOOL fPausedForDiskSpace;
 @property(nonatomic) uint64_t fDiskSpaceNeeded;
 @property(nonatomic) uint64_t fDiskSpaceAvailable;

@@ -564,11 +564,15 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
     return NO;
 }
 
-- (void)moveTorrentDataFileTo:(NSString*)folder
+- (void)moveTorrentDataFileTo:(NSString*)folder completionHandler:(void (^)(void))completionHandler
 {
     NSString* oldFolder = self.currentDirectory;
     if ([oldFolder isEqualToString:folder])
     {
+        if (completionHandler)
+        {
+            completionHandler();
+        }
         return;
     }
 
@@ -586,14 +590,20 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
         [alert addButtonWithTitle:NSLocalizedString(@"OK", "Move inside itself alert -> button")];
 
         [alert runModal];
-
+        if (completionHandler)
+        {
+            completionHandler();
+        }
         return;
     }
 
+    self.fIsMovingData = YES;
     __block int volatile status;
     tr_torrentSetLocation(self.fHandle, folder.UTF8String, YES, &status);
 
     NSString* torrentName = self.name;
+    void (^const onDone)(void) = completionHandler ?: ^{
+    };
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
         while (status == TR_LOC_MOVING)
         {
@@ -601,11 +611,9 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
         }
 
         dispatch_async(dispatch_get_main_queue(), ^{
-            if (status == TR_LOC_DONE)
-            {
-                [NSNotificationCenter.defaultCenter postNotificationName:@"UpdateStats" object:nil];
-            }
-            else
+            self.fIsMovingData = NO;
+            [NSNotificationCenter.defaultCenter postNotificationName:@"UpdateStats" object:nil];
+            if (status != TR_LOC_DONE)
             {
                 NSAlert* alert = [[NSAlert alloc] init];
                 alert.messageText = NSLocalizedString(@"There was an error moving the data file.", "Move error alert -> title");
@@ -618,6 +626,7 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
             }
 
             [self updateTimeMachineExclude];
+            onDone();
         });
     });
 }

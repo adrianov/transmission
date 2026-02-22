@@ -8,3 +8,6 @@
 "Played: %lu" = "Played: %lu";
 /* Files tab / Play button tooltip -> open count for other */
 "Opened: %lu" = "Opened: %lu";
+
+/* Torrent -> status string (move in progress) */
+"Moving data" = "Moving data";

@@ -42,13 +42,26 @@
     }
 
     [panel beginSheetModalForWindow:self.fWindow completionHandler:^(NSInteger result) {
-        if (result == NSModalResponseOK)
+        if (result != NSModalResponseOK)
         {
-            for (Torrent* torrent in torrents)
-            {
-                [torrent moveTorrentDataFileTo:panel.URLs[0].path];
-            }
+            return;
         }
+        NSURL* destinationURL = panel.URLs[0];
+        BOOL needsScope = [destinationURL startAccessingSecurityScopedResource];
+        dispatch_group_t group = dispatch_group_create();
+        for (Torrent* torrent in torrents)
+        {
+            dispatch_group_enter(group);
+            [torrent moveTorrentDataFileTo:destinationURL.path completionHandler:^{
+                dispatch_group_leave(group);
+            }];
+        }
+        dispatch_group_notify(group, dispatch_get_main_queue(), ^{
+            if (needsScope)
+            {
+                [destinationURL stopAccessingSecurityScopedResource];
+            }
+        });
     }];
 }
 
