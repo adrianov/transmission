@@ -109,10 +109,18 @@
             tr_torrentStart(torrent.torrentStruct);
             continue;
         }
-        // Keep torrent if its data is on an external volume (/Volumes/...) so user can mount again
+        // Keep torrent if its data is on an external volume that is not currently mounted
         if ([torrent.currentDirectory hasPrefix:@"/Volumes/"])
         {
-            continue;
+            NSArray<NSString*>* comp = [torrent.currentDirectory pathComponents];
+            if (comp.count >= 3)
+            {
+                NSString* volumePath = [NSString pathWithComponents:[comp subarrayWithRange:NSMakeRange(0, 3)]];
+                if (![[NSFileManager defaultManager] fileExistsAtPath:volumePath])
+                {
+                    continue; // volume not mounted, keep so user can mount again
+                }
+            }
         }
         [toRemove addObject:torrent];
     }
