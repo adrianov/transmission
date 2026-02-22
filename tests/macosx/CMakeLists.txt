@@ -5,6 +5,7 @@ add_executable(macosx-test)
 target_sources(macosx-test
     PRIVATE
         IINAWatchHelper-test.mm
+        PlayButtonStateBuilder-test.mm
         NSStringAdditions-test.mm
         TorrentPlayable-regression-test.mm
         ${CMAKE_SOURCE_DIR}/macosx/IINAWatchHelper.h

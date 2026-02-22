@@ -54,6 +54,15 @@ static void initMediaExtensionSets(void)
     initMediaExtensionSets();
 }
 
+/// YES when ext is a known video file extension (lowercase). Used for ETA < duration play button visibility.
++ (BOOL)isVideoFileExtension:(NSString*)ext
+{
+    if (ext.length == 0)
+        return NO;
+    [Torrent ensureMediaExtensionSets];
+    return [sVideoExtensions containsObject:ext.lowercaseString];
+}
+
 /// Detects dominant media type (video or audio) in folder torrents.
 /// Also detects DVD structure (VIDEO_TS folder with VOB files).
 - (void)detectMediaType

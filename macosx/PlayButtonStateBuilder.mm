@@ -45,13 +45,12 @@ static NSTimeInterval durationForVideoAtPath(NSString* path)
     return sec;
 }
 
-/// For video/adult: show play button only when ETA (remaining/speed) < video duration. Duration is parsed when progress >= 1% and cached.
+/// For video files (by extension): show play button when file is playable (path + duration) and ETA < duration.
 static BOOL videoDisplayAllowed(Torrent* torrent, NSDictionary* entry, CGFloat progress, BOOL visible)
 {
     if (!visible || progress >= 1.0)
         return visible;
-    NSString* category = entry[@"category"];
-    if (![category isEqualToString:@"video"] && ![category isEqualToString:@"adult"])
+    if (![Torrent isVideoFileExtension:[torrent pathExtensionOfPlayableItem:entry]])
         return visible;
     if (progress < 0.01)
         return NO;
@@ -293,8 +292,7 @@ static dispatch_queue_t iinaStateQueue()
     NSMutableArray<NSDictionary*>* targets = [NSMutableArray array];
     for (NSMutableDictionary* entry in state)
     {
-        NSString* category = entry[@"category"];
-        if (![category isEqualToString:@"video"] && ![category isEqualToString:@"adult"])
+        if (![Torrent isVideoFileExtension:[torrent pathExtensionOfPlayableItem:entry]])
             continue;
 
         if (entry[@"iinaUnwatched"] != nil || [entry[@"iinaPending"] boolValue])
@@ -315,13 +313,9 @@ static dispatch_queue_t iinaStateQueue()
         return;
 
     __weak Torrent* weakTorrent = torrent;
+    NSArray<NSString*>* paths = [targets valueForKey:@"path"];
     dispatch_async(iinaStateQueue(), ^{
-        NSMutableArray<NSNumber*>* values = [NSMutableArray arrayWithCapacity:targets.count];
-        for (NSDictionary* target in targets)
-        {
-            NSString* path = target[@"path"];
-            [values addObject:@([IINAWatchHelper unwatchedForVideoPath:path completionObject:nil])];
-        }
+        NSArray<NSNumber*>* values = [IINAWatchHelper unwatchedForVideoPaths:paths];
 
         dispatch_async(dispatch_get_main_queue(), ^{
             Torrent* strongTorrent = weakTorrent;
@@ -473,22 +467,23 @@ static dispatch_queue_t iinaStateQueue()
             NSString* folder = entry[@"folder"];
             newProgress = folder.length > 0 ? [torrent folderConsecutiveProgress:folder] : 0.0;
         }
-        if (std::fabs(newProgress - progress) > 0.000001)
+        NSNumber* indexNum = entry[@"index"];
+        BOOL wanted = indexNum ?
+            ([torrent checkForFiles:[NSIndexSet indexSetWithIndex:indexNum.unsignedIntegerValue]] == NSControlStateValueOn) :
+            YES;
+        BOOL progressChanged = std::fabs(newProgress - progress) > 0.000001;
+        if (progressChanged)
         {
             progress = newProgress;
             entry[@"progress"] = @(progress);
             int progressPct = (int)floor(progress * 100);
             entry[@"progressPercent"] = @(progressPct);
-            NSNumber* indexNum = entry[@"index"];
-            BOOL wanted = indexNum ?
-                ([torrent checkForFiles:[NSIndexSet indexSetWithIndex:indexNum.unsignedIntegerValue]] == NSControlStateValueOn) :
-                YES;
             BOOL visible = isPlayableItemVisible(type, progress, wanted);
-            visible = videoDisplayAllowed(torrent, entry, progress, visible);
-            // Do not hide video/adult play button once it is already showing
-            NSString* cat = entry[@"category"];
-            if (wasVisible && ([cat isEqualToString:@"video"] || [cat isEqualToString:@"adult"]))
-                visible = YES;
+            BOOL isVideoFile = [Torrent isVideoFileExtension:[torrent pathExtensionOfPlayableItem:entry]];
+            if (wasVisible && isVideoFile)
+                visible = YES; // Do not re-evaluate ETA < duration once button is shown
+            else
+                visible = videoDisplayAllowed(torrent, entry, progress, visible);
             entry[@"visible"] = @(visible);
             if (visible != wasVisible)
                 visibilityChanged = YES;
@@ -497,6 +492,24 @@ static dispatch_queue_t iinaStateQueue()
             if (visible && ![type hasPrefix:@"document"] && progress < 1.0 && progressPct < 100)
                 title = [NSString stringWithFormat:@"%@ (%d%%)", baseTitle, progressPct];
             entry[@"title"] = title;
+        }
+        else
+        {
+            // ETA depends on download speed; re-evaluate video-file visibility so button appears when ETA < duration
+            if (!wasVisible && progress < 1.0 && [Torrent isVideoFileExtension:[torrent pathExtensionOfPlayableItem:entry]])
+            {
+                int progressPct = [entry[@"progressPercent"] intValue];
+                BOOL visible = isPlayableItemVisible(type, progress, wanted);
+                visible = videoDisplayAllowed(torrent, entry, progress, visible);
+                if (visible != wasVisible)
+                {
+                    entry[@"visible"] = @(visible);
+                    visibilityChanged = YES;
+                    NSString* baseTitle = entry[@"baseTitle"] ?: @"";
+                    entry[@"title"] = (visible && ![type hasPrefix:@"document"] && progressPct < 100) ?
+                        [NSString stringWithFormat:@"%@ (%d%%)", baseTitle, progressPct] : baseTitle;
+                }
+            }
         }
     }
     if (state.count >= 2)

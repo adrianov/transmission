@@ -119,6 +119,8 @@ extern NSString* _Nonnull const kTorrentDidChangeGroupNotification;
 
 /// Returns detected media category for a specific file index.
 - (NSString* _Nullable)mediaCategoryForFile:(NSUInteger)index;
+/// YES when ext is a known video file extension. Used for play button ETA < duration visibility.
++ (BOOL)isVideoFileExtension:(NSString* _Nullable)ext;
 
 /// YES if video at path is unwatched in IINA (no watch_later file and not in IINA playback history). Existence-only check; we do not parse watch_later contents. Used for tooltip/behavior; play button is drawn black-ish.
 - (BOOL)iinaUnwatchedForVideoPath:(NSString* _Nonnull)path;
@@ -191,6 +193,8 @@ extern NSString* _Nonnull const kTorrentDidChangeGroupNotification;
 - (NSString* _Nonnull)pathToOpenForPlayableItem:(NSDictionary* _Nonnull)item;
 /// Same as pathToOpenForPlayableItem but returns nil if the path does not exist on disk. Use for play actions to avoid "Cannot open stream".
 - (NSString* _Nullable)pathToOpenForPlayableItemIfExists:(NSDictionary* _Nonnull)item;
+/// Path extension of a playable item (from item[@"path"] or item[@"originalExt"]). Nil if none.
+- (NSString* _Nullable)pathExtensionOfPlayableItem:(NSDictionary* _Nonnull)item;
 /// YES when this playable item should display as album (CUE) rather than single track. Single source for icon and play menu.
 - (BOOL)playableItemOpensAsCueAlbum:(NSDictionary* _Nonnull)item;
 /// Display name for play menu; should reflect the file that is opened (e.g. .cue when present).

@@ -16,6 +16,9 @@ extern NSString* const kIINAWatchCacheDidUpdateNotification;
 /// Returns YES if video at path is unwatched (no watch_later file and not in IINA playback history). Returns NO if watched (file exists or in history).
 + (BOOL)unwatchedForVideoPath:(NSString*)path completionObject:(id)completionObject;
 
+/// Batch variant: reads watch_later dir and history once, returns one BOOL per path. Use when checking many paths (e.g. play button state).
++ (NSArray<NSNumber*>*)unwatchedForVideoPaths:(NSArray<NSString*>*)paths;
+
 /// Clears cached result for path (call after user plays file so next check reflects IINA state).
 + (void)invalidateCacheForPath:(NSString*)path;
 
