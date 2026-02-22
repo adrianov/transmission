@@ -4,11 +4,77 @@
 
 #include <cmath>
 
+#import <AVFoundation/AVFoundation.h>
+
 #import "PlayButtonStateBuilder.h"
 #import "IINAWatchHelper.h"
 #import "NSStringAdditions.h"
 #import "Torrent.h"
 #import "TorrentPrivate.h"
+
+static NSTimeInterval durationForVideoAtPath(NSString* path)
+{
+    if (!path || path.length == 0)
+        return 0;
+    static NSCache<NSString*, NSNumber*>* sDurationCache;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        sDurationCache = [[NSCache alloc] init];
+        sDurationCache.countLimit = 200;
+    });
+    NSNumber* cached = [sDurationCache objectForKey:path];
+    if (cached != nil)
+        return cached.doubleValue;
+    NSURL* url = [NSURL fileURLWithPath:path];
+    if (!url)
+        return 0;
+    AVURLAsset* asset = [AVURLAsset assetWithURL:url];
+    CMTime cm = asset.duration;
+    if (!CMTIME_IS_NUMERIC(cm))
+    {
+        [sDurationCache setObject:@(0) forKey:path];
+        return 0;
+    }
+    NSTimeInterval sec = CMTimeGetSeconds(cm);
+    if (sec <= 0 || !isfinite(sec))
+    {
+        [sDurationCache setObject:@(0) forKey:path];
+        return 0;
+    }
+    [sDurationCache setObject:@(sec) forKey:path];
+    return sec;
+}
+
+/// For video/adult: show play button only when ETA (remaining/speed) < video duration. Duration is parsed when progress >= 1% and cached.
+static BOOL videoDisplayAllowed(Torrent* torrent, NSDictionary* entry, CGFloat progress, BOOL visible)
+{
+    if (!visible || progress >= 1.0)
+        return visible;
+    NSString* category = entry[@"category"];
+    if (![category isEqualToString:@"video"] && ![category isEqualToString:@"adult"])
+        return visible;
+    if (progress < 0.01)
+        return NO;
+    NSNumber* indexNum = entry[@"index"];
+    if (indexNum == nil)
+        return visible;
+    NSString* pathOnDisk = [torrent pathToOpenForPlayableItemIfExists:entry];
+    if (!pathOnDisk)
+        return NO;
+    NSTimeInterval durationSec = durationForVideoAtPath(pathOnDisk);
+    if (durationSec <= 0)
+        return NO;
+    uint64_t fileSize = [torrent fileSizeForIndex:indexNum.unsignedIntegerValue];
+    if (fileSize == 0)
+        return visible;
+    double remainingBytes = (1.0 - progress) * (double)fileSize;
+    CGFloat speedKBps = [torrent downloadRate];
+    if (speedKBps <= 0)
+        return NO;
+    double speedBytesPerSec = (double)speedKBps * 1024.0;
+    double etaSec = remainingBytes / speedBytesPerSec;
+    return etaSec < durationSec;
+}
 
 /// When multiple buttons share the same stripped title, prepend humanized parent directory and re-strip so labels are distinct (e.g. "Part 01 — Monte Cristo").
 static void disambiguateDuplicateTitles(NSMutableArray<NSMutableDictionary*>* state, NSArray<NSNumber*>* seasons)
@@ -355,6 +421,7 @@ static dispatch_queue_t iinaStateQueue()
                 ([torrent checkForFiles:[NSIndexSet indexSetWithIndex:indexNum.unsignedIntegerValue]] == NSControlStateValueOn) :
                 YES;
             BOOL visible = isPlayableItemVisible(type, progress, wanted);
+            visible = videoDisplayAllowed(torrent, entry, progress, visible);
             entry[@"visible"] = @(visible);
             if (visible && ![type hasPrefix:@"document"] && progress < 1.0 && progressPct < 100)
                 entry[@"title"] = [NSString stringWithFormat:@"%@ (%d%%)", entry[@"baseTitle"], progressPct];
@@ -417,6 +484,11 @@ static dispatch_queue_t iinaStateQueue()
                 ([torrent checkForFiles:[NSIndexSet indexSetWithIndex:indexNum.unsignedIntegerValue]] == NSControlStateValueOn) :
                 YES;
             BOOL visible = isPlayableItemVisible(type, progress, wanted);
+            visible = videoDisplayAllowed(torrent, entry, progress, visible);
+            // Do not hide video/adult play button once it is already showing
+            NSString* cat = entry[@"category"];
+            if (wasVisible && ([cat isEqualToString:@"video"] || [cat isEqualToString:@"adult"]))
+                visible = YES;
             entry[@"visible"] = @(visible);
             if (visible != wasVisible)
                 visibilityChanged = YES;

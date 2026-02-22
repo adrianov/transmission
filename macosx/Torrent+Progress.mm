@@ -40,6 +40,11 @@
     return progress;
 }
 
+- (uint64_t)fileSizeForIndex:(NSUInteger)index
+{
+    return tr_torrentFile(self.fHandle, (tr_file_index_t)index).length;
+}
+
 - (void)invalidateFileProgressCache
 {
     self.fProgressCacheGeneration = 0;
