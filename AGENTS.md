@@ -181,3 +181,11 @@ npm run lint:fix          # Fix
 - **DRY Principle**: When multiple UI components need the same logic (e.g., determining tooltip paths, finding associated files), implement it once in the `Torrent` class and have UI components call those methods
 - UI components should access `Torrent` through `FileListNode.torrent` property
 - Avoid duplicating file path resolution or association logic across UI components
+
+### Pre-Commit DRY Analysis
+
+Before presenting changes, run `git diff -w -W --histogram` and scan the diff for:
+- Duplicate loops over the same collection (merge into one pass)
+- Identical grouping/bucketing logic (extract shared grouping, apply separate operations)
+- Repeated guard/filter patterns (extract a predicate or helper)
+- ObjC/JS mirror code is expected (separate platforms) — flag only intra-file or intra-language duplication

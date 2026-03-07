@@ -153,3 +153,4 @@ TEST(PlayButtonStateBuilderTest, SameSeasonDuplicatesDisambiguated)
     // "E2" is unique and should stay unchanged
     EXPECT_STREQ([state[2][@"title"] UTF8String], "E2");
 }
+

@@ -20,13 +20,12 @@ static NSUInteger commonPrefixTokenCount(NSArray<NSArray<NSString*>*>* tokenArra
 static NSString* stringFromWordTokens(NSArray<NSString*>* tokens);
 /// Trim trailing whitespace and extra trailing ')' so e.g. "I (2024) " → "I (2024)", "Album (2024))" → "Album (2024)".
 static NSString* trimTrailingParenAndSpace(NSString* s);
-static NSDictionary<NSString*, NSString*>* commonPrefixAndSuffixForStrings(NSArray<NSString*>* strings);
 /// YES if token looks like a season marker (e.g. S1, S01).
 static BOOL isSeasonToken(NSString* token);
-/// YES if tokens from given index form a disc marker (CD1, Disc 1, CD 2, etc.).
-static BOOL isDiscMarkerFromTokenIndex(NSArray<NSString*>* tokens, NSUInteger from);
-/// YES if every token array has a disc marker at the common prefix boundary (prefixDrop).
-static BOOL allTitlesHaveDiscMarkerAt(NSArray<NSArray<NSString*>*>* tokenArrays, NSUInteger prefixDrop);
+/// YES if tokens from given index form a part marker (CD1, Disc 1, Scene 2, Part 3, Chapter 1, etc.).
+static BOOL isPartMarkerFromTokenIndex(NSArray<NSString*>* tokens, NSUInteger from);
+/// YES if every token array has a part marker at the common prefix boundary (prefixDrop).
+static BOOL allTitlesHavePartMarkerAt(NSArray<NSArray<NSString*>*>* tokenArrays, NSUInteger prefixDrop);
 /// YES if the common prefix (0..prefixDrop-1) of the first title contains a season token (S1, S01, etc.).
 static BOOL commonPrefixContainsSeasonToken(NSArray<NSArray<NSString*>*>* tokenArrays, NSUInteger prefixDrop);
 /// YES if the common prefix ends with "-" (Artist - Title pattern); allows stripping "Artist - " for album buttons.
@@ -39,8 +38,6 @@ static BOOL isEpisodeOnlyToken(NSString* token);
 static BOOL isLeadingTrackNumberToken(NSString* token);
 /// YES if string is only a resolution/format tag (e.g. 1080p, 2160p, #1080p); avoid using as button title (over-stripped).
 static BOOL isResolutionOnlyTitle(NSString* s);
-/// YES if string is only digits or digits + trailing period (e.g. 13, 01.); avoid using as button title (over-stripped).
-static BOOL isBareTrackNumberOnly(NSString* s);
 /// Normalize so "01.Monte.Cristo" tokenizes as leading number + words (enables "01", "02" strip when remainder is same).
 static NSString* normalizeTitleForTokenization(NSString* s);
 
@@ -384,9 +381,24 @@ static NSString* normalizeTitleForTokenization(NSString* s);
     }
     NSUInteger suffixDrop = commonSuffixTokenCount(workArrays);
     NSUInteger prefixDrop = commonPrefixTokenCount(workArrays);
-    // Allow prefix strip when: season token (S1, S01), or remainder is disc marker (CD1, Disc 1), or "Artist - " pattern.
+    // Allow prefix strip when: season token (S1, S01), remainder is part marker (CD1, Disc 1, Scene 2, etc.),
+    // "Artist - " pattern, or every remainder has 2+ tokens (e.g. "Scene 1", "Scene 2").
+    BOOL allRemaindersMultiToken = YES;
+    if (prefixDrop > 0)
+    {
+        for (NSArray<NSString*>* arr in workArrays)
+        {
+            NSUInteger remainderCount = arr.count > prefixDrop + suffixDrop ? arr.count - prefixDrop - suffixDrop : 0;
+            if (remainderCount < 2)
+            {
+                allRemaindersMultiToken = NO;
+                break;
+            }
+        }
+    }
     if (prefixDrop > 0 && !commonPrefixContainsSeasonToken(workArrays, prefixDrop) &&
-        !allTitlesHaveDiscMarkerAt(workArrays, prefixDrop) && !commonPrefixEndsWithArtistSeparator(workArrays, prefixDrop))
+        !allTitlesHavePartMarkerAt(workArrays, prefixDrop) && !commonPrefixEndsWithArtistSeparator(workArrays, prefixDrop) &&
+        !allRemaindersMultiToken)
         prefixDrop = 0;
     // Do not strip when the remainder would be only an episode-only token (e.g. E126); keep full title.
     if (prefixDrop > 0 && allRemaindersAreSingleEpisodeOnlyToken(workArrays, prefixDrop, suffixDrop) &&
@@ -436,12 +448,7 @@ static NSString* normalizeTitleForTokenization(NSString* s);
             [remainders addObject:joined.length > 0 ? joined : @""];
         if (joined.length == 0)
             [result addObject:raw];
-        // Regression fix: Prevent over-stripping in first pass. If token-based stripping produces only a resolution
-        // (e.g. "1080p") or bare track number (e.g. "13"), keep the original title. This prevents buttons from showing
-        // meaningless labels like "1080p" or "13" when the full title should be displayed. The "all same remainder"
-        // logic below (lines 425-434) will override this for the special case where all titles share the same suffix
-        // (e.g. "01. Same", "02. Same" → "01", "02"), which is the intended behavior.
-        else if (isResolutionOnlyTitle(joined) || isBareTrackNumberOnly(joined))
+        else if (isResolutionOnlyTitle(joined))
             [result addObject:raw];
         else if (leadingTokens)
             [result addObject:[[leadingTokens[i] stringByAppendingString:@" "] stringByAppendingString:joined]];
@@ -488,7 +495,16 @@ static BOOL isSeasonToken(NSString* token)
     return YES;
 }
 
-static BOOL isDiscMarkerFromTokenIndex(NSArray<NSString*>* tokens, NSUInteger from)
+/// Marker words that indicate a numbered part (e.g. "Scene 1", "Part 2", "Disc 3").
+static BOOL isPartMarkerWord(NSString* lowercaseToken)
+{
+    return [lowercaseToken isEqualToString:@"cd"] || [lowercaseToken isEqualToString:@"disc"] ||
+           [lowercaseToken isEqualToString:@"disk"] || [lowercaseToken isEqualToString:@"scene"] ||
+           [lowercaseToken isEqualToString:@"part"] || [lowercaseToken isEqualToString:@"chapter"] ||
+           [lowercaseToken isEqualToString:@"volume"] || [lowercaseToken isEqualToString:@"vol"];
+}
+
+static BOOL isPartMarkerFromTokenIndex(NSArray<NSString*>* tokens, NSUInteger from)
 {
     if (from >= tokens.count)
         return NO;
@@ -496,14 +512,15 @@ static BOOL isDiscMarkerFromTokenIndex(NSArray<NSString*>* tokens, NSUInteger fr
     if (t0.length == 0)
         return NO;
     NSCharacterSet* digits = [NSCharacterSet decimalDigitCharacterSet];
+    // "Disc 1", "Scene 2" etc. where marker word is at end of common prefix
     if (from >= 1)
     {
         NSString* prev = [tokens[from - 1] lowercaseString];
-        if (([prev isEqualToString:@"disc"] || [prev isEqualToString:@"disk"] || [prev isEqualToString:@"cd"]) &&
-            [t0 stringByTrimmingCharactersInSet:digits].length == 0)
-            return YES; // "Disc 1", "Disk 1", "CD 1" etc. with marker word in common prefix
+        if (isPartMarkerWord(prev) && [t0 stringByTrimmingCharactersInSet:digits].length == 0)
+            return YES;
     }
-    if ([t0 isEqualToString:@"cd"] || [t0 isEqualToString:@"disc"] || [t0 isEqualToString:@"disk"])
+    // "Scene N" / "Part N" as two tokens starting at from
+    if (isPartMarkerWord(t0))
     {
         if (from + 1 < tokens.count)
         {
@@ -513,29 +530,29 @@ static BOOL isDiscMarkerFromTokenIndex(NSArray<NSString*>* tokens, NSUInteger fr
         }
         return NO;
     }
-    if (t0.length >= 3 && [t0 hasPrefix:@"cd"])
+    // Merged tokens: "CD1", "Disc2", "Scene3", etc.
+    static NSArray<NSString*>* prefixes;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        prefixes = @[ @"cd", @"disc", @"disk", @"scene", @"part", @"chapter", @"volume", @"vol" ];
+    });
+    for (NSString* prefix in prefixes)
     {
-        NSString* rest = [t0 substringFromIndex:2];
-        return rest.length > 0 && [rest stringByTrimmingCharactersInSet:digits].length == 0;
-    }
-    if (t0.length >= 4 && [t0 hasPrefix:@"disc"])
-    {
-        NSString* rest = [t0 substringFromIndex:4];
-        return rest.length > 0 && [rest stringByTrimmingCharactersInSet:digits].length == 0;
-    }
-    if (t0.length >= 5 && [t0 hasPrefix:@"disk"])
-    {
-        NSString* rest = [t0 substringFromIndex:4];
-        return rest.length > 0 && [rest stringByTrimmingCharactersInSet:digits].length == 0;
+        if (t0.length > prefix.length && [t0 hasPrefix:prefix])
+        {
+            NSString* rest = [t0 substringFromIndex:prefix.length];
+            if ([rest stringByTrimmingCharactersInSet:digits].length == 0)
+                return YES;
+        }
     }
     return NO;
 }
 
-static BOOL allTitlesHaveDiscMarkerAt(NSArray<NSArray<NSString*>*>* tokenArrays, NSUInteger prefixDrop)
+static BOOL allTitlesHavePartMarkerAt(NSArray<NSArray<NSString*>*>* tokenArrays, NSUInteger prefixDrop)
 {
     for (NSArray<NSString*>* tokens in tokenArrays)
     {
-        if (!isDiscMarkerFromTokenIndex(tokens, prefixDrop))
+        if (!isPartMarkerFromTokenIndex(tokens, prefixDrop))
             return NO;
     }
     return YES;
@@ -638,23 +655,6 @@ static BOOL isResolutionOnlyTitle(NSString* s)
         ]];
     });
     return [resolutionTags containsObject:t] || [resolutionTags containsObject:t.lowercaseString];
-}
-
-static BOOL isBareTrackNumberOnly(NSString* s)
-{
-    if (s.length == 0)
-        return NO;
-    NSString* t = [s stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet];
-    if (t.length == 0)
-        return NO;
-    NSUInteger i = 0;
-    while (i < t.length && [[NSCharacterSet decimalDigitCharacterSet] characterIsMember:[t characterAtIndex:i]])
-        i++;
-    if (i == 0)
-        return NO;
-    if (i < t.length && [t characterAtIndex:i] == '.')
-        i++;
-    return i == t.length;
 }
 
 static NSString* normalizeTitleForTokenization(NSString* s)
@@ -798,52 +798,6 @@ static NSString* trimTrailingParenAndSpace(NSString* s)
 }
 
 /// Returns common prefix and suffix for an array of strings (Playable button titles per parent; not file paths).
-static NSDictionary<NSString*, NSString*>* commonPrefixAndSuffixForStrings(NSArray<NSString*>* strings)
-{
-    static NSCharacterSet* separators;
-    static dispatch_once_t once;
-    dispatch_once(&once, ^{
-        separators = [NSCharacterSet characterSetWithCharactersInString:@".-_ "];
-    });
-    NSString* prefix = @"";
-    NSString* suffix = @"";
-    if (strings.count < 2)
-        return @{ @"prefix" : prefix, @"suffix" : suffix };
-    for (NSString* s in strings)
-    {
-        if (prefix.length == 0)
-            prefix = s;
-        else
-        {
-            NSUInteger j = 0;
-            while (j < prefix.length && j < s.length && [prefix characterAtIndex:j] == [s characterAtIndex:j])
-                j++;
-            prefix = [prefix substringToIndex:j];
-        }
-        if (suffix.length == 0)
-            suffix = s;
-        else
-        {
-            NSUInteger j = 0;
-            while (j < suffix.length && j < s.length &&
-                   [suffix characterAtIndex:suffix.length - 1 - j] == [s characterAtIndex:s.length - 1 - j])
-                j++;
-            suffix = [suffix substringFromIndex:suffix.length - j];
-        }
-    }
-    if (prefix.length > 0)
-    {
-        NSUInteger lastSep = [prefix rangeOfCharacterFromSet:separators options:NSBackwardsSearch].location;
-        prefix = (lastSep != NSNotFound) ? [prefix substringToIndex:lastSep + 1] : @"";
-    }
-    if (suffix.length > 0)
-    {
-        NSUInteger firstSep = [suffix rangeOfCharacterFromSet:separators].location;
-        suffix = (firstSep != NSNotFound) ? [suffix substringFromIndex:firstSep] : @"";
-    }
-    return @{ @"prefix" : prefix ?: @"", @"suffix" : suffix ?: @"" };
-}
-
 - (NSArray<NSDictionary*>*)buildIndividualFilePlayables
 {
     static NSRegularExpression* nonWordRegex;
@@ -981,15 +935,12 @@ static NSDictionary<NSString*, NSString*>* commonPrefixAndSuffixForStrings(NSArr
     }
 
     NSMutableDictionary<NSString*, NSNumber*>* cueProgress = [NSMutableDictionary dictionary];
-    /// Button titles per parent — used for common prefix/suffix (Playable button titles only, not file paths).
-    NSMutableDictionary<NSString*, NSMutableArray<NSString*>*>* playableTitlesByParent = [NSMutableDictionary dictionary];
 
     for (NSUInteger i = 0; i < count; i++)
     {
         auto const file = tr_torrentFile(self.fHandle, i);
         NSString* fileName = [NSString convertedStringFromCString:file.name];
         NSString* originalFileName = fileName;
-        NSString* parent = fileName.stringByDeletingLastPathComponent;
 
         NSString* ext = originalFileName.pathExtension.lowercaseString;
 
@@ -1107,13 +1058,6 @@ static NSDictionary<NSString*, NSString*>* commonPrefixAndSuffixForStrings(NSArr
         }
 
         BOOL const opensInBooks = (isDocument && ![documentExternalExtensions containsObject:ext]) || useCompanionPdf || useCompanionEpub;
-        NSMutableArray<NSString*>* titlesInParent = playableTitlesByParent[parent];
-        if (!titlesInParent)
-        {
-            titlesInParent = [NSMutableArray array];
-            playableTitlesByParent[parent] = titlesInParent;
-        }
-        [titlesInParent addObject:displayName];
         [playable addObject:[@{
                       @"type" : isDocument ? (opensInBooks ? @"document-books" : @"document") : @"file",
                       @"category" : category ?: @"",
@@ -1137,15 +1081,7 @@ static NSDictionary<NSString*, NSString*>* commonPrefixAndSuffixForStrings(NSArr
         if (cueIndex && audioIndex)
         {
             NSString* cueFileName = cueFileNames[cueBaseName];
-            NSString* cueParent = cueFileName.stringByDeletingLastPathComponent;
             NSString* cueDisplayName = cueBaseName.humanReadableFileName;
-            NSMutableArray<NSString*>* titlesInParent = playableTitlesByParent[cueParent];
-            if (!titlesInParent)
-            {
-                titlesInParent = [NSMutableArray array];
-                playableTitlesByParent[cueParent] = titlesInParent;
-            }
-            [titlesInParent addObject:cueDisplayName];
 
             CGFloat progress = cueProgress[cueBaseName] ? cueProgress[cueBaseName].doubleValue : 0.0;
             if (progress < 0)
@@ -1174,77 +1110,12 @@ static NSDictionary<NSString*, NSString*>* commonPrefixAndSuffixForStrings(NSArr
     if (playable.count == 0)
         return nil;
 
-    NSMutableDictionary<NSString*, NSString*>* commonPrefixByParent = [NSMutableDictionary dictionary];
-    NSMutableDictionary<NSString*, NSString*>* commonSuffixByParent = [NSMutableDictionary dictionary];
-    for (NSString* parent in playableTitlesByParent)
-    {
-        NSArray<NSString*>* titles = playableTitlesByParent[parent];
-        NSDictionary* pair = commonPrefixAndSuffixForStrings(titles);
-        commonPrefixByParent[parent] = pair[@"prefix"] ?: @"";
-        commonSuffixByParent[parent] = pair[@"suffix"] ?: @"";
-    }
-
-    // Entries in playable must be NSMutableDictionary: we update @"name" in place (common prefix/suffix stripping).
-    // Using immutable NSDictionary here caused -[__NSDictionaryI setObject:forKeyedSubscript:]: unrecognized selector crash.
-    // Skip document-books: per-parent strip can truncate PDF titles (e.g. "In The Court Of The Crimson King..." → "In").
-    for (NSMutableDictionary* fileInfo in playable)
-    {
-        if ([fileInfo[@"type"] isEqualToString:@"document-books"])
-            continue;
-        NSString* relativePath = fileInfo[@"relativePath"];
-        if (relativePath.length == 0)
-            continue;
-        NSString* parent = relativePath.stringByDeletingLastPathComponent;
-        NSString* commonPrefix = commonPrefixByParent[parent] ?: @"";
-        NSString* commonSuffix = commonSuffixByParent[parent] ?: @"";
-        NSString* title = fileInfo[@"name"];
-        if (title.length == 0)
-            continue;
-        if (commonPrefix.length > 0 && title.length > commonPrefix.length && [title hasPrefix:commonPrefix])
-            title = [title substringFromIndex:commonPrefix.length];
-        if (commonSuffix.length > 0 && title.length > commonSuffix.length && [title hasSuffix:commonSuffix])
-            title = [title substringToIndex:title.length - commonSuffix.length];
-        title = [title stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
-        // Regression: do not strip to resolution-only (e.g. "1080p") or bare track number (e.g. "13"); keep humanized title so button is meaningful.
-        if (title.length > 0 && !isResolutionOnlyTitle(title) && !isBareTrackNumberOnly(title))
-            fileInfo[@"name"] = title;
-    }
-
-    // When each playable is in a different parent (e.g. Part.01, Part.02) we had only one title per parent so
-    // per-parent strip did nothing. Run token-based strip globally so "01 Monte Cristo", "02 Monte Cristo" → "01", "02".
-    if (playable.count >= 2)
-    {
-        NSArray<NSString*>* allNames = [playable valueForKey:@"name"];
-        NSArray<NSString*>* stripped = [Torrent displayTitlesByStrippingCommonPrefixSuffix:allNames];
-        if (stripped.count == playable.count)
-        {
-            for (NSUInteger i = 0; i < playable.count; i++)
-            {
-                NSString* s = stripped[i];
-                // Regression fix: Accept bare track numbers from "all same remainder" logic (e.g. "01", "02" when all
-                // titles are "01. Same", "02. Same"). The displayTitlesByStrippingCommonPrefixSuffix method (lines 405-406)
-                // already prevents unwanted bare numbers in the first pass, so if a bare number reaches here, it's because
-                // it was intentionally produced by the "all same remainder" logic (lines 425-434). Reject only resolution-only
-                // titles (e.g. "1080p") which indicate over-stripping. Do not add isBareTrackNumberOnly check here, as it
-                // would break the intended "01", "02", "03" behavior for albums/tracks with identical suffixes.
-                // Do not apply global strip to document-books: token-based strip is for episodes/tracks; applying it
-                // to a single book mixed with audio can over-strip the book title (e.g. "In The Court Of The Crimson King..."
-                // → "In" when tracks share tokens like "The Court Of The Crimson King").
-                NSString* type = playable[i][@"type"];
-                if ([s isKindOfClass:[NSString class]] && s.length > 0 && !isResolutionOnlyTitle(s) && ![type isEqualToString:@"document-books"])
-                    ((NSMutableDictionary*)playable[i])[@"name"] = s;
-            }
-        }
-    }
-
-    // When multiple files in the same folder share the same base name (only extension differs), show extension only (e.g. pdf, epub).
+    // Group files by parent directory for per-folder operations.
     NSMutableDictionary<NSString*, NSMutableArray<NSMutableDictionary*>*>* byParent = [NSMutableDictionary dictionary];
     for (NSMutableDictionary* fileInfo in playable)
     {
         NSString* relativePath = fileInfo[@"relativePath"];
-        if (relativePath.length == 0)
-            continue;
-        NSString* parent = relativePath.stringByDeletingLastPathComponent;
+        NSString* parent = relativePath.length > 0 ? relativePath.stringByDeletingLastPathComponent : @"";
         NSMutableArray* list = byParent[parent];
         if (!list)
         {
@@ -1253,33 +1124,46 @@ static NSDictionary<NSString*, NSString*>* commonPrefixAndSuffixForStrings(NSArr
         }
         [list addObject:fileInfo];
     }
-    for (NSMutableArray* list in byParent.allValues)
+    for (NSMutableArray<NSMutableDictionary*>* list in byParent.allValues)
     {
         if (list.count < 2)
             continue;
-        NSDictionary* firstInfo = list.firstObject;
-        NSString* first = firstInfo[@"name"];
+
+        // Token-based common prefix/suffix strip (skip document-books to avoid over-stripping).
+        NSMutableArray<NSMutableDictionary*>* strippable = [NSMutableArray arrayWithCapacity:list.count];
+        for (NSMutableDictionary* fi in list)
+            if (![fi[@"type"] isEqualToString:@"document-books"])
+                [strippable addObject:fi];
+        if (strippable.count >= 2)
+        {
+            NSArray<NSString*>* names = [strippable valueForKey:@"name"];
+            NSArray<NSString*>* stripped = [Torrent displayTitlesByStrippingCommonPrefixSuffix:names];
+            for (NSUInteger i = 0; i < strippable.count; i++)
+            {
+                NSString* s = stripped[i];
+                if ([s isKindOfClass:[NSString class]] && s.length > 0 && !isResolutionOnlyTitle(s))
+                    strippable[i][@"name"] = s;
+            }
+        }
+
+        // When all files share the same display name (only extension differs), show extension (e.g. pdf, epub).
+        NSString* first = [list.firstObject objectForKey:@"name"];
         if (first.length == 0)
             continue;
         BOOL allSame = YES;
         for (NSUInteger i = 1; i < list.count; i++)
-        {
-            NSString* name = [[list objectAtIndex:i] objectForKey:@"name"];
-            if (![name isEqualToString:first])
+            if (![[list[i] objectForKey:@"name"] isEqualToString:first])
             {
                 allSame = NO;
                 break;
             }
-        }
         if (allSame)
-        {
             for (NSMutableDictionary* fileInfo in list)
             {
                 NSString* ext = fileInfo[@"originalExt"];
                 if ([ext isKindOfClass:[NSString class]] && ext.length > 0)
                     fileInfo[@"name"] = ext.lowercaseString;
             }
-        }
     }
 
     // Sort by full path so directory order is preserved (e.g. Part.01 before Part.02 before Part.03).
