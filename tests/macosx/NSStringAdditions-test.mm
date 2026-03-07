@@ -364,3 +364,11 @@ TEST_F(NSStringAdditionsTest, HumanReadableEpisodeTitle_StandaloneE05_FullFilena
     EXPECT_TRUE([result containsString:@"Show"]) << "Should contain full title, got: " << [result UTF8String];
     EXPECT_GT(result.length, (NSUInteger)3) << "Should be full filename, got: " << [result UTF8String];
 }
+
+TEST_F(NSStringAdditionsTest, HumanReadableEpisodeTitle_BDRemuxStripped)
+{
+    NSString* input = @"The.Wire.S01E01.BDRemux.mkv";
+    NSString* result = [input.lastPathComponent humanReadableEpisodeTitleWithTorrentName:@"The.Wire.Compl.BDRemux"];
+    EXPECT_TRUE([result hasPrefix:@"S1 E1"]) << "Should start with S1 E1, got: " << [result UTF8String];
+    EXPECT_FALSE([result containsString:@"BDRemux"]) << "BDRemux should be stripped, got: " << [result UTF8String];
+}

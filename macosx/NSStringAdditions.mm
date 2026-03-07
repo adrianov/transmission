@@ -708,6 +708,7 @@
         @"PROPER",
         @"EXTENDED",
         @"UNRATED",
+        @"BDRemux",
         @"REMUX",
         @"HDCLUB",
         @"Jaskier",
@@ -1105,10 +1106,10 @@
 
     // Strip technical tags from the original string BEFORE processing (so patterns with dots like H.264 work correctly)
     NSArray* tagsToStrip = @[
-        @"1080p", @"720p",   @"2160p", @"480p",   @"8K",   @"4K",        @"UHD",   @"WEB-DL", @"WEBDL", @"WEBRip",
-        @"BDRip", @"BluRay", @"HDRip", @"DVDRip", @"HDTV", @"WEB-DLRip", @"DLRip", @"H264",   @"H.264", @"H265",
-        @"H.265", @"x264",   @"x265",  @"HEVC",   @"AVC",  @"AMZN",      @"NF",    @"DSNP",   @"HMAX",  @"PCOK",
-        @"ATVP",  @"APTV",   @"2xRu",  @"Ru",     @"En",   @"qqss44",    @"WEB",   @"DL"
+        @"1080p", @"720p",    @"2160p",  @"480p",   @"8K",   @"4K",        @"UHD",     @"WEB-DL", @"WEBDL", @"WEBRip",
+        @"BDRip", @"BDRemux", @"BluRay", @"HDRip",  @"DVDRip", @"HDTV", @"WEB-DLRip", @"DLRip", @"H264", @"H.264",
+        @"H265",  @"H.265",   @"x264",   @"x265",   @"HEVC",   @"AVC",  @"AMZN",      @"NF",    @"DSNP", @"HMAX",
+        @"PCOK",  @"ATVP",    @"APTV",   @"2xRu",   @"Ru",     @"En",   @"qqss44",    @"WEB",   @"DL"
     ];
 
     // Remove any [Source]-?Rip variants from episode title (before dot replacement)
