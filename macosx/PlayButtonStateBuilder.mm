@@ -75,16 +75,23 @@ static BOOL videoDisplayAllowed(Torrent* torrent, NSDictionary* entry, CGFloat p
     return etaSec < durationSec;
 }
 
-/// When multiple buttons share the same stripped title, prepend humanized parent directory and re-strip so labels are distinct (e.g. "Part 01 — Monte Cristo").
+/// When multiple buttons share the same stripped title within the same season, prepend humanized parent directory and re-strip so labels are distinct (e.g. "Part 01 — Monte Cristo").
+/// Duplicates across different seasons are expected (e.g. "E1" in Season 1 and "E1" in Season 2) and not disambiguated.
 static void disambiguateDuplicateTitles(NSMutableArray<NSMutableDictionary*>* state, NSArray<NSNumber*>* seasons)
 {
     if (state.count < 2)
         return;
     NSArray<NSString*>* titles = [state valueForKey:@"title"];
-    NSCountedSet<NSString*>* counts = [NSCountedSet setWithArray:titles];
+    // Count duplicates only within the same season (title+season pair).
+    NSCountedSet<NSString*>* counts = [NSCountedSet set];
+    for (NSUInteger i = 0; i < state.count; i++)
+    {
+        NSNumber* season = (seasons && i < seasons.count) ? seasons[i] : @0;
+        [counts addObject:[NSString stringWithFormat:@"%@\x01%@", titles[i], season]];
+    }
     BOOL anyDuplicate = NO;
-    for (NSString* t in counts)
-        if ([counts countForObject:t] > 1)
+    for (NSString* key in counts)
+        if ([counts countForObject:key] > 1)
         {
             anyDuplicate = YES;
             break;
@@ -93,7 +100,9 @@ static void disambiguateDuplicateTitles(NSMutableArray<NSMutableDictionary*>* st
         return;
     for (NSUInteger i = 0; i < state.count; i++)
     {
-        if ([counts countForObject:titles[i]] < 2)
+        NSNumber* season = (seasons && i < seasons.count) ? seasons[i] : @0;
+        NSString* key = [NSString stringWithFormat:@"%@\x01%@", titles[i], season];
+        if ([counts countForObject:key] < 2)
             continue;
         NSMutableDictionary* e = state[i];
         NSString* path = e[@"path"];

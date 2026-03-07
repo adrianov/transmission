@@ -83,3 +83,73 @@ TEST(PlayButtonStateBuilderTest, etaEqualsDurationHidesButton)
 {
     EXPECT_FALSE(showVideoByEtaDuration(60.0, 60.0));
 }
+
+/// Mirrors disambiguateDuplicateTitles from PlayButtonStateBuilder.mm: counts duplicates per season.
+static void testDisambiguateDuplicateTitles(NSMutableArray<NSMutableDictionary*>* state, NSArray<NSNumber*>* seasons)
+{
+    if (state.count < 2)
+        return;
+    NSArray<NSString*>* titles = [state valueForKey:@"title"];
+    NSCountedSet<NSString*>* counts = [NSCountedSet set];
+    for (NSUInteger i = 0; i < state.count; i++)
+    {
+        NSNumber* season = (seasons && i < seasons.count) ? seasons[i] : @0;
+        [counts addObject:[NSString stringWithFormat:@"%@\x01%@", titles[i], season]];
+    }
+    BOOL anyDuplicate = NO;
+    for (NSString* key in counts)
+        if ([counts countForObject:key] > 1)
+        {
+            anyDuplicate = YES;
+            break;
+        }
+    if (!anyDuplicate)
+        return;
+    for (NSUInteger i = 0; i < state.count; i++)
+    {
+        NSNumber* season = (seasons && i < seasons.count) ? seasons[i] : @0;
+        NSString* key = [NSString stringWithFormat:@"%@\x01%@", titles[i], season];
+        if ([counts countForObject:key] < 2)
+            continue;
+        NSString* base = state[i][@"title"] ?: @"";
+        state[i][@"title"] = [NSString stringWithFormat:@"Parent%@ — %@", season, base];
+    }
+}
+
+TEST(PlayButtonStateBuilderTest, CrossSeasonDuplicatesNotDisambiguated)
+{
+    // "E1" in season 1 and "E1" in season 2 should NOT trigger disambiguation
+    // because they appear under different season headers.
+    NSMutableArray<NSMutableDictionary*>* state = [NSMutableArray array];
+    [state addObject:[@{ @"title" : @"E1" } mutableCopy]];
+    [state addObject:[@{ @"title" : @"E2" } mutableCopy]];
+    [state addObject:[@{ @"title" : @"E1" } mutableCopy]];
+    [state addObject:[@{ @"title" : @"E2" } mutableCopy]];
+    NSArray<NSNumber*>* seasons = @[ @1, @1, @2, @2 ];
+
+    testDisambiguateDuplicateTitles(state, seasons);
+
+    // Titles should remain unchanged — no "—" prepended
+    EXPECT_STREQ([state[0][@"title"] UTF8String], "E1");
+    EXPECT_STREQ([state[1][@"title"] UTF8String], "E2");
+    EXPECT_STREQ([state[2][@"title"] UTF8String], "E1");
+    EXPECT_STREQ([state[3][@"title"] UTF8String], "E2");
+}
+
+TEST(PlayButtonStateBuilderTest, SameSeasonDuplicatesDisambiguated)
+{
+    // "E1" appearing twice in the same season SHOULD be disambiguated.
+    NSMutableArray<NSMutableDictionary*>* state = [NSMutableArray array];
+    [state addObject:[@{ @"title" : @"E1" } mutableCopy]];
+    [state addObject:[@{ @"title" : @"E1" } mutableCopy]];
+    [state addObject:[@{ @"title" : @"E2" } mutableCopy]];
+    NSArray<NSNumber*>* seasons = @[ @1, @1, @1 ];
+
+    testDisambiguateDuplicateTitles(state, seasons);
+
+    // The two "E1" entries should be disambiguated (contain "—")
+    EXPECT_TRUE([state[0][@"title"] containsString:@"—"]) << "Same-season duplicate should be disambiguated, got: " << [state[0][@"title"] UTF8String];
+    EXPECT_TRUE([state[1][@"title"] containsString:@"—"]) << "Same-season duplicate should be disambiguated, got: " << [state[1][@"title"] UTF8String];
+    // "E2" is unique and should stay unchanged
+    EXPECT_STREQ([state[2][@"title"] UTF8String], "E2");
+}
