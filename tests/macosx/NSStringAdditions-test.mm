@@ -243,6 +243,15 @@ TEST_F(NSStringAdditionsTest, HumanReadableTitle_HyphenatedWordNoSpaces)
     EXPECT_FALSE([result containsString:@"Butt - Head"]) << "Should not add spaces around hyphen, got: " << [result UTF8String];
 }
 
+TEST_F(NSStringAdditionsTest, HumanReadableFileName_PreservesParenthesizedContent)
+{
+    NSString* input = @"11 - The Algorithm (Sessanta Live Mix)";
+    NSString* result = input.humanReadableFileName;
+    EXPECT_TRUE([result containsString:@"Algorithm"]) << "Should contain Algorithm, got: " << [result UTF8String];
+    EXPECT_TRUE([result containsString:@"Mix"]) << "Should contain Mix, got: " << [result UTF8String];
+    EXPECT_TRUE([result containsString:@"Sessanta"]) << "Should contain Sessanta, got: " << [result UTF8String];
+}
+
 TEST_F(NSStringAdditionsTest, HumanReadableTitle_SeasonRange)
 {
     NSString* input = @"Samurai.Jack.2001-2017.S01-05.BDRip.1080p-SergeZuich";

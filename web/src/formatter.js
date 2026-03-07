@@ -641,8 +641,27 @@ export const Formatter = {
     // Also remove empty brackets/parentheses like [] or ()
     title = title.replaceAll(/[([]\s*[)\]]/g, '');
 
-    // Remove stray closing brackets or parentheses
-    title = title.replaceAll(/[\])]/g, '');
+    // Remove stray (unmatched) closing brackets/parentheses, preserving balanced pairs like "(Part I)".
+    {
+      let out = '';
+      let parenDepth = 0;
+      let bracketDepth = 0;
+      for (const ch of title) {
+        if (ch === '(') {
+          parenDepth++;
+        } else if (ch === ')') {
+          if (parenDepth <= 0) continue;
+          parenDepth--;
+        } else if (ch === '[') {
+          bracketDepth++;
+        } else if (ch === ']') {
+          if (bracketDepth <= 0) continue;
+          bracketDepth--;
+        }
+        out += ch;
+      }
+      title = out;
+    }
     title = title.replaceAll('|', '');
     /* eslint-disable-next-line sonarjs/slow-regex -- simple pattern on short string */
     title = title.replaceAll(/\s+l\s+/g, ' ');

@@ -1235,9 +1235,33 @@
                                                         withTemplate:@""];
     }
 
-    // Remove stray closing brackets or parentheses that might be left over
-    title = [title stringByReplacingOccurrencesOfString:@"]" withString:@""];
-    title = [title stringByReplacingOccurrencesOfString:@")" withString:@""];
+    // Remove stray (unmatched) closing brackets/parentheses, preserving balanced pairs like "(Part I)".
+    {
+        NSMutableString* cleaned = [NSMutableString stringWithCapacity:title.length];
+        NSInteger parenDepth = 0, bracketDepth = 0;
+        for (NSUInteger ci = 0; ci < title.length; ci++)
+        {
+            unichar ch = [title characterAtIndex:ci];
+            if (ch == '(')
+                parenDepth++;
+            else if (ch == ')')
+            {
+                if (parenDepth <= 0)
+                    continue;
+                parenDepth--;
+            }
+            else if (ch == '[')
+                bracketDepth++;
+            else if (ch == ']')
+            {
+                if (bracketDepth <= 0)
+                    continue;
+                bracketDepth--;
+            }
+            [cleaned appendFormat:@"%C", ch];
+        }
+        title = cleaned;
+    }
     title = [title stringByReplacingOccurrencesOfString:@"|" withString:@""];
     NSRegularExpression* lSeparatorRegexEpisode = [NSRegularExpression regularExpressionWithPattern:@"\\s+l\\s+" options:0
                                                                                               error:nil];
