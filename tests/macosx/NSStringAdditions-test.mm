@@ -243,6 +243,47 @@ TEST_F(NSStringAdditionsTest, HumanReadableTitle_HyphenatedWordNoSpaces)
     EXPECT_FALSE([result containsString:@"Butt - Head"]) << "Should not add spaces around hyphen, got: " << [result UTF8String];
 }
 
+TEST_F(NSStringAdditionsTest, HumanReadableTitle_SeasonRange)
+{
+    NSString* input = @"Samurai.Jack.2001-2017.S01-05.BDRip.1080p-SergeZuich";
+    NSString* result = input.humanReadableTitle;
+    EXPECT_TRUE([result containsString:@"Season 1-5"]) << "Should contain season range, got: " << [result UTF8String];
+    EXPECT_TRUE([result containsString:@"(2001-2017)"]) << "Should contain year interval, got: " << [result UTF8String];
+}
+
+TEST_F(NSStringAdditionsTest, HumanReadableTitle_CurlyBraceMetadataStripped)
+{
+    NSString* input = @"ABBA - Voyage (2021) [FLAC CD] {Polar, 00602438614820}";
+    NSString* result = input.humanReadableTitle;
+    EXPECT_FALSE([result containsString:@"00602438614820"]) << "Catalog number should be stripped, got: " << [result UTF8String];
+    EXPECT_FALSE([result containsString:@"Polar"]) << "Label should be stripped, got: " << [result UTF8String];
+    EXPECT_FALSE([result containsString:@"{"]) << "Should not contain curly braces, got: " << [result UTF8String];
+    EXPECT_TRUE([result containsString:@"ABBA"]) << "Should contain artist, got: " << [result UTF8String];
+    EXPECT_TRUE([result containsString:@"Voyage"]) << "Should contain album, got: " << [result UTF8String];
+    EXPECT_TRUE([result containsString:@"(2021)"]) << "Should contain year, got: " << [result UTF8String];
+}
+
+TEST_F(NSStringAdditionsTest, HumanReadableTitle_LeadingYearDotStripped)
+{
+    NSString* input = @"1990. B.J. Thomas - 20 Greatest Hits (FCD-4416)";
+    NSString* result = input.humanReadableTitle;
+    EXPECT_FALSE([result hasPrefix:@"."]) << "Title should not start with dot, got: " << [result UTF8String];
+    EXPECT_TRUE([result containsString:@"B.J. Thomas"]) << "Should contain artist name, got: " << [result UTF8String];
+    EXPECT_TRUE([result containsString:@"(1990)"]) << "Should contain year, got: " << [result UTF8String];
+}
+
+TEST_F(NSStringAdditionsTest, HumanReadableTitle_DotsReplacedAfterTagRemoval)
+{
+    // Dots must be replaced with spaces even when tech tag removal reduces to fewer than 3 dot-separated words.
+    NSString* input = @"Svyasennaya.Gora.1973.x264.BDRip(1080p)-Kinozal.TV-HD.mkv";
+    NSString* result = input.humanReadableTitle;
+    EXPECT_FALSE([result containsString:@"."]) << "Should not contain dots, got: " << [result UTF8String];
+    EXPECT_TRUE([result containsString:@"Svyasennaya"]) << "Should contain title word, got: " << [result UTF8String];
+    EXPECT_TRUE([result containsString:@"Gora"]) << "Should contain title word, got: " << [result UTF8String];
+    EXPECT_TRUE([result containsString:@"(1973)"]) << "Should contain year, got: " << [result UTF8String];
+    EXPECT_TRUE([result containsString:@"#1080p"]) << "Should contain resolution, got: " << [result UTF8String];
+}
+
 class PlayButtonIconTest : public ::testing::Test
 {
   protected:

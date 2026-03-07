@@ -182,7 +182,9 @@ function formatHumanTitle(name) {
   // Remove file extension (any 2-5 character alphanumeric extension)
   title = title.replace(/\.[a-z0-9]{2,5}$/i, '');
 
-  // Normalize bracketed metadata early to simplify parsing
+  // Remove curly-brace metadata entirely (label/catalog info, e.g. "{Polar, 00602438614820}")
+  title = title.replaceAll(/\{[^}]*\}/g, ' ');
+  // Normalize square-bracketed metadata early to simplify parsing
   title = title.replaceAll('[', ' ').replaceAll(']', ' ');
   title = title.replaceAll(/\s{2,}/g, ' ').trim();
   title = title.replaceAll(/\s-\s-\s+/g, ' - ');
@@ -223,11 +225,14 @@ function formatHumanTitle(name) {
     }
   }
 
-  // Season pattern (S01, Season 1, etc.)
-  const seasonMatch = title.match(/\bS(\d{1,2})(?:E\d+)?\b/i);
-  const season = seasonMatch
-    ? `Season ${Number.parseInt(seasonMatch[1], 10)}`
-    : null;
+  // Season pattern (S01, S01-05 range, etc.)
+  const seasonRangeMatch = title.match(/\bS(\d{1,2})[-–](\d{1,2})\b/i);
+  const seasonSingleMatch = title.match(/\bS(\d{1,2})(?:E\d+)?\b/i);
+  const season = seasonRangeMatch
+    ? `Season ${Number.parseInt(seasonRangeMatch[1], 10)}-${Number.parseInt(seasonRangeMatch[2], 10)}`
+    : seasonSingleMatch
+      ? `Season ${Number.parseInt(seasonSingleMatch[1], 10)}`
+      : null;
 
   // Date pattern DD.MM.YYYY (e.g., 25.10.2021) - check BEFORE year to avoid partial match
   // Also match dates wrapped in parentheses like (25.10.2021)
@@ -253,6 +258,11 @@ function formatHumanTitle(name) {
     fullDateMatch || yearInterval
       ? null
       : title.match(/\b(19\d{2}|20\d{2})\b/)?.[1] || null;
+
+  // Detect dot-separated words BEFORE tech tag removal (removing tags can break "3+ glued words" detection).
+  /* eslint-disable sonarjs/slow-regex -- simple pattern on short string */
+  const hadGluedDots = /[\p{L}\p{N}]+\.[\p{L}\p{N}]+\.[\p{L}\p{N}]+/u.test(title);
+  /* eslint-enable sonarjs/slow-regex */
 
   // Remove tech tags
   // Allow optional separators (space/dot/string boundary) before/after tags
@@ -291,7 +301,7 @@ function formatHumanTitle(name) {
       '',
     )
     .replaceAll(/\(?\(?(МР3|МРЗ)\)?/gi, '')
-    .replaceAll(/\.?S\d{1,2}(E\d+)?\b/gi, '');
+    .replaceAll(/\.?S\d{1,2}(?:[-–]\d{1,2})?(?:E\d+)?\b/gi, '');
   // Remove year interval (hyphen or ellipsis) and preceding dot or surrounding parentheses
   if (yearInterval) {
     title = title.replace(/\.?\(?(?:19|20)\d{2}\s*-\s*(?:19|20)\d{2}\)?/, '');
@@ -302,23 +312,21 @@ function formatHumanTitle(name) {
     // Remove orphaned year-with-dots (e.g. "1971.." or "1971...") when second year was in different format
     title = title.replaceAll(/\b(?:19|20)\d{2}\.{2,}/g, '');
   }
-  // Remove year only if not part of a full date or interval (and preceding dot or surrounding parentheses)
+  // Remove year only if not part of a full date or interval (and preceding dot or surrounding parentheses).
   if (year) {
     title = title.replace(/\.?\(?(19\d{2}|20\d{2})\)?/, '');
+    // When year was at the start, trim leading dot+spaces (e.g. "1990. Title" → "Title")
+    title = title.replace(/^\.[ ]*/, '');
   }
   // Remove both date formats (DD.MM.YYYY and YY.MM.DD), including surrounding parentheses
   title = title
     .replace(/\(?\d{2}\.\d{2}\.\d{4}\)?/, '')
     .replace(/\(?\d{2}\.\d{2}\.\d{2}\)?/, '');
 
-  // Replace dots with spaces if more than 2 words are glued with dots (e.g., Word.Word.Word)
-  // or if the title uses dots as separators (no spaces at all)
-  /* eslint-disable sonarjs/slow-regex -- simple patterns on short strings */
-  const gluedDotsRegex = /[\p{L}\p{N}]+\.[\p{L}\p{N}]+\.[\p{L}\p{N}]+/u;
-  const hasGluedDots = gluedDotsRegex.test(title);
-  /* eslint-enable sonarjs/slow-regex */
+  // Replace dots with spaces if the original title had 3+ dot-separated words (detected before tech tag removal),
+  // or if the current title still uses dots as sole separators.
   const hasNoSpaces = !title.includes(' ');
-  if (hasGluedDots || (hasNoSpaces && title.includes('.'))) {
+  if (hadGluedDots || (hasNoSpaces && title.includes('.'))) {
     title = title.replaceAll('.', ' ');
   }
 

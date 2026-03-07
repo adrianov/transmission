@@ -440,7 +440,10 @@
     title = [orphanFormatParenRegex stringByReplacingMatchesInString:title options:0 range:NSMakeRange(0, title.length)
                                                         withTemplate:@""];
 
-    // Normalize bracketed metadata early to simplify parsing
+    // Remove curly-brace metadata entirely (label/catalog info, e.g. "{Polar, 00602438614820}")
+    NSRegularExpression* curlyRegex = [NSRegularExpression regularExpressionWithPattern:@"\\{[^}]*\\}" options:0 error:nil];
+    title = [curlyRegex stringByReplacingMatchesInString:title options:0 range:NSMakeRange(0, title.length) withTemplate:@" "];
+    // Normalize square-bracketed metadata early to simplify parsing
     title = [title stringByReplacingOccurrencesOfString:@"[" withString:@" "];
     title = [title stringByReplacingOccurrencesOfString:@"]" withString:@" "];
     NSRegularExpression* bracketSpaceRegex = [NSRegularExpression regularExpressionWithPattern:@"\\s{2,}" options:0 error:nil];
@@ -545,16 +548,29 @@
         resolution = extractedFormat;
     }
 
-    // Extract season (S01, S02, etc.)
-    NSRegularExpression* seasonRegex = [NSRegularExpression regularExpressionWithPattern:@"\\bS(\\d{1,2})(?:E\\d+)?\\b"
-                                                                                 options:NSRegularExpressionCaseInsensitive
-                                                                                   error:nil];
-    NSTextCheckingResult* seasonMatch = [seasonRegex firstMatchInString:title options:0 range:NSMakeRange(0, title.length)];
+    // Extract season (S01, S02, S01-05 range, etc.)
     NSString* season = nil;
-    if (seasonMatch && seasonMatch.numberOfRanges > 1)
+    NSRegularExpression* seasonRangeRegex = [NSRegularExpression regularExpressionWithPattern:@"\\bS(\\d{1,2})[-–](\\d{1,2})\\b"
+                                                                                      options:NSRegularExpressionCaseInsensitive
+                                                                                        error:nil];
+    NSTextCheckingResult* seasonRangeMatch = [seasonRangeRegex firstMatchInString:title options:0 range:NSMakeRange(0, title.length)];
+    if (seasonRangeMatch && seasonRangeMatch.numberOfRanges > 2)
     {
-        NSString* seasonNum = [title substringWithRange:[seasonMatch rangeAtIndex:1]];
-        season = [NSString stringWithFormat:@"Season %d", seasonNum.intValue];
+        int from = [title substringWithRange:[seasonRangeMatch rangeAtIndex:1]].intValue;
+        int to = [title substringWithRange:[seasonRangeMatch rangeAtIndex:2]].intValue;
+        season = [NSString stringWithFormat:@"Season %d-%d", from, to];
+    }
+    if (!season)
+    {
+        NSRegularExpression* seasonRegex = [NSRegularExpression regularExpressionWithPattern:@"\\bS(\\d{1,2})(?:E\\d+)?\\b"
+                                                                                     options:NSRegularExpressionCaseInsensitive
+                                                                                       error:nil];
+        NSTextCheckingResult* seasonMatch = [seasonRegex firstMatchInString:title options:0 range:NSMakeRange(0, title.length)];
+        if (seasonMatch && seasonMatch.numberOfRanges > 1)
+        {
+            NSString* seasonNum = [title substringWithRange:[seasonMatch rangeAtIndex:1]];
+            season = [NSString stringWithFormat:@"Season %d", seasonNum.intValue];
+        }
     }
 
     // Extract date pattern DD.MM.YYYY (e.g., 25.10.2021) - check BEFORE year to avoid partial match
@@ -625,6 +641,12 @@
             year = extractedYearFromMetadata;
         }
     }
+
+    // Detect dot-separated words BEFORE tech tag removal (removing tags can break "3+ glued words" detection).
+    NSRegularExpression* earlyGluedDotsRegex = [NSRegularExpression regularExpressionWithPattern:@"[\\p{L}\\p{N}]+\\.[\\p{L}\\p{N}]+\\.[\\p{L}\\p{N}]+"
+                                                                                         options:0
+                                                                                           error:nil];
+    BOOL const hadGluedDots = [earlyGluedDotsRegex firstMatchInString:title options:0 range:NSMakeRange(0, title.length)] != nil;
 
     // Remove any [Source]-?Rip variants (e.g., WEB-Rip, WEBRip, BD-Rip, BDRip)
     NSRegularExpression* ripRegex = [NSRegularExpression regularExpressionWithPattern:@"\\b[a-z0-9]+-?rip\\b"
@@ -759,7 +781,7 @@
     title = [cyrillicMp3RemoveRegex stringByReplacingMatchesInString:title options:0 range:NSMakeRange(0, title.length)
                                                         withTemplate:@""];
 
-    NSRegularExpression* seasonRemoveRegex = [NSRegularExpression regularExpressionWithPattern:@"\\.?S\\d{1,2}(E\\d+)?\\b"
+    NSRegularExpression* seasonRemoveRegex = [NSRegularExpression regularExpressionWithPattern:@"\\.?S\\d{1,2}(?:[-–]\\d{1,2})?(?:E\\d+)?\\b"
                                                                                        options:NSRegularExpressionCaseInsensitive
                                                                                          error:nil];
     title = [seasonRemoveRegex stringByReplacingMatchesInString:title options:0 range:NSMakeRange(0, title.length) withTemplate:@""];
@@ -768,14 +790,10 @@
     title = [fullDateRegex stringByReplacingMatchesInString:title options:0 range:NSMakeRange(0, title.length) withTemplate:@""];
     title = [shortDateRegex stringByReplacingMatchesInString:title options:0 range:NSMakeRange(0, title.length) withTemplate:@""];
 
-    // Replace dots with spaces if more than 2 words are glued with dots (e.g., Word.Word.Word)
-    // or if the title uses dots as separators (no spaces at all)
-    NSRegularExpression* gluedDotsRegex = [NSRegularExpression regularExpressionWithPattern:@"[\\p{L}\\p{N}]+\\.[\\p{L}\\p{N}]+\\.[\\p{L}\\p{N}]+"
-                                                                                    options:0
-                                                                                      error:nil];
-    BOOL const hasGluedDots = [gluedDotsRegex firstMatchInString:title options:0 range:NSMakeRange(0, title.length)] != nil;
+    // Replace dots with spaces if the original title had 3+ dot-separated words (detected before tech tag removal),
+    // or if the current title still has glued dots, or uses dots as sole separators.
     BOOL const hasNoSpaces = ![title containsString:@" "];
-    if (hasGluedDots || (hasNoSpaces && [title containsString:@"."]))
+    if (hadGluedDots || (hasNoSpaces && [title containsString:@"."]))
     {
         title = [title stringByReplacingOccurrencesOfString:@"." withString:@" "];
     }
@@ -1407,6 +1425,13 @@
         }
         else if (removeStart > 0 && [result characterAtIndex:(NSUInteger)(removeStart - 1)] == '.')
             removeStart--;
+        // When year is at the start, consume trailing dot/space separator (e.g. "1990. Title" → "Title")
+        if (removeStart == 0 && removeEnd < len)
+        {
+            while (removeEnd < len && ([result characterAtIndex:(NSUInteger)removeEnd] == '.' ||
+                                       [result characterAtIndex:(NSUInteger)removeEnd] == ' '))
+                removeEnd++;
+        }
         [result deleteCharactersInRange:NSMakeRange((NSUInteger)removeStart, (NSUInteger)(removeEnd - removeStart))];
     }
     return [result copy];
