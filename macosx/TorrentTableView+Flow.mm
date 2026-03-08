@@ -201,7 +201,8 @@ static NSString* flowViewTorrentHash(FlowLayoutView* flowView)
     if (path.length > 0)
         playButton.identifier = path;
     NSString* openLabel = [torrent openCountLabelForPlayableItem:entry];
-    NSString* tooltip = playButton.title.length > 0 ? playButton.title : NSLocalizedString(@"Play", "Play button tooltip fallback");
+    NSString* tooltipPath = [torrent tooltipPathForItemPath:path type:type folder:folder];
+    NSString* tooltip = tooltipPath.length > 0 ? tooltipPath : (playButton.title.length > 0 ? playButton.title : NSLocalizedString(@"Play", "Play button tooltip fallback"));
     playButton.toolTip = openLabel.length > 0 ? [NSString stringWithFormat:@"%@\n%@", tooltip, openLabel] : tooltip;
     objc_setAssociatedObject(playButton, &kPlayButtonTypeKey, type, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     objc_setAssociatedObject(playButton, &kPlayButtonFolderKey, folder.length > 0 ? folder : nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
