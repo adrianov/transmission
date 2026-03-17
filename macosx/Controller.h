@@ -26,7 +26,7 @@ typedef NS_ENUM(NSUInteger, AddType) { //
 };
 
 @interface Controller
-    : NSObject<NSApplicationDelegate, NSMenuItemValidation, NSPopoverDelegate, NSSearchFieldDelegate, NSSharingServiceDelegate, NSSharingServicePickerDelegate, NSSoundDelegate, NSToolbarDelegate, NSToolbarItemValidation, NSWindowDelegate, QLPreviewPanelDataSource, QLPreviewPanelDelegate, VDKQueueDelegate, SUUpdaterDelegate>
+    : NSObject<NSApplicationDelegate, NSMenuItemValidation, NSPopoverDelegate, NSSearchFieldDelegate, NSSharingServiceDelegate, NSSharingServicePickerDelegate, NSSoundDelegate, NSToolbarDelegate, NSToolbarItemValidation, NSWindowDelegate, QLPreviewPanelDataSource, QLPreviewPanelDelegate, SUUpdaterDelegate>
 
 - (void)openFiles:(NSArray<NSString*>*)filenames addType:(AddType)type forcePath:(NSString*)path;
 
@@ -63,33 +63,6 @@ typedef NS_ENUM(NSUInteger, AddType) { //
 - (IBAction)stopSelectedTorrents:(id)sender;
 - (IBAction)stopAllTorrents:(id)sender;
 - (void)stopTorrents:(NSArray<Torrent*>*)torrents;
-
-- (void)removeTorrents:(NSArray<Torrent*>*)torrents deleteData:(BOOL)deleteData;
-- (void)confirmRemoveTorrents:(NSArray<Torrent*>*)torrents deleteData:(BOOL)deleteData;
-- (void)confirmRemoveTorrents:(NSArray<Torrent*>*)torrents
-                   deleteData:(BOOL)deleteData
-            completionHandler:(void (^)(void))completionHandler;
-- (IBAction)removeNoDelete:(id)sender;
-- (IBAction)removeDeleteData:(id)sender;
-
-- (IBAction)clearCompleted:(id)sender;
-
-- (IBAction)moveDataFilesSelected:(id)sender;
-- (void)moveDataFiles:(NSArray<Torrent*>*)torrents;
-
-- (IBAction)copyTorrentFiles:(id)sender;
-- (void)copyTorrentFileForTorrents:(NSMutableArray<Torrent*>*)torrents;
-
-- (IBAction)copyMagnetLinks:(id)sender;
-
-- (IBAction)revealFile:(id)sender;
-
-- (IBAction)renameSelected:(id)sender;
-
-- (IBAction)announceSelectedTorrents:(id)sender;
-
-- (IBAction)verifySelectedTorrents:(id)sender;
-- (void)verifyTorrents:(NSArray<Torrent*>*)torrents;
 
 @property(nonatomic, readonly) NSArray<Torrent*>* selectedTorrents;
 
@@ -141,23 +114,10 @@ typedef NS_ENUM(NSUInteger, AddType) { //
 - (IBAction)speedLimitChanged:(id)sender;
 - (void)altSpeedToggledCallbackIsLimited:(NSDictionary*)dict;
 
-- (void)changeAutoImport;
-- (void)checkAutoImportDirectory;
-
-- (void)beginCreateFile:(NSNotification*)notification;
-
 @property(nonatomic, readonly) VDKQueue* fileWatcherQueue;
 
 - (void)torrentTableViewSelectionDidChange:(NSNotification*)notification;
 
-- (IBAction)toggleSmallView:(id)sender;
-- (IBAction)togglePiecesBar:(id)sender;
-- (IBAction)toggleAvailabilityBar:(id)sender;
-- (IBAction)toggleShowContentButtons:(id)sender;
-
-- (IBAction)toggleStatusBar:(id)sender;
-- (IBAction)toggleFilterBar:(id)sender;
-- (IBAction)toggleToolbarShown:(id)sender;
 - (void)focusFilterField;
 
 - (void)allToolbarClicked:(id)sender;
@@ -182,11 +142,6 @@ typedef NS_ENUM(NSUInteger, AddType) { //
 
 - (IBAction)toggleQuickLook:(id)sender;
 
-- (IBAction)linkHomepage:(id)sender;
-- (IBAction)linkForums:(id)sender;
-- (IBAction)linkGitHub:(id)sender;
-- (IBAction)linkDonate:(id)sender;
-
 - (void)rpcCallback:(tr_rpc_callback_type)type forTorrentStruct:(struct tr_torrent*)torrentStruct;
 - (void)autoDeleteOldTorrentsAtPath:(NSString*)path
                               group:(NSInteger)groupValue
@@ -201,4 +156,51 @@ typedef NS_ENUM(NSUInteger, AddType) { //
 - (void)rpcMovedTorrent:(Torrent*)torrent;
 - (void)rpcUpdateQueue;
 
+@end
+
+@interface Controller (DockLinks)
+- (IBAction)linkHomepage:(id)sender;
+- (IBAction)linkForums:(id)sender;
+- (IBAction)linkGitHub:(id)sender;
+- (IBAction)linkDonate:(id)sender;
+@end
+
+@interface Controller (Remove)
+- (void)removeTorrents:(NSArray<Torrent*>*)torrents deleteData:(BOOL)deleteData;
+- (void)confirmRemoveTorrents:(NSArray<Torrent*>*)torrents deleteData:(BOOL)deleteData;
+- (void)confirmRemoveTorrents:(NSArray<Torrent*>*)torrents
+                   deleteData:(BOOL)deleteData
+            completionHandler:(void (^)(void))completionHandler;
+- (IBAction)removeNoDelete:(id)sender;
+- (IBAction)removeDeleteData:(id)sender;
+- (IBAction)clearCompleted:(id)sender;
+@end
+
+@interface Controller (TorrentActions)
+- (IBAction)moveDataFilesSelected:(id)sender;
+- (void)moveDataFiles:(NSArray<Torrent*>*)torrents;
+- (IBAction)copyTorrentFiles:(id)sender;
+- (void)copyTorrentFileForTorrents:(NSMutableArray<Torrent*>*)torrents;
+- (IBAction)copyMagnetLinks:(id)sender;
+- (IBAction)revealFile:(id)sender;
+- (IBAction)renameSelected:(id)sender;
+- (IBAction)announceSelectedTorrents:(id)sender;
+- (IBAction)verifySelectedTorrents:(id)sender;
+- (void)verifyTorrents:(NSArray<Torrent*>*)torrents;
+@end
+
+@interface Controller (ViewToggles)
+- (IBAction)toggleSmallView:(id)sender;
+- (IBAction)togglePiecesBar:(id)sender;
+- (IBAction)toggleAvailabilityBar:(id)sender;
+- (IBAction)toggleShowContentButtons:(id)sender;
+- (IBAction)toggleStatusBar:(id)sender;
+- (IBAction)toggleFilterBar:(id)sender;
+- (IBAction)toggleToolbarShown:(id)sender;
+@end
+
+@interface Controller (AutoImport)<VDKQueueDelegate>
+- (void)changeAutoImport;
+- (void)checkAutoImportDirectory;
+- (void)beginCreateFile:(NSNotification*)notification;
 @end

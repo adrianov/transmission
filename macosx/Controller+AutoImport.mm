@@ -94,6 +94,26 @@ static dispatch_queue_t autoImportQueue()
     [self checkAutoImportDirectoryWithReason:@"unspecified"];
 }
 
+- (void)beginCreateFile:(NSNotification*)notification
+{
+    if (![self.fDefaults boolForKey:@"AutoImport"])
+    {
+        return;
+    }
+
+    NSString* location = ((NSURL*)notification.object).path;
+    NSString* path = [self.fDefaults stringForKey:@"AutoImportDirectory"];
+
+    if (location && path && [location.stringByDeletingLastPathComponent.stringByExpandingTildeInPath isEqualToString:path.stringByExpandingTildeInPath])
+    {
+        [self.fAutoImportedNames addObject:location.lastPathComponent];
+    }
+}
+
+@end
+
+@implementation Controller (AutoImportPrivate)
+
 - (void)checkAutoImportDirectoryWithReason:(NSString*)reason
 {
     uint64_t const scanId = ++sAutoImportScanCounter;
@@ -270,22 +290,6 @@ static dispatch_queue_t autoImportQueue()
                            CFAbsoluteTimeGetCurrent() - requestStart);
         });
     });
-}
-
-- (void)beginCreateFile:(NSNotification*)notification
-{
-    if (![self.fDefaults boolForKey:@"AutoImport"])
-    {
-        return;
-    }
-
-    NSString* location = ((NSURL*)notification.object).path;
-    NSString* path = [self.fDefaults stringForKey:@"AutoImportDirectory"];
-
-    if (location && path && [location.stringByDeletingLastPathComponent.stringByExpandingTildeInPath isEqualToString:path.stringByExpandingTildeInPath])
-    {
-        [self.fAutoImportedNames addObject:location.lastPathComponent];
-    }
 }
 
 @end

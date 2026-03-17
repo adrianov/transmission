@@ -106,11 +106,16 @@
 - (void)preloadSearchFieldTextInput;
 - (void)updateSearchFieldClearButtonVisibility:(NSSearchField*)field;
 
++ (void)runStartupChecks;
+
+@end
+
+@interface Controller (AutoImportPrivate)
+- (void)checkAutoImportDirectoryWithReason:(NSString*)reason;
+@end
+
+@interface Controller (MissingDataLaunch)
 - (void)removeMissingDataTorrentsOnLaunch;
 - (NSSet<NSString*>*)missingDataCandidateDownloadDirsFromTorrents:(NSArray<Torrent*>*)torrents;
 - (BOOL)setTorrentLocationFromCandidatesIfNeeded:(Torrent*)torrent candidateDirs:(NSSet<NSString*>*)candidateDirs didSwitch:(BOOL*)didSwitch;
-- (void)checkAutoImportDirectoryWithReason:(NSString*)reason;
-
-+ (void)runStartupChecks;
-
 @end
