@@ -1334,6 +1334,8 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
         self.fPlayableFiles = nil;
         // Also invalidate cached button state
         self.cachedPlayButtonState = nil;
+        self.cachedPlayButtonStateByIndex = nil;
+        self.cachedPlayButtonStateByFolder = nil;
         self.cachedPlayButtonSource = nil;
         self.cachedPlayButtonLayout = nil;
 
@@ -1440,6 +1442,8 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
 
     self.fPlayableFiles = nil;
     self.cachedPlayButtonState = nil;
+    self.cachedPlayButtonStateByIndex = nil;
+    self.cachedPlayButtonStateByFolder = nil;
     self.cachedPlayButtonSource = nil;
     self.cachedPlayButtonLayout = nil;
     self.cachedPlayButtonProgressGeneration = 0;

@@ -186,11 +186,15 @@ extern char const kPlayButtonRepresentedKey = '\0';
 
     if ([notification.userInfo[@"refreshOnly"] boolValue])
     {
+        // Force re-apply of play button state (e.g. iinaUnwatched) so refreshPlayButtonStateForCell does not early-return.
+        torrent.cachedPlayButtonProgressGeneration = 0;
         [self updateVisiblePlayButtons];
         return;
     }
 
     torrent.cachedPlayButtonState = nil;
+    torrent.cachedPlayButtonStateByIndex = nil;
+    torrent.cachedPlayButtonStateByFolder = nil;
     torrent.cachedPlayButtonLayout = nil;
     [self updateVisiblePlayButtons];
 }
@@ -1373,8 +1377,24 @@ static BOOL openWithIINAIfAvailable(NSURL* fileURL)
     NSString* itemPath = item[@"path"];
     if (itemPath && ![itemPath isEqualToString:path])
         [Torrent invalidateIINAWatchCacheForPath:itemPath];
-    torrent.cachedPlayButtonState = nil;
-    torrent.cachedPlayButtonLayout = nil;
+    // Keep other buttons as-is, but force the clicked entry to gray immediately and don't re-query it on refresh.
+    NSNumber* itemIndex = [item[@"index"] isKindOfClass:[NSNumber class]] ? item[@"index"] : nil;
+    NSString* itemFolder = [item[@"folder"] isKindOfClass:[NSString class]] ? item[@"folder"] : nil;
+    NSMutableDictionary* entry = itemIndex ? torrent.cachedPlayButtonStateByIndex[itemIndex] :
+                                    (itemFolder.length > 0 ? torrent.cachedPlayButtonStateByFolder[itemFolder] : nil);
+    if (entry != nil)
+    {
+        entry[@"iinaUnwatched"] = @NO;
+        [entry removeObjectForKey:@"iinaPending"];
+    }
+    else
+    {
+        torrent.cachedPlayButtonState = nil;
+        torrent.cachedPlayButtonLayout = nil;
+        torrent.cachedPlayButtonStateByIndex = nil;
+        torrent.cachedPlayButtonStateByFolder = nil;
+    }
+    torrent.cachedPlayButtonProgressGeneration = 0;
     [self updateVisiblePlayButtons];
 
     NSString* type = item[@"type"];

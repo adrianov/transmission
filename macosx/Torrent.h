@@ -133,6 +133,9 @@ extern NSString* _Nonnull const kTorrentDidChangeGroupNotification;
 @property(nonatomic) CGFloat cachedPlayButtonsWidth;
 /// Cached play button state (title/visibility) for UI rendering.
 @property(nonatomic, copy) NSArray<NSDictionary*>* _Nullable cachedPlayButtonState;
+/// Lookup by file index or folder path for O(1) play-state entry access.
+@property(nonatomic, copy) NSDictionary<NSNumber*, NSMutableDictionary*>* _Nullable cachedPlayButtonStateByIndex;
+@property(nonatomic, copy) NSDictionary<NSString*, NSMutableDictionary*>* _Nullable cachedPlayButtonStateByFolder;
 /// Cached source items for play button state.
 @property(nonatomic, copy) NSArray<NSDictionary*>* _Nullable cachedPlayButtonSource;
 /// Cached play button layout (season headers + items).

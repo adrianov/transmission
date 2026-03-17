@@ -355,6 +355,36 @@ static dispatch_queue_t iinaStateQueue()
     });
 }
 
+static void setStateLookups(Torrent* torrent, NSArray<NSMutableDictionary*>* state)
+{
+    if (!state || state.count == 0)
+    {
+        torrent.cachedPlayButtonStateByIndex = nil;
+        torrent.cachedPlayButtonStateByFolder = nil;
+        return;
+    }
+    NSMutableDictionary<NSNumber*, NSMutableDictionary*>* byIndex =
+        [NSMutableDictionary dictionaryWithCapacity:state.count];
+    NSMutableDictionary<NSString*, NSMutableDictionary*>* byFolder =
+        [NSMutableDictionary dictionaryWithCapacity:state.count];
+    for (NSMutableDictionary* entry in state)
+    {
+        NSNumber* idx = entry[@"index"];
+        if (idx != nil)
+            byIndex[idx] = entry;
+        NSString* folder = [entry[@"folder"] isKindOfClass:[NSString class]] ? entry[@"folder"] : nil;
+        if (folder.length > 0)
+            byFolder[folder] = entry;
+    }
+    torrent.cachedPlayButtonStateByIndex = byIndex;
+    torrent.cachedPlayButtonStateByFolder = byFolder;
+}
+
++ (void)updateStateLookupsForTorrent:(Torrent*)torrent state:(NSArray<NSMutableDictionary*>*)state
+{
+    setStateLookups(torrent, (NSArray<NSMutableDictionary*>*)state);
+}
+
 + (NSMutableArray<NSMutableDictionary*>*)stateForTorrent:(Torrent*)torrent
 {
     NSArray<NSDictionary*>* playableFiles = torrent.playableFiles;
@@ -363,6 +393,7 @@ static dispatch_queue_t iinaStateQueue()
         torrent.cachedPlayButtonSource = nil;
         torrent.cachedPlayButtonState = nil;
         torrent.cachedPlayButtonLayout = nil;
+        setStateLookups(torrent, nil);
         return nil;
     }
 
@@ -372,6 +403,7 @@ static dispatch_queue_t iinaStateQueue()
         torrent.cachedPlayButtonSource = playableFiles;
         torrent.cachedPlayButtonState = nil;
         torrent.cachedPlayButtonLayout = nil;
+        setStateLookups(torrent, nil);
         torrent.cachedPlayButtonProgressGeneration = 0;
     }
 
@@ -454,6 +486,7 @@ static dispatch_queue_t iinaStateQueue()
             }
         }
         torrent.cachedPlayButtonState = state;
+        setStateLookups(torrent, state);
     }
 
     NSUInteger statsGeneration = torrent.statsGeneration;

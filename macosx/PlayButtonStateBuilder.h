@@ -24,4 +24,7 @@
 /// Returns cached or newly built layout for the given state.
 + (NSArray<NSDictionary*>*)layoutForTorrent:(Torrent*)torrent state:(NSArray<NSDictionary*>*)state;
 
+/// Updates index/folder lookup maps on torrent for O(1) play-state entry access. Pass nil to clear.
++ (void)updateStateLookupsForTorrent:(Torrent*)torrent state:(NSArray<NSMutableDictionary*>*)state;
+
 @end

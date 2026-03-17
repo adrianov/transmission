@@ -345,6 +345,7 @@ static NSString* flowViewTorrentHash(FlowLayoutView* flowView)
 
     torrent.cachedPlayButtonSource = playableFilesForApply;
     torrent.cachedPlayButtonState = state;
+    [PlayButtonStateBuilder updateStateLookupsForTorrent:torrent state:state];
     torrent.cachedPlayButtonLayout = layout;
     torrent.cachedPlayButtonProgressGeneration = torrent.statsGeneration;
 
