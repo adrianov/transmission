@@ -23,6 +23,12 @@ endif()
 
 project(transmission)
 
+# Run compile and link steps at lowest CPU + idle I/O priority
+if(UNIX AND NOT APPLE)
+    set_property(GLOBAL PROPERTY RULE_LAUNCH_COMPILE "nice -n 19 ionice -c 3")
+    set_property(GLOBAL PROPERTY RULE_LAUNCH_LINK    "nice -n 19 ionice -c 3")
+endif()
+
 set(TR_THIRD_PARTY_DIR_NAME third-party)
 set(TR_THIRD_PARTY_SOURCE_DIR ${PROJECT_SOURCE_DIR}/${TR_THIRD_PARTY_DIR_NAME})
 set(TR_THIRD_PARTY_BINARY_DIR ${PROJECT_BINARY_DIR}/${TR_THIRD_PARTY_DIR_NAME})
