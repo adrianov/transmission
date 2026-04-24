@@ -62,10 +62,12 @@
           </object>
         </child>
         <child>
-          <object class="GtkProgressBar">
-            <property name="show-text">1</property>
+          <object class="gtkmm__CustomObject_17PiecesProgressBar">
             <property name="valign">0.5</property>
             <property name="vexpand">1</property>
+            <binding name="torrent">
+              <lookup name="item">GtkListItem</lookup>
+            </binding>
             <binding name="fraction">
               <lookup name="percent-done" type="gtkmm__CustomObject_7Torrent">
                 <lookup name="item">GtkListItem</lookup>

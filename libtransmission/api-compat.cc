@@ -248,7 +248,7 @@ auto constexpr RpcKeys = std::array<ApiKey, 212U>{ {
     { TR_KEY_torrent_verify, TR_KEY_torrent_verify_kebab_APICOMPAT },
 } };
 
-auto constexpr SessionKeys = std::array<ApiKey, 139U>{ {
+auto constexpr SessionKeys = std::array<ApiKey, 140U>{ {
     { TR_KEY_activity_date, TR_KEY_activity_date_kebab_APICOMPAT },
     { TR_KEY_added_date, TR_KEY_added_date_kebab_APICOMPAT },
     { TR_KEY_alt_speed_down, TR_KEY_alt_speed_down_kebab_APICOMPAT },
@@ -357,6 +357,7 @@ auto constexpr SessionKeys = std::array<ApiKey, 139U>{ {
     { TR_KEY_show_filterbar, TR_KEY_show_filterbar_kebab_APICOMPAT },
     { TR_KEY_show_notification_area_icon, TR_KEY_show_notification_area_icon_kebab_APICOMPAT },
     { TR_KEY_show_options_window, TR_KEY_show_options_window_kebab_APICOMPAT },
+    { TR_KEY_show_pieces_bar, TR_KEY_show_pieces_bar_kebab_APICOMPAT },
     { TR_KEY_show_statusbar, TR_KEY_show_statusbar_kebab_APICOMPAT },
     { TR_KEY_show_toolbar, TR_KEY_show_toolbar_kebab_APICOMPAT },
     { TR_KEY_show_tracker_scrapes, TR_KEY_show_tracker_scrapes_kebab_APICOMPAT },

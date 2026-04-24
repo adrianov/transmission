@@ -45,6 +45,8 @@ target_sources(${TR_NAME}-gtk
         PathButton.cc
         PathButton.h
         Percents.cc
+        PiecesProgressBar.cc
+        PiecesProgressBar.h
         Percents.h
         Prefs.cc
         Prefs.h

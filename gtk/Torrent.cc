@@ -21,8 +21,10 @@
 #include <fmt/format.h>
 
 #include <array>
+#include <chrono>
 #include <cmath>
 #include <utility>
+#include <vector>
 
 using namespace std::string_view_literals;
 
@@ -225,6 +227,14 @@ private:
     tr_torrent* const raw_torrent_;
 
     Cache cache_;
+
+    std::vector<bool> previous_finished_pieces_;
+    std::chrono::steady_clock::time_point previous_finished_pieces_time_{};
+    bool previous_finished_pieces_valid_ = false;
+
+public:
+    [[nodiscard]] std::vector<bool> const* get_previous_finished_pieces();
+    void set_previous_finished_pieces(std::vector<bool> indexes);
 };
 
 Torrent::Impl::Impl(Torrent& torrent, tr_torrent* raw_torrent)
@@ -890,6 +900,70 @@ Glib::ustring Torrent::get_long_status_text() const
 bool Torrent::get_sensitive() const
 {
     return impl_->get_cache().activity != TR_STATUS_STOPPED;
+}
+
+bool Torrent::get_has_metadata() const
+{
+    return impl_->get_cache().has_metadata;
+}
+
+bool Torrent::get_all_downloaded() const
+{
+    return impl_->get_cache().left_until_done.is_zero();
+}
+
+size_t Torrent::get_piece_count() const
+{
+    return static_cast<size_t>(tr_torrentView(impl_->get_raw_torrent()).n_pieces);
+}
+
+void Torrent::get_amount_finished(float* tab, int size) const
+{
+    tr_torrentAmountFinished(impl_->get_raw_torrent(), tab, size);
+}
+
+std::vector<bool> const* Torrent::get_previous_finished_pieces() const
+{
+    return impl_->get_previous_finished_pieces();
+}
+
+void Torrent::set_previous_finished_pieces(std::vector<bool> indexes)
+{
+    impl_->set_previous_finished_pieces(std::move(indexes));
+}
+
+std::vector<bool> const* Torrent::Impl::get_previous_finished_pieces()
+{
+    if (!previous_finished_pieces_valid_)
+    {
+        return nullptr;
+    }
+
+    // Expire the cache if it hasn't been refreshed recently (matches
+    // macOS Torrent.mm's 2-second freshness check).
+    auto const now = std::chrono::steady_clock::now();
+    if (now - previous_finished_pieces_time_ > std::chrono::seconds(2))
+    {
+        previous_finished_pieces_valid_ = false;
+        previous_finished_pieces_.clear();
+        return nullptr;
+    }
+
+    return &previous_finished_pieces_;
+}
+
+void Torrent::Impl::set_previous_finished_pieces(std::vector<bool> indexes)
+{
+    if (indexes.empty())
+    {
+        previous_finished_pieces_valid_ = false;
+        previous_finished_pieces_.clear();
+        return;
+    }
+
+    previous_finished_pieces_ = std::move(indexes);
+    previous_finished_pieces_time_ = std::chrono::steady_clock::now();
+    previous_finished_pieces_valid_ = true;
 }
 
 std::vector<Glib::ustring> Torrent::get_css_classes() const

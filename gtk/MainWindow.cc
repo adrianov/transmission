@@ -14,7 +14,9 @@
 #include "Torrent.h"
 #include "Utils.h"
 
-#if !GTKMM_CHECK_VERSION(4, 0, 0)
+#if GTKMM_CHECK_VERSION(4, 0, 0)
+#include "PiecesProgressBar.h"
+#else
 #include "TorrentCellRenderer.h"
 #endif
 
@@ -272,6 +274,10 @@ void MainWindow::Impl::init_view(TorrentView* view, Glib::RefPtr<FilterBar::Mode
             gtr_get_full_resource_path(filename).c_str()));
     };
 
+    // Make sure the custom `PiecesProgressBar` GType is registered with
+    // GObject before the builder tries to instantiate it from a .ui file.
+    PiecesProgressBar::ensure_registered();
+
     item_factory_compact_ = create_builder_list_item_factory("TorrentListItemCompact.ui"s);
     item_factory_full_ = create_builder_list_item_factory("TorrentListItemFull.ui"s);
 
@@ -339,6 +345,15 @@ void MainWindow::Impl::prefsChanged(tr_quark const key)
 
     case TR_KEY_show_statusbar:
         status_->set_visible(gtr_pref_flag_get(key));
+        break;
+
+    case TR_KEY_show_pieces_bar:
+        // Force a redraw of every row so the new pieces-bar setting takes effect.
+#if GTKMM_CHECK_VERSION(4, 0, 0)
+        view_->queue_draw();
+#else
+        view_->queue_draw();
+#endif
         break;
 
     case TR_KEY_show_filterbar:

@@ -182,6 +182,10 @@
           <attribute name="label" translatable="yes">_Compact View</attribute>
           <attribute name="accel">&lt;alt&gt;C</attribute>
         </item>
+        <item>
+          <attribute name="action">win.show_pieces_bar</attribute>
+          <attribute name="label" translatable="yes">Show _Pieces Bar</attribute>
+        </item>
       </section>
       <section>
         <item>

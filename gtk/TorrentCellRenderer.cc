@@ -7,6 +7,8 @@
 
 #include "HigWorkarea.h" // GUI_PAD, GUI_PAD_SMALL
 #include "Percents.h"
+#include "PiecesProgressBar.h"
+#include "Prefs.h"
 #include "Torrent.h"
 
 #include <libtransmission/transmission.h>
@@ -44,7 +46,7 @@
 namespace
 {
 
-auto const DefaultBarHeight = 12;
+auto const DefaultBarHeight = 16;
 auto const CompactBarWidth = 50;
 auto const SmallScale = 0.9;
 auto const CompactIconSize = Gtk::ICON_SIZE_MENU;
@@ -319,6 +321,16 @@ void TorrentCellRenderer::Impl::render_progress_bar(
     Gtk::CellRendererState flags,
     std::optional<Gdk::RGBA> const& color)
 {
+    auto* const torrent = property_torrent_.get_value();
+    auto const show_pieces = torrent != nullptr && gtr_pref_flag_get(TR_KEY_show_pieces_bar);
+
+    if (show_pieces)
+    {
+        // Mac-style two-strip rendering: pieces on top, progress on bottom.
+        pieces_progress_bar::draw(context, area, *torrent, color, /*show_pieces=*/true);
+        return;
+    }
+
     if (!color.has_value())
     {
         progress_renderer_->render(context, widget, area, area, flags);

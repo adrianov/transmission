@@ -66,11 +66,12 @@ void toggle_pref_cb(Gio::SimpleAction& action, gpointer /*user_data*/)
     myCore->set_pref(tr_quark_new({ key.c_str(), key.size() }), !val);
 }
 
-std::array<tr_quark, 6> const pref_toggle_entries = {
+std::array<tr_quark, 7> const pref_toggle_entries = {
     TR_KEY_alt_speed_enabled, //
     TR_KEY_compact_view, //
     TR_KEY_sort_reversed, //
     TR_KEY_show_filterbar, //
+    TR_KEY_show_pieces_bar, //
     TR_KEY_show_statusbar, //
     TR_KEY_show_toolbar, //
 };

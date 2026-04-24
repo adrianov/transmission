@@ -577,6 +577,7 @@ auto constexpr MyStatic = std::array<std::string_view, TR_N_KEYS>{
     "show-filterbar"sv, // gtk app, qt app
     "show-notification-area-icon"sv, // gtk app, qt app
     "show-options-window"sv, // gtk app, qt app
+    "show-pieces-bar"sv, // gtk app
     "show-statusbar"sv, // gtk app, qt app
     "show-toolbar"sv, // gtk app, qt app
     "show-tracker-scrapes"sv, // gtk app, qt app
@@ -585,6 +586,7 @@ auto constexpr MyStatic = std::array<std::string_view, TR_N_KEYS>{
     "show_filterbar"sv, // gtk app, qt app
     "show_notification_area_icon"sv, // gtk app, qt app
     "show_options_window"sv, // gtk app, qt app
+    "show_pieces_bar"sv, // gtk app
     "show_statusbar"sv, // gtk app, qt app
     "show_toolbar"sv, // gtk app, qt app
     "show_tracker_scrapes"sv, // gtk app, qt app

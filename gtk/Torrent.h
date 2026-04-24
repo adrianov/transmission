@@ -22,6 +22,7 @@
 #include <cstdint>
 #include <initializer_list>
 #include <memory>
+#include <vector>
 
 class Percents;
 
@@ -110,6 +111,17 @@ public:
     Glib::ustring get_long_status_text() const;
     bool get_sensitive() const;
     std::vector<Glib::ustring> get_css_classes() const;
+
+    bool get_has_metadata() const;
+    bool get_all_downloaded() const;
+    size_t get_piece_count() const;
+    void get_amount_finished(float* tab, int size) const;
+
+    // Cache of pieces finished at the previous refresh, used to briefly
+    // highlight newly-completed pieces (mirrors macOS ProgressBarView behaviour).
+    // The cache is automatically invalidated after ~2s of not being refreshed.
+    std::vector<bool> const* get_previous_finished_pieces() const;
+    void set_previous_finished_pieces(std::vector<bool> indexes);
 
     ChangeFlags update();
 

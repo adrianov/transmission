@@ -67,8 +67,11 @@
               </object>
             </child>
             <child>
-              <object class="GtkProgressBar">
+              <object class="gtkmm__CustomObject_17PiecesProgressBar">
                 <property name="valign">0.5</property>
+                <binding name="torrent">
+                  <lookup name="item">GtkListItem</lookup>
+                </binding>
                 <binding name="fraction">
                   <lookup name="percent-done" type="gtkmm__CustomObject_7Torrent">
                     <lookup name="item">GtkListItem</lookup>
