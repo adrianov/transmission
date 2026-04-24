@@ -85,6 +85,12 @@
 #include <glib-unix.h>
 #endif
 
+#ifdef __linux__
+#include <sched.h>
+#include <sys/syscall.h>
+#include <unistd.h>
+#endif
+
 using namespace std::literals;
 
 #if GTKMM_CHECK_VERSION(4, 0, 0)
@@ -100,6 +106,18 @@ namespace
 {
 
 auto const AppIconName = "transmission"sv; // TODO(C++20): Use ""s
+
+#ifdef __linux__
+// Linux I/O priority constants (from <linux/ioprio.h>, not always available in user space)
+auto constexpr IoPrioWhoProcess = 1;
+auto constexpr IoPrioClassBE = 2; // best-effort (default)
+auto constexpr IoPrioClassIdle = 3; // idle
+
+constexpr int make_ioprio(int ioclass, int data)
+{
+    return (ioclass << 13) | data;
+}
+#endif
 
 char const* const LICENSE =
     "Copyright 2005-2026. All code is copyrighted by the respective authors.\n"
@@ -152,6 +170,11 @@ private:
 
     void on_main_window_size_allocated();
     void on_main_window_focus_in();
+
+    void scheduleProcessPriorityUpdate();
+    void updateProcessPriority();
+    void applyLowPriority();
+    void applyNormalPriority();
 
 #if GTKMM_CHECK_VERSION(4, 0, 0)
     bool on_drag_data_received(Glib::ValueBase const& value, double x, double y);
@@ -216,6 +239,8 @@ private:
     bool const start_iconified_;
     bool is_iconified_ = false;
     bool is_closing_ = false;
+    bool is_using_background_priority_ = false;
+    bool priority_update_pending_ = false;
 
     Glib::RefPtr<Gtk::Builder> ui_builder_;
 
@@ -809,6 +834,7 @@ void Application::Impl::presentMainWindow()
 
     gtr_window_present(wind_);
     gtr_window_raise(*wind_);
+    scheduleProcessPriorityUpdate();
 }
 
 void Application::Impl::hideMainWindow()
@@ -818,6 +844,7 @@ void Application::Impl::hideMainWindow()
     gtr_window_set_skip_taskbar_hint(*wind_, true);
     gtr_widget_set_visible(*wind_, false);
     is_iconified_ = true;
+    scheduleProcessPriorityUpdate();
 }
 
 void Application::Impl::toggleMainWindow()
@@ -922,6 +949,24 @@ void Application::Impl::main_window_setup()
     gtr_window_on_close(*wind_, sigc::mem_fun(*this, &Impl::winclose));
     refresh_actions();
 
+    // Dynamic process priority: lower when app is backgrounded, normal when in foreground.
+    // app_.property_active_window() becomes nullptr when the user switches to another
+    // application entirely. Transient (non-ApplicationWindow) dialogs don't affect this
+    // property, so priority stays at foreground while any Transmission dialog is open.
+    app_.property_active_window().signal_changed().connect(
+        sigc::mem_fun(*this, &Impl::scheduleProcessPriorityUpdate));
+#if !GTKMM_CHECK_VERSION(4, 0, 0)
+    // Hook window state events: GDK_WINDOW_STATE_FOCUSED is set/cleared here on both
+    // X11 and Wayland, giving us an immediate signal when the window gains or loses focus.
+    wind_->signal_window_state_event().connect(
+        [this](GdkEventWindowState*) { scheduleProcessPriorityUpdate(); return false; }, false);
+    wind_->signal_focus_in_event().connect(
+        [this](GdkEventFocus*) { scheduleProcessPriorityUpdate(); return false; }, false);
+    wind_->signal_focus_out_event().connect(
+        [this](GdkEventFocus*) { scheduleProcessPriorityUpdate(); return false; }, false);
+#endif
+    scheduleProcessPriorityUpdate();
+
     /* register to handle URIs that get dragged onto our main window */
 #if GTKMM_CHECK_VERSION(4, 0, 0)
     auto drop_controller = Gtk::DropTarget::create(G_TYPE_INVALID, Gdk::DragAction::COPY);
@@ -962,6 +1007,9 @@ void Application::Impl::on_app_exit()
     }
 
     is_closing_ = true;
+
+    // Restore normal priority for a fast, responsive shutdown.
+    applyNormalPriority();
 
     refresh_actions_tag_.disconnect();
     update_model_soon_tag_.disconnect();
@@ -1093,6 +1141,86 @@ void Application::Impl::on_core_error(Session::ErrorCode code, Glib::ustring con
         g_assert_not_reached();
         break;
     }
+}
+
+void Application::Impl::scheduleProcessPriorityUpdate()
+{
+    // Debounce via idle: when focus moves between app windows there's a brief
+    // focus-out/focus-in pair. Deferring to the next idle cycle ensures we read
+    // the settled state after both events have been dispatched.
+    if (!priority_update_pending_)
+    {
+        priority_update_pending_ = true;
+        Glib::signal_idle().connect_once([this]() {
+            priority_update_pending_ = false;
+            updateProcessPriority();
+        });
+    }
+}
+
+void Application::Impl::updateProcessPriority()
+{
+    // Mirror macOS logic: background if app has no focused window OR window is hidden.
+    // Use GDK_WINDOW_STATE_FOCUSED rather than app_.get_active_window() because the
+    // latter can remain stale on Wayland when focus moves to a non-GTK application.
+    // GDK updates the FOCUSED flag reliably via wl_keyboard enter/leave on Wayland and
+    // FocusIn/FocusOut on X11.
+    bool is_focused = false;
+    if (wind_ != nullptr)
+    {
+#if GTKMM_CHECK_VERSION(4, 0, 0)
+        is_focused = wind_->is_active();
+#else
+        auto const gdk_win = wind_->get_window();
+        is_focused = gdk_win != nullptr && (gdk_win->get_state() & Gdk::WINDOW_STATE_FOCUSED) != Gdk::WindowState{};
+#endif
+    }
+
+    bool const use_background = !is_focused || is_iconified_;
+
+    if (use_background)
+    {
+        applyLowPriority();
+    }
+    else
+    {
+        applyNormalPriority();
+    }
+}
+
+void Application::Impl::applyLowPriority()
+{
+    if (is_using_background_priority_)
+    {
+        return;
+    }
+
+#ifdef __linux__
+    // SCHED_BATCH signals to the kernel that this is a non-interactive batch workload;
+    // the scheduler deprioritises it without requiring elevated privileges, and it is
+    // fully reversible (unlike raising the nice value, which cannot be undone without
+    // CAP_SYS_NICE when RLIMIT_NICE is 0).
+    struct sched_param sp = {};
+    sched_setscheduler(0, SCHED_BATCH, &sp);
+    // Idle I/O class: disk I/O is only served when nothing else needs the disk.
+    syscall(SYS_ioprio_set, IoPrioWhoProcess, 0, make_ioprio(IoPrioClassIdle, 0));
+#endif
+    is_using_background_priority_ = true;
+}
+
+void Application::Impl::applyNormalPriority()
+{
+    if (!is_using_background_priority_)
+    {
+        return;
+    }
+
+#ifdef __linux__
+    struct sched_param sp = {};
+    sched_setscheduler(0, SCHED_OTHER, &sp);
+    syscall(SYS_ioprio_set, IoPrioWhoProcess, 0, make_ioprio(IoPrioClassBE, 0));
+#endif
+    is_using_background_priority_ = false;
 }
 
 void Application::Impl::on_main_window_focus_in()
@@ -1377,6 +1505,7 @@ bool Application::Impl::update_model_loop()
     if (!is_closing_)
     {
         update_model_once();
+        updateProcessPriority(); // poll every tick as fallback for missed focus signals
     }
 
     return !is_closing_;
