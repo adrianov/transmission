@@ -67,6 +67,16 @@ horizontal]]></property>
               </object>
             </child>
             <child>
+              <object class="GtkButton" id="delete_torrent_button">
+                <property name="focusable">1</property>
+                <property name="tooltip-text" translatable="yes">Remove torrent and delete files</property>
+                <property name="action-name">win.delete_torrent</property>
+                <property name="label" translatable="1">_Delete Files and Remove</property>
+                <property name="use-underline">1</property>
+                <property name="icon-name">edit-delete</property>
+              </object>
+            </child>
+            <child>
               <object class="GtkSeparator">
                 <property name="orientation">vertical</property>
                 <property name="can-focus">0</property>
