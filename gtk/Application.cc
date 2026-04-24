@@ -861,9 +861,46 @@ void Application::Impl::toggleMainWindow()
 
 bool Application::Impl::winclose()
 {
-    if (icon_ != nullptr)
+    // Mirror the macOS close-button behaviour: stay running (minimized) while any torrent
+    // is actively downloading, but actually quit once nothing is downloading (only seeds,
+    // paused or stopped torrents remain).
+    bool any_downloading = false;
+    if (auto const model = core_->get_model(); model)
     {
-        gtr_action_activate(GTR_KEY_toggle_main_window);
+        for (auto i = 0U, count = model->get_n_items(); i < count; ++i)
+        {
+            auto const torrent = gtr_ptr_dynamic_cast<Torrent>(model->get_object(i));
+            if (torrent == nullptr)
+            {
+                continue;
+            }
+
+            auto const activity = torrent->get_activity();
+            if (activity == TR_STATUS_DOWNLOAD || activity == TR_STATUS_DOWNLOAD_WAIT)
+            {
+                any_downloading = true;
+                break;
+            }
+        }
+    }
+
+    if (any_downloading)
+    {
+        if (icon_ != nullptr)
+        {
+            // Hide to the notification-area icon (existing close-to-tray behaviour).
+            gtr_action_activate(GTR_KEY_toggle_main_window);
+        }
+        else
+        {
+            // No tray icon: iconify to the taskbar so the user can still get the window back.
+#if GTKMM_CHECK_VERSION(4, 0, 0)
+            wind_->minimize();
+#else
+            wind_->iconify();
+#endif
+            scheduleProcessPriorityUpdate();
+        }
     }
     else
     {
