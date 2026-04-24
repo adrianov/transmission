@@ -675,15 +675,26 @@ std::string build_filename(tr_torrent const* tor, Gtk::TreeModel::iterator const
 
 std::optional<std::string> get_filename_to_open(tr_torrent const* tor, Gtk::TreeModel::iterator const& iter)
 {
+    // For a file row, try to open the actual on-disk file. This uses
+    // tr_torrentFindFile() so partial downloads (with a ".part" suffix
+    // or living in the incomplete-dir) are still returned.
+    if (bool const is_file = iter->children().empty(); is_file)
+    {
+        if (auto path = tr_torrentFindFile(tor, iter->get_value(file_cols.index)); !path.empty())
+        {
+            return path;
+        }
+    }
+
+    // Otherwise (directory row, or file not yet on disk): fall back to the
+    // directory itself, or the nearest existing ancestor.
     auto file = Gio::File::create_for_path(build_filename(tor, iter));
 
-    // if the selected file is complete, use it
-    if (iter->get_value(file_cols.prog) == 100 && file->query_exists())
+    if (file->query_exists())
     {
         return file->get_path();
     }
 
-    // use nearest existing ancestor instead
     for (;;)
     {
         file = file->get_parent();
