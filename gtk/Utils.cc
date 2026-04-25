@@ -597,39 +597,43 @@ void gtr_open_file(std::string const& path)
     gtr_open_uri(Gio::File::create_for_path(path)->get_uri());
 }
 
+bool gtr_try_open_uri(Glib::ustring const& uri)
+{
+    if (uri.empty())
+    {
+        return false;
+    }
+
+    bool opened = false;
+
+    try
+    {
+        opened = Gio::AppInfo::launch_default_for_uri(uri);
+    }
+    catch (Glib::Error const&)
+    {
+    }
+
+    if (!opened)
+    {
+        try
+        {
+            Glib::spawn_async({}, std::vector<std::string>{ "xdg-open", uri }, TR_GLIB_SPAWN_FLAGS(SEARCH_PATH));
+            opened = true;
+        }
+        catch (Glib::SpawnError const&)
+        {
+        }
+    }
+
+    return opened;
+}
+
 void gtr_open_uri(Glib::ustring const& uri)
 {
-    if (!uri.empty())
+    if (!uri.empty() && !gtr_try_open_uri(uri))
     {
-        bool opened = false;
-
-        if (!opened)
-        {
-            try
-            {
-                opened = Gio::AppInfo::launch_default_for_uri(uri);
-            }
-            catch (Glib::Error const&)
-            {
-            }
-        }
-
-        if (!opened)
-        {
-            try
-            {
-                Glib::spawn_async({}, std::vector<std::string>{ "xdg-open", uri }, TR_GLIB_SPAWN_FLAGS(SEARCH_PATH));
-                opened = true;
-            }
-            catch (Glib::SpawnError const&)
-            {
-            }
-        }
-
-        if (!opened)
-        {
-            gtr_message(fmt::format(fmt::runtime(_("Couldn't open '{url}'")), fmt::arg("url", uri)));
-        }
+        gtr_message(fmt::format(fmt::runtime(_("Couldn't open '{url}'")), fmt::arg("url", uri)));
     }
 }
 

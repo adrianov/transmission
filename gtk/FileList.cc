@@ -728,7 +728,24 @@ void FileList::Impl::onRowActivated(Gtk::TreeModel::Path const& path, Gtk::TreeV
 
     if (auto const filename = get_filename_to_open(tor, iter); filename)
     {
-        gtr_open_file(*filename);
+        auto const file = Gio::File::create_for_path(*filename);
+        auto const uri = file->get_uri();
+
+        // File row: if nothing is associated with the file type, open its parent folder in the file manager.
+        if (iter->children().empty())
+        {
+            if (!gtr_try_open_uri(uri))
+            {
+                if (auto const parent = file->get_parent())
+                {
+                    gtr_open_uri(parent->get_uri());
+                }
+            }
+        }
+        else
+        {
+            gtr_open_uri(uri);
+        }
     }
 }
 

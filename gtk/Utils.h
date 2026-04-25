@@ -93,6 +93,9 @@ inline GParamSpec* gtr_get_param_spec(char const* name, char const* nick, char c
 
 void gtr_open_uri(Glib::ustring const& uri);
 
+/** @brief Like gtr_open_uri() but does not show an error dialog; returns false if nothing handled the URI. */
+[[nodiscard]] bool gtr_try_open_uri(Glib::ustring const& uri);
+
 void gtr_open_file(std::string const& path);
 
 Glib::ustring gtr_get_help_uri();

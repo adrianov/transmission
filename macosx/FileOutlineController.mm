@@ -414,7 +414,18 @@ typedef NS_ENUM(NSUInteger, FilePriorityMenuTag) { //
         if (path)
         {
             [self.torrent recordOpenForFileNode:node];
-            [NSWorkspace.sharedWorkspace openURL:[path fileURLForOpening]];
+            NSURL* const fileURL = [path fileURLForOpening];
+            if (![NSWorkspace.sharedWorkspace openURL:fileURL])
+            {
+                if (!node.isFolder)
+                {
+                    NSURL* const parentURL = [fileURL URLByDeletingLastPathComponent];
+                    if (parentURL)
+                    {
+                        (void)[NSWorkspace.sharedWorkspace openURL:parentURL];
+                    }
+                }
+            }
         }
     }
 }
