@@ -401,6 +401,12 @@ public:
         return num_consecutive_fruitless_;
     }
 
+    /** Clears delays from prior fruitless or slow-disconnect penalties so we can retry soon. */
+    constexpr void clear_reconnect_delay_penalty() noexcept
+    {
+        num_consecutive_fruitless_ = {};
+    }
+
     // ---
 
     constexpr void set_pex_flags(uint8_t pex_flags) noexcept

@@ -2632,6 +2632,30 @@ void enforceSessionPeerLimit(size_t global_peer_limit, tr_torrents& torrents)
         std::for_each(std::begin(peers) + global_peer_limit, std::end(peers), close_peer);
     }
 }
+
+// Slow peers get extra fruitless counts, which increases reconnect delay. If we end up with
+// nobody connected while still downloading, clear those penalties so the pool can be retried.
+void clear_reconnect_delays_if_no_peers(tr_swarm* const s)
+{
+    auto* const tor = s->tor;
+    if (!tor->is_running() || tor->is_done())
+    {
+        return;
+    }
+
+    if (!s->peers.empty())
+    {
+        return;
+    }
+
+    for (auto const& [socket_address, peer_info] : s->connectable_pool)
+    {
+        if (peer_info->fruitless_connection_count() != 0U)
+        {
+            peer_info->clear_reconnect_delay_penalty();
+        }
+    }
+}
 } // namespace disconnect_helpers
 } // namespace
 
@@ -2658,6 +2682,7 @@ void tr_peerMgr::reconnect_pulse()
             close_bad_peers(swarm, now_sec, bad_peers_buf);
             close_slow_peers(swarm, now_msec, now_sec);
             update_dynamic_peer_limit(swarm, now_msec, now_sec);
+            clear_reconnect_delays_if_no_peers(swarm);
         }
     }
 
