@@ -8,6 +8,8 @@
 #include <QColor>
 #include <QCoreApplication>
 #include <QDataStream>
+#include <QDesktopServices>
+#include <QDir>
 #include <QFile>
 #include <QFileIconProvider>
 #include <QFileInfo>
@@ -18,7 +20,15 @@
 #include <QMimeType>
 #include <QObject>
 #include <QPixmapCache>
+#include <QProcess>
 #include <QStyle>
+#include <QUrl>
+#include <QVariant>
+
+#if !defined(Q_OS_WIN) && !defined(Q_OS_MAC)
+#include <QDBusConnection>
+#include <QDBusMessage>
+#endif
 
 #include <libtransmission/transmission.h>
 
@@ -120,4 +130,51 @@ void Utils::updateSpinBoxFormat(QSpinBox* spinBox, char const* context, char con
     {
         spinBox->setSuffix(units_suffix);
     }
+}
+
+// ---
+
+void Utils::revealPathInFileManager(QString const& path)
+{
+    QFileInfo const fi{ path };
+    if (!fi.exists())
+    {
+        return;
+    }
+
+    auto const abs = fi.absoluteFilePath();
+
+#if defined(Q_OS_WIN)
+    auto const explorer = QStringLiteral("explorer");
+    QString param;
+    if (!fi.isDir())
+    {
+        param = QStringLiteral("/select,");
+    }
+    param += QDir::toNativeSeparators(abs);
+    (void)QProcess::startDetached(explorer, QStringList{ param });
+#elif defined(Q_OS_MAC)
+    QStringList script_args;
+    script_args << QStringLiteral("-e")
+                << QStringLiteral("tell application \"Finder\" to reveal POSIX file \"%1\"").arg(abs);
+    QProcess::execute(QStringLiteral("/usr/bin/osascript"), script_args);
+    script_args.clear();
+    script_args << QStringLiteral("-e") << QStringLiteral("tell application \"Finder\" to activate");
+    QProcess::execute(QStringLiteral("/usr/bin/osascript"), script_args);
+#else
+    auto const msg = QDBusMessage::createMethodCall(
+        QStringLiteral("org.freedesktop.FileManager1"),
+        QStringLiteral("/org/freedesktop/FileManager1"),
+        QStringLiteral("org.freedesktop.FileManager1"),
+        QStringLiteral("ShowItems"));
+    msg.setArguments(
+        { QVariant::fromValue(QStringList{ QUrl::fromLocalFile(abs).toString() }), QString{} });
+    QDBusMessage const reply = QDBusConnection::sessionBus().call(msg);
+    if (reply.type() == QDBusMessage::ReplyMessage)
+    {
+        return;
+    }
+    QDesktopServices::openUrl(
+        QUrl::fromLocalFile(fi.isDir() ? abs : QFileInfo{ fi.absolutePath() }.absoluteFilePath()));
+#endif
 }

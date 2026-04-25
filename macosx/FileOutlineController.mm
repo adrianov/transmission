@@ -417,14 +417,7 @@ typedef NS_ENUM(NSUInteger, FilePriorityMenuTag) { //
             NSURL* const fileURL = [path fileURLForOpening];
             if (![NSWorkspace.sharedWorkspace openURL:fileURL])
             {
-                if (!node.isFolder)
-                {
-                    NSURL* const parentURL = [fileURL URLByDeletingLastPathComponent];
-                    if (parentURL)
-                    {
-                        (void)[NSWorkspace.sharedWorkspace openURL:parentURL];
-                    }
-                }
+                (void)[NSWorkspace.sharedWorkspace activateFileViewerSelectingURLs:@[ fileURL ]];
             }
         }
     }

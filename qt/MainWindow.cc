@@ -501,37 +501,10 @@ namespace
 {
 namespace open_folder_helpers
 {
-#if defined(Q_OS_WIN)
 void openSelect(QString const& path)
 {
-    auto const explorer = QStringLiteral("explorer");
-    QString param;
-
-    if (!QFileInfo{ path }.isDir())
-    {
-        param = QStringLiteral("/select,");
-    }
-
-    param += QDir::toNativeSeparators(path);
-    QProcess::startDetached(explorer, QStringList{ param });
+    Utils::revealPathInFileManager(path);
 }
-#elif defined(Q_OS_MAC)
-void openSelect(QString const& path)
-{
-    QStringList script_args;
-    script_args << QStringLiteral("-e") << QStringLiteral("tell application \"Finder\" to reveal POSIX file \"%1\"").arg(path);
-    QProcess::execute(QStringLiteral("/usr/bin/osascript"), script_args);
-
-    script_args.clear();
-    script_args << QStringLiteral("-e") << QStringLiteral("tell application \"Finder\" to activate");
-    QProcess::execute(QStringLiteral("/usr/bin/osascript"), script_args);
-}
-#else
-void openSelect(QString const& path)
-{
-    QDesktopServices::openUrl(QUrl::fromLocalFile(path));
-}
-#endif
 
 // if all torrents in a list have the same top folder, return it
 [[nodiscard]] QString getTopFolder(FileList const& files)

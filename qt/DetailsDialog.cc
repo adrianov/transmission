@@ -14,7 +14,6 @@
 #include <QDesktopServices>
 #include <QEvent>
 #include <QFile>
-#include <QFileInfo>
 #include <QFont>
 #include <QFontMetrics>
 #include <QHeaderView>
@@ -1678,12 +1677,8 @@ void DetailsDialog::onOpenRequested(QString const& path) const
             break;
         }
 
-        // No app associated with this file: open the parent directory instead.
-        if (QFileInfo const fi{ local_file_path }; fi.isFile() &&
-            QDesktopServices::openUrl(QUrl::fromLocalFile(fi.dir().absolutePath())))
-        {
-            break;
-        }
+        Utils::revealPathInFileManager(local_file_path);
+        break;
     }
 }
 

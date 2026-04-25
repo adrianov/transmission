@@ -736,10 +736,7 @@ void FileList::Impl::onRowActivated(Gtk::TreeModel::Path const& path, Gtk::TreeV
         {
             if (!gtr_try_open_uri(uri))
             {
-                if (auto const parent = file->get_parent())
-                {
-                    gtr_open_uri(parent->get_uri());
-                }
+                gtr_reveal_in_file_manager(*filename);
             }
         }
         else

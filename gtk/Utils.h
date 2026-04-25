@@ -98,6 +98,9 @@ void gtr_open_uri(Glib::ustring const& uri);
 
 void gtr_open_file(std::string const& path);
 
+/** Open a file manager window with this path selected (best effort; may open a parent folder only). */
+void gtr_reveal_in_file_manager(std::string const& path);
+
 Glib::ustring gtr_get_help_uri();
 
 /***

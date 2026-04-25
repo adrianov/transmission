@@ -20,7 +20,9 @@
 #include <gdkmm/display.h>
 #include <giomm/appinfo.h>
 #include <giomm/asyncresult.h>
+#include <giomm/dbusconnection.h>
 #include <giomm/file.h>
+#include <glibmm/fileutils.h>
 #include <glibmm/error.h>
 #include <glibmm/i18n.h>
 #include <glibmm/quark.h>
@@ -595,6 +597,45 @@ Glib::ustring gtr_get_help_uri()
 void gtr_open_file(std::string const& path)
 {
     gtr_open_uri(Gio::File::create_for_path(path)->get_uri());
+}
+
+void gtr_reveal_in_file_manager(std::string const& path)
+{
+    if (path.empty())
+    {
+        return;
+    }
+
+    try
+    {
+        auto const connection = Gio::DBus::Connection::get_sync(TR_GIO_DBUS_BUS_TYPE(SESSION));
+        auto const file = Gio::File::create_for_path(path);
+        std::vector<Glib::ustring> const uris = { file->get_uri() };
+        connection->call_sync(
+            "/org/freedesktop/FileManager1",
+            "org.freedesktop.FileManager1",
+            "ShowItems",
+            Glib::VariantContainerBase::create_tuple({
+                Glib::Variant<std::vector<Glib::ustring>>::create(uris),
+                Glib::Variant<Glib::ustring>::create(""),
+            }),
+            "org.freedesktop.FileManager1",
+            1000);
+        return;
+    }
+    catch (Glib::Error const&)
+    {
+    }
+
+    auto const file = Gio::File::create_for_path(path);
+    if (Glib::file_test(path, Glib::FileTest::FILE_TEST_IS_DIR))
+    {
+        gtr_open_uri(file->get_uri());
+    }
+    else if (auto const parent = file->get_parent())
+    {
+        gtr_open_uri(parent->get_uri());
+    }
 }
 
 bool gtr_try_open_uri(Glib::ustring const& uri)

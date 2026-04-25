@@ -57,4 +57,7 @@ public:
     }
 
     static void updateSpinBoxFormat(QSpinBox* spinBox, char const* context, char const* format, QString const& placeholder);
+
+    /** Open a file manager window with this file or directory highlighted (platform-specific best effort). */
+    static void revealPathInFileManager(QString const& path);
 };
