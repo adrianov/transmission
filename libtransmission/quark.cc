@@ -251,6 +251,8 @@ auto constexpr MyStatic = std::array<std::string_view, TR_N_KEYS>{
     "info"sv, // .torrent
     "inhibit-desktop-hibernation"sv, // gtk app, qt app
     "inhibit_desktop_hibernation"sv, // gtk app, qt app
+    "inspector-show-piece-availability"sv, // gtk app
+    "inspector_show_piece_availability"sv, // gtk app
     "ip_protocol"sv, // rpc
     "ipv4"sv, // BEP0010; BT protocol, rpc
     "ipv6"sv, // BEP0010; BT protocol, rpc

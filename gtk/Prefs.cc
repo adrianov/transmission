@@ -62,6 +62,7 @@ namespace
     map.try_emplace(TR_KEY_details_window_width, 700);
     map.try_emplace(TR_KEY_download_dir, dir);
     map.try_emplace(TR_KEY_inhibit_desktop_hibernation, false);
+    map.try_emplace(TR_KEY_inspector_show_piece_availability, false);
     map.try_emplace(TR_KEY_main_window_height, 500);
     map.try_emplace(TR_KEY_main_window_is_maximized, false);
     map.try_emplace(TR_KEY_main_window_width, 300);

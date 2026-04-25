@@ -5,6 +5,7 @@
 
 #include "DetailsDialog.h"
 
+#include "InspectorPiecesView.h"
 #include "Actions.h"
 #include "FileList.h"
 #include "GtkCompat.h"
@@ -30,6 +31,11 @@
 #include <gtkmm/cellrenderertext.h>
 #include <gtkmm/checkbutton.h>
 #include <gtkmm/combobox.h>
+#include <gtkmm/comboboxtext.h>
+#include <gtkmm/drawingarea.h>
+#if GTKMM_CHECK_VERSION(4, 0, 0)
+#include <gtkmm/gestureclick.h>
+#endif
 #include <gtkmm/entry.h>
 #include <gtkmm/label.h>
 #include <gtkmm/liststore.h>
@@ -99,6 +105,15 @@ private:
 
     bool onPeerViewQueryTooltip(int x, int y, bool keyboard_tip, Glib::RefPtr<Gtk::Tooltip> const& tooltip);
     void onMorePeerInfoToggled();
+
+    void onPiecesMapModeChanged();
+#if GTKMM_CHECK_VERSION(4, 0, 0)
+    void onPiecesInspectorDraw(Cairo::RefPtr<Cairo::Context> const& cr, int width, int height);
+    void onPiecesInspectorClick(int n_press, double x, double y);
+#else
+    bool onPiecesInspectorDraw(Cairo::RefPtr<Cairo::Context> const& cr);
+    bool onPiecesInspectorClick(GdkEventButton* event);
+#endif
 
     bool trackerVisibleFunc(Gtk::TreeModel::const_iterator const& iter);
     void on_tracker_list_selection_changed();
@@ -177,6 +192,11 @@ private:
     Gtk::Label* origin_lb_ = nullptr;
     Gtk::Label* destination_lb_ = nullptr;
     Glib::RefPtr<Gtk::TextBuffer> comment_buffer_;
+
+    Gtk::ComboBoxText* pieces_map_mode_combo_ = nullptr;
+    Gtk::DrawingArea* pieces_inspector_drawing_ = nullptr;
+    inspector_pieces::State inspector_pieces_state_;
+    sigc::connection pieces_map_mode_changed_tag_;
 
     std::unordered_map<std::string, Gtk::TreeRowReference> peer_hash_;
     std::unordered_map<std::string, Gtk::TreeRowReference> webseed_hash_;
@@ -1036,13 +1056,125 @@ void DetailsDialog::Impl::refreshInfo(std::vector<tr_torrent*> const& torrents)
     }
 
     last_activity_lb_->set_text(str);
+
+    if (pieces_inspector_drawing_ != nullptr)
+    {
+        bool const can_map =
+            std::size(torrents) == 1U && tr_torrentHasMetadata(torrents.front());
+        pieces_map_mode_combo_->set_sensitive(can_map);
+        pieces_inspector_drawing_->queue_draw();
+    }
 }
+
+void DetailsDialog::Impl::onPiecesMapModeChanged()
+{
+    int const row = pieces_map_mode_combo_->get_active_row_number();
+    if (row < 0)
+    {
+        return;
+    }
+
+    bool const as_availability = (row == 1);
+    core_->set_pref(TR_KEY_inspector_show_piece_availability, as_availability);
+    pieces_inspector_drawing_->queue_draw();
+}
+
+#if GTKMM_CHECK_VERSION(4, 0, 0)
+void DetailsDialog::Impl::onPiecesInspectorDraw(Cairo::RefPtr<Cairo::Context> const& cr, int width, int height)
+{
+    Gdk::Rectangle const area(0, 0, width, height);
+    auto const torrents = getTorrents();
+    tr_torrent const* const t = std::size(torrents) == 1U ? torrents.front() : nullptr;
+    bool const show_availability = gtr_pref_flag_get(TR_KEY_inspector_show_piece_availability);
+    inspector_pieces::draw(
+        *pieces_inspector_drawing_,
+        cr,
+        area,
+        t,
+        show_availability,
+        inspector_pieces_state_);
+}
+
+void DetailsDialog::Impl::onPiecesInspectorClick(int const n_press, double /*x*/, double /*y*/)
+{
+    if (n_press != 1)
+    {
+        return;
+    }
+    if (getTorrents().size() != 1U || !tr_torrentHasMetadata(getTorrents().front()))
+    {
+        return;
+    }
+
+    bool const next = !gtr_pref_flag_get(TR_KEY_inspector_show_piece_availability);
+    core_->set_pref(TR_KEY_inspector_show_piece_availability, next);
+    pieces_map_mode_changed_tag_.block();
+    pieces_map_mode_combo_->set_active(next ? 1 : 0);
+    pieces_map_mode_changed_tag_.unblock();
+    pieces_inspector_drawing_->queue_draw();
+}
+#else
+bool DetailsDialog::Impl::onPiecesInspectorDraw(Cairo::RefPtr<Cairo::Context> const& cr)
+{
+    auto const& a = pieces_inspector_drawing_->get_allocation();
+    Gdk::Rectangle const area(0, 0, a.get_width(), a.get_height());
+    auto const torrents = getTorrents();
+    tr_torrent const* const t = std::size(torrents) == 1U ? torrents.front() : nullptr;
+    bool const show_availability = gtr_pref_flag_get(TR_KEY_inspector_show_piece_availability);
+    inspector_pieces::draw(
+        *pieces_inspector_drawing_,
+        cr,
+        area,
+        t,
+        show_availability,
+        inspector_pieces_state_);
+    return true;
+}
+
+bool DetailsDialog::Impl::onPiecesInspectorClick(GdkEventButton* const event)
+{
+    if (event->type == GDK_BUTTON_PRESS && event->button == 1U)
+    {
+        if (getTorrents().size() == 1U && tr_torrentHasMetadata(getTorrents().front()))
+        {
+            bool const next = !gtr_pref_flag_get(TR_KEY_inspector_show_piece_availability);
+            core_->set_pref(TR_KEY_inspector_show_piece_availability, next);
+            pieces_map_mode_changed_tag_.block();
+            pieces_map_mode_combo_->set_active(next ? 1 : 0);
+            pieces_map_mode_changed_tag_.unblock();
+            pieces_inspector_drawing_->queue_draw();
+        }
+    }
+    return false;
+}
+#endif
 
 void DetailsDialog::Impl::info_page_init(Glib::RefPtr<Gtk::Builder> const& builder)
 {
     comment_buffer_ = Gtk::TextBuffer::create();
     auto* tw = gtr_get_widget<Gtk::TextView>(builder, "comment_value_view");
     tw->set_buffer(comment_buffer_);
+
+    pieces_map_mode_combo_->remove_all();
+    pieces_map_mode_combo_->append(_("Download progress"));
+    pieces_map_mode_combo_->append(_("Swarm availability"));
+    pieces_map_mode_changed_tag_ = pieces_map_mode_combo_->signal_changed().connect(
+        [this]() { onPiecesMapModeChanged(); });
+    pieces_map_mode_changed_tag_.block();
+    pieces_map_mode_combo_->set_active(gtr_pref_flag_get(TR_KEY_inspector_show_piece_availability) ? 1 : 0);
+    pieces_map_mode_changed_tag_.unblock();
+
+#if GTKMM_CHECK_VERSION(4, 0, 0)
+    pieces_inspector_drawing_->set_draw_func(sigc::mem_fun(*this, &Impl::onPiecesInspectorDraw));
+    auto const click = Gtk::GestureClick::create();
+    click->signal_pressed().connect(sigc::mem_fun(*this, &Impl::onPiecesInspectorClick));
+    pieces_inspector_drawing_->add_controller(click);
+#else
+    pieces_inspector_drawing_->signal_draw().connect(sigc::mem_fun(*this, &Impl::onPiecesInspectorDraw));
+    pieces_inspector_drawing_->add_events(Gdk::BUTTON_PRESS_MASK);
+    pieces_inspector_drawing_->signal_button_press_event().connect(
+        sigc::mem_fun(*this, &Impl::onPiecesInspectorClick));
+#endif
 }
 
 /****
@@ -2517,6 +2649,8 @@ DetailsDialog::Impl::Impl(DetailsDialog& dialog, Glib::RefPtr<Gtk::Builder> cons
     , privacy_lb_(gtr_get_widget<Gtk::Label>(builder, "privacy_value_label"))
     , origin_lb_(gtr_get_widget<Gtk::Label>(builder, "origin_value_label"))
     , destination_lb_(gtr_get_widget<Gtk::Label>(builder, "location_value_label"))
+    , pieces_map_mode_combo_(gtr_get_widget<Gtk::ComboBoxText>(builder, "pieces_map_mode_combo"))
+    , pieces_inspector_drawing_(gtr_get_widget<Gtk::DrawingArea>(builder, "pieces_inspector_drawing"))
     , webseed_view_(gtr_get_widget<Gtk::ScrolledWindow>(builder, "webseeds_view_scroll"))
     , peer_view_(gtr_get_widget<Gtk::TreeView>(builder, "peers_view"))
     , more_peer_details_check_(gtr_get_widget<Gtk::CheckButton>(builder, "more_peer_details_check"))

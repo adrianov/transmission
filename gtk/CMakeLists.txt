@@ -27,6 +27,8 @@ target_sources(${TR_NAME}-gtk
         FreeSpaceLabel.h
         GtkCompat.h
         HigWorkarea.h
+        InspectorPiecesView.cc
+        InspectorPiecesView.h
         IconCache.cc
         IconCache.h
         ListModelAdapter.cc
