@@ -148,6 +148,8 @@ public:
         flushCloseMessages();
     }
 
+    void clearFailedTrackerHostsAndReannounce() override;
+
     void upkeep() override;
 
     void onAnnounceDone(
@@ -1684,6 +1686,23 @@ void scrapeAndAnnounceMore(tr_announcer_impl* announcer)
 }
 } // namespace upkeep_helpers
 } // namespace
+
+void tr_announcer_impl::clearFailedTrackerHostsAndReannounce()
+{
+    if (!std::empty(failed_hosts_))
+    {
+        tr_logAddInfo(_("Cleared per-session unreachable tracker host list; reannouncing to torrent trackers"));
+    }
+    failed_hosts_.clear();
+
+    for (auto* const tor : session->torrents())
+    {
+        if (tor != nullptr && tor->is_running() && tor->torrent_announcer != nullptr)
+        {
+            tr_announcerManualAnnounce(tor);
+        }
+    }
+}
 
 void tr_announcer_impl::upkeep()
 {

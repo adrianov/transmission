@@ -400,9 +400,11 @@ void PrefsDialog::initNetworkTab()
     initWidget(ui_.enableDhtCheck, Prefs::DHT_ENABLED);
     initWidget(ui_.enableLpdCheck, Prefs::LPD_ENABLED);
     initWidget(ui_.defaultTrackersPlainTextEdit, Prefs::DEFAULT_TRACKERS);
+    initWidget(ui_.proxyUrlLineEdit, Prefs::PROXY_URL);
 
     auto* cr = new ColumnResizer{ this };
     cr->addLayout(ui_.incomingPeersSectionLayout);
+    cr->addLayout(ui_.proxySectionLayout);
     cr->addLayout(ui_.peerLimitsSectionLayout);
     cr->update();
 

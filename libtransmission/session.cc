@@ -41,6 +41,7 @@
 #include "libtransmission/log.h"
 #include "libtransmission/net.h"
 #include "libtransmission/peer-mgr.h"
+#include "libtransmission/announcer.h"
 #include "libtransmission/peer-socket.h"
 #include "libtransmission/port-forwarding.h"
 #include "libtransmission/quark.h"
@@ -808,6 +809,11 @@ void tr_session::setSettings(tr_session::Settings&& settings_in, bool force)
     else if (!val)
     {
         is_proxy_disabled_for_session_ = false;
+    }
+
+    if (!force && new_settings.proxy_url != old_settings.proxy_url && announcer_ != nullptr)
+    {
+        announcer_->clearFailedTrackerHostsAndReannounce();
     }
 
     // We need to update bandwidth if speed settings changed.

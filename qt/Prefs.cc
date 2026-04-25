@@ -256,5 +256,6 @@ tr_variant::Map Prefs::defaults()
     map.try_emplace(TR_KEY_torrent_complete_sound_enabled, true);
     map.try_emplace(TR_KEY_watch_dir, download_dir);
     map.try_emplace(TR_KEY_watch_dir_enabled, false);
+    map.try_emplace(TR_KEY_proxy_url, nullptr);
     return map;
 }

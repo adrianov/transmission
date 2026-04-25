@@ -81,6 +81,10 @@ public:
     virtual void startShutdown() = 0;
 
     virtual void upkeep() = 0;
+
+    /// Clears the session's "unreachable" tracker host list (e.g. after a proxy
+    /// change) and requests an announce for all running torrents.
+    virtual void clearFailedTrackerHostsAndReannounce() = 0;
 };
 
 std::unique_ptr<tr_announcer> tr_announcerCreate(tr_session* session);

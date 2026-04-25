@@ -30,6 +30,7 @@
 #include <libtransmission/quark.h>
 #include <libtransmission/rpcimpl.h>
 #include <libtransmission/utils.h>
+#include <libtransmission/variant.h>
 #include <libtransmission/version.h>
 
 #include <gdkmm/display.h>
@@ -1499,6 +1500,21 @@ void Application::Impl::on_prefs_changed(tr_quark const key)
     case TR_KEY_torrent_complete_verify_enabled:
         tr_sessionSetCompleteVerifyEnabled(tr, gtr_pref_flag_get(key));
         break;
+
+    case TR_KEY_proxy_url:
+        {
+            auto map = tr_variant::Map{ 1U };
+            if (auto const s = gtr_pref_string_get(key); s.empty())
+            {
+                map.try_emplace(key, nullptr);
+            }
+            else
+            {
+                map.try_emplace(key, s);
+            }
+            tr_sessionSet(tr, tr_variant{ std::move(map) });
+            break;
+        }
 
     default:
         break;

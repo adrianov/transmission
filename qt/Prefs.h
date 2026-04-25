@@ -122,7 +122,8 @@ public:
         USPEED_ENABLED,
         USPEED,
         UPLOAD_SLOTS_PER_TORRENT,
-        LAST_CORE_PREF = UPLOAD_SLOTS_PER_TORRENT,
+        PROXY_URL,
+        LAST_CORE_PREF = PROXY_URL,
         //
         PREFS_COUNT
     };
@@ -291,6 +292,7 @@ private:
         { USPEED_ENABLED, TR_KEY_speed_limit_up_enabled, QMetaType::Bool },
         { USPEED, TR_KEY_speed_limit_up, QMetaType::Int },
         { UPLOAD_SLOTS_PER_TORRENT, TR_KEY_upload_slots_per_torrent, QMetaType::Int },
+        { PROXY_URL, TR_KEY_proxy_url, QMetaType::QString },
     } };
 
     [[nodiscard]] static tr_variant::Map defaults();

@@ -695,6 +695,38 @@
         </widget>
        </item>
        <item>
+        <widget class="QGroupBox" name="proxySection">
+         <property name="title">
+          <string>Proxy</string>
+         </property>
+         <layout class="QGridLayout" name="proxySectionLayout" columnstretch="0,1">
+          <item row="0" column="0">
+           <widget class="QLabel" name="proxyUrlLabel">
+            <property name="text">
+             <string>HTTP/SOCKS &amp;proxy for trackers:</string>
+            </property>
+            <property name="buddy">
+             <cstring>proxyUrlLineEdit</cstring>
+            </property>
+            <property name="wordWrap">
+             <bool>true</bool>
+            </property>
+           </widget>
+          </item>
+          <item row="0" column="1">
+           <widget class="QLineEdit" name="proxyUrlLineEdit">
+            <property name="toolTip">
+             <string>Used for HTTP/HTTPS announce and scrapes. Examples: http://host:port, socks5://127.0.0.1:1080. Leave empty to connect directly. UDP trackers are not tunneled through the proxy.</string>
+            </property>
+            <property name="clearButtonEnabled">
+             <bool>true</bool>
+            </property>
+           </widget>
+          </item>
+         </layout>
+        </widget>
+       </item>
+       <item>
         <widget class="QGroupBox" name="peerLimitsSection">
          <property name="title">
           <string>Peer Limits</string>

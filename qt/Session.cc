@@ -212,6 +212,22 @@ void Session::updatePref(int key)
             sessionSet(Prefs::getKey(key), prefs_.variant(key));
             break;
 
+        case Prefs::PROXY_URL:
+            {
+                tr_variant args;
+                tr_variantInitDict(&args, 1);
+                if (auto const s = prefs_.get<QString>(key); s.isEmpty())
+                {
+                    *tr_variantDictAdd(&args, TR_KEY_proxy_url) = tr_variant{ nullptr };
+                }
+                else
+                {
+                    tr_variantDictAddStr(&args, TR_KEY_proxy_url, s.toStdString());
+                }
+                exec(TR_KEY_session_set, &args);
+            }
+            break;
+
         case Prefs::DOWNLOAD_DIR:
             sessionSet(Prefs::getKey(key), prefs_.variant(key));
             /* this will change the 'freespace' argument, so refresh */
