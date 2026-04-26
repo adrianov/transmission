@@ -59,6 +59,20 @@
 using namespace std::literals;
 using namespace transmission::app;
 
+namespace
+{
+
+/* tr_torrentRemove runs on the session thread and frees the tr_torrent before the main-thread
+   idle from connect_once runs, so find_torrent_by_id() would call tr_torrentId on freed memory.
+   We remove the row from the list model first and keep a RefPtr until the callback. */
+struct TorrentRemovalUserData
+{
+    Session* session = nullptr;
+    Glib::RefPtr<Torrent> torrent;
+};
+
+} // namespace
+
 class Session::Impl
 {
 public:
@@ -171,7 +185,7 @@ private:
     void on_torrent_completeness_changed(tr_torrent* tor, tr_completeness completeness, bool was_running);
     void on_torrent_metadata_changed(tr_torrent* raw_torrent);
 
-    void on_torrent_removal_done(tr_torrent_id_t id, bool succeeded);
+    void on_torrent_removal_done(bool succeeded, Glib::RefPtr<Torrent> tor);
 
 private:
     Session& core_;
@@ -932,13 +946,17 @@ void Session::remove_torrent(tr_torrent_id_t id, bool delete_files)
 
 void Session::Impl::remove_torrent(tr_torrent_id_t id, bool delete_files)
 {
-    static auto const callback = [](tr_torrent_id_t processed_id, bool succeeded, void* user_data)
+    static auto const callback = [](tr_torrent_id_t /*processed_id*/, bool succeeded, void* user_data)
     {
         // "Own" the core since refcount has already been incremented before operation start — only decrement required.
-        auto const core = Glib::make_refptr_for_instance(static_cast<Session*>(user_data));
+        std::unique_ptr<TorrentRemovalUserData> ud{ static_cast<TorrentRemovalUserData*>(user_data) };
+        auto const core = Glib::make_refptr_for_instance(ud->session);
+        auto keep = std::move(ud->torrent);
+        ud.reset();
 
-        Glib::signal_idle().connect_once([processed_id, succeeded, core]()
-                                         { core->impl_->on_torrent_removal_done(processed_id, succeeded); });
+        Glib::signal_idle().connect_once(
+            [succeeded, core, keep = std::move(keep)]() mutable
+            { core->impl_->on_torrent_removal_done(succeeded, std::move(keep)); });
     };
 
     if (auto const& [torrent, position] = find_torrent_by_id(id); torrent)
@@ -946,28 +964,30 @@ void Session::Impl::remove_torrent(tr_torrent_id_t id, bool delete_files)
         // Extend core lifetime, refcount will be decremented in the callback.
         core_.reference();
 
+        auto* const ud = new TorrentRemovalUserData{ &core_, torrent };
+        get_raw_model()->remove(position);
+
         tr_torrentRemove(
-            &torrent->get_underlying(),
+            &ud->torrent->get_underlying(),
             delete_files,
             [](char const* filename, void* /*user_data*/, tr_error* error)
             { return gtr_file_trash_or_remove(filename, error); },
             nullptr,
             callback,
-            &core_);
+            ud);
     }
 }
 
-void Session::Impl::on_torrent_removal_done(tr_torrent_id_t id, bool succeeded)
+void Session::Impl::on_torrent_removal_done(bool succeeded, Glib::RefPtr<Torrent> tor)
 {
     if (!succeeded)
     {
+        /* Removal failed: tr_torrent is still valid; put the row back. */
+        add_torrent(tor, false);
         return;
     }
 
-    if (auto const& [torrent, position] = find_torrent_by_id(id); torrent)
-    {
-        get_raw_model()->remove(position);
-    }
+    /* Success: tr_torrent was freed on the session thread; dropping `tor` destroys the shell object. */
 }
 
 void Session::load(bool force_paused)
