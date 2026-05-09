@@ -70,6 +70,12 @@ struct MetainfoHandler final : public transmission::benc::BasicHandler<MaxBencDe
     tr_pathbuf file_subpath_;
     std::string_view pieces_root_;
     int64_t file_length_ = 0;
+    std::vector<size_t> file_tree_path_lens_;
+    int file_tree_depth_ = 0;
+    bool v2_single_root_file_ = false;
+    /// v2 single-file tree root seen before info `name` (bencode key order varies by client).
+    int64_t v2_deferred_single_file_len_ = 0;
+    bool file_tree_skip_files_ = false;
 
     enum class State : uint8_t
     {
@@ -95,19 +101,31 @@ struct MetainfoHandler final : public transmission::benc::BasicHandler<MaxBencDe
     {
         if (state_ == State::FileTree)
         {
-            auto const path_element = currentKey();
-            if (!path_element)
+            ++file_tree_depth_;
+
+            if (!file_tree_skip_files_)
             {
-                return false;
+                auto const path_element = currentKey();
+                if (!path_element)
+                {
+                    context.error.set(EINVAL, "file tree: missing dict entry key");
+                    return false;
+                }
+
+                if (!std::empty(*path_element))
+                {
+                    file_tree_path_lens_.push_back(std::size(file_subpath_));
+                    if (!std::empty(file_subpath_))
+                    {
+                        file_subpath_ += '/';
+                    }
+                    tr_torrent_files::sanitize_subpath(*path_element, file_subpath_);
+                }
             }
 
-            if (!std::empty(file_subpath_))
-            {
-                file_subpath_ += '/';
-            }
-            tr_torrent_files::sanitize_subpath(*path_element, file_subpath_);
+            return BasicHandler::StartDict(context);
         }
-        else if (pathIs(InfoKey))
+        if (pathIs(InfoKey))
         {
             info_dict_begin_ = context.raw();
             tm_.info_dict_offset_ = context.tokenSpan().first;
@@ -117,6 +135,11 @@ struct MetainfoHandler final : public transmission::benc::BasicHandler<MaxBencDe
             state_ = State::FileTree;
             file_subpath_.clear();
             file_length_ = 0;
+            file_tree_path_lens_.clear();
+            file_tree_depth_ = 1;
+            v2_single_root_file_ = false;
+            v2_deferred_single_file_len_ = 0;
+            file_tree_skip_files_ = !std::empty(tm_.files_);
         }
         else if (pathIs(PieceLayersKey))
         {
@@ -140,11 +163,55 @@ struct MetainfoHandler final : public transmission::benc::BasicHandler<MaxBencDe
             return finish(context);
         }
 
-        if (state_ == State::FileTree) // bittorrent v2 format
+        if (state_ == State::FileTree)
         {
-            // v2, ignore for today
-            tr_logAddInfo("'file tree' is ignored");
-            state_ = State::UsePath;
+            if (!file_tree_skip_files_ && file_length_ > 0)
+            {
+                if (std::empty(file_subpath_))
+                {
+                    if (!std::empty(tm_.name_))
+                    {
+                        auto path = tr_pathbuf{};
+                        tr_torrent_files::sanitize_subpath(tm_.name_, path);
+                        tm_.files_.add(path, file_length_);
+                        v2_single_root_file_ = true;
+                    }
+                    else if (v2_deferred_single_file_len_ > 0)
+                    {
+                        context.error.set(EINVAL, "duplicate BitTorrent v2 single-file root in file tree");
+                        return false;
+                    }
+                    else
+                    {
+                        v2_deferred_single_file_len_ = file_length_;
+                    }
+                }
+                else if (!addFile(context))
+                {
+                    return false;
+                }
+
+                file_length_ = 0;
+            }
+            else if (file_tree_skip_files_)
+            {
+                file_length_ = 0;
+            }
+
+            if (!file_tree_path_lens_.empty())
+            {
+                file_subpath_.resize(file_tree_path_lens_.back());
+                file_tree_path_lens_.pop_back();
+            }
+
+            TR_ASSERT(file_tree_depth_ > 0);
+            --file_tree_depth_;
+            if (file_tree_depth_ == 0)
+            {
+                state_ = State::UsePath;
+            }
+
+            return depth() > 0;
         }
         else if (state_ == State::Files) // bittorrent v1 format
         {
@@ -361,6 +428,14 @@ struct MetainfoHandler final : public transmission::benc::BasicHandler<MaxBencDe
         else if (pathIs(InfoKey, NameKey) || pathIs(InfoKey, NameUtf8Key))
         {
             tm_.set_name(value);
+            if (v2_deferred_single_file_len_ > 0 && !std::empty(tm_.name_))
+            {
+                auto path = tr_pathbuf{};
+                tr_torrent_files::sanitize_subpath(tm_.name_, path);
+                tm_.files_.add(path, v2_deferred_single_file_len_);
+                v2_single_root_file_ = true;
+                v2_deferred_single_file_len_ = 0;
+            }
         }
         else if (pathIs(InfoKey, PiecesKey))
         {
@@ -374,7 +449,7 @@ struct MetainfoHandler final : public transmission::benc::BasicHandler<MaxBencDe
             else
             {
                 context.error.set(EINVAL, fmt::format("invalid piece size: {}", std::size(value)));
-                unhandled = true;
+                return false;
             }
         }
         else if (pathStartsWith(PieceLayersKey))
@@ -479,9 +554,26 @@ private:
             return false;
         }
 
+        if (v2_deferred_single_file_len_ > 0)
+        {
+            if (std::empty(tm_.name_))
+            {
+                context.error.set(
+                    EINVAL,
+                    "BitTorrent v2 'file tree' single-file root requires non-empty info 'name'");
+                return false;
+            }
+
+            auto path = tr_pathbuf{};
+            tr_torrent_files::sanitize_subpath(tm_.name_, path);
+            tm_.files_.add(path, v2_deferred_single_file_len_);
+            v2_single_root_file_ = true;
+            v2_deferred_single_file_len_ = 0;
+        }
+
         auto root = tr_pathbuf{};
         tr_torrent_files::sanitize_subpath(tm_.name_, root);
-        if (!std::empty(root))
+        if (!std::empty(root) && !v2_single_root_file_)
         {
             tm_.files_.insert_subpath_prefix(root);
         }
@@ -543,8 +635,13 @@ private:
         }
 
         // no metainfo; might be a Transmission 3.00-style magnet file
-        auto const ok = tm_.has_magnet_info_hash_;
-        return ok;
+        if (auto const ok = tm_.has_magnet_info_hash_; ok)
+        {
+            return true;
+        }
+
+        context.error.set(EINVAL, "torrent missing info dictionary");
+        return false;
     }
 
     static constexpr std::string_view AcodecKey = "acodec"sv;
