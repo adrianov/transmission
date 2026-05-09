@@ -712,7 +712,7 @@ Glib::RefPtr<Torrent> Session::Impl::create_new_torrent(tr_ctor* ctor)
         char const* config = tr_sessionGetConfigDir(session_);
         char const* source = tr_ctorGetSourceFile(ctor);
 
-        if (source != nullptr)
+        if (source != nullptr && source[0] != '\0')
         {
             /* #1294: don't delete the .torrent file if it's our internal copy */
             bool const is_internal = strstr(source, config) == source;
