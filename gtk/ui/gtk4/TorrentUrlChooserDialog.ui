@@ -2,7 +2,7 @@
 <interface domain="transmission-gtk">
   <requires lib="gtk" version="4.0"/>
   <object class="GtkDialog" id="TorrentUrlChooserDialog">
-    <property name="title" translatable="1">Open URL</property>
+    <property name="title" translatable="1">Open Torrent from URL or Magnet Link</property>
     <child internal-child="content_area">
       <object class="GtkBox" id="dialog_layout">
         <property name="orientation">vertical</property>
@@ -17,7 +17,7 @@
               <object class="GtkFrame">
                 <child type="label">
                   <object class="GtkLabel" id="url_section_label">
-                    <property name="label" translatable="1">Open torrent from URL</property>
+                    <property name="label" translatable="1">Open torrent from URL or magnet link</property>
                     <attributes>
                       <attribute name="weight" value="bold"/>
                     </attributes>
@@ -29,7 +29,7 @@
                     <property name="column-spacing">12</property>
                     <child>
                       <object class="GtkLabel" id="url_label">
-                        <property name="label" translatable="1">_URL</property>
+                        <property name="label" translatable="1">_URL or magnet link</property>
                         <property name="use-underline">1</property>
                         <property name="mnemonic-widget">url_entry</property>
                         <layout>

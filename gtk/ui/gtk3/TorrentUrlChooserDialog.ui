@@ -4,7 +4,7 @@
   <object class="GtkDialog" id="TorrentUrlChooserDialog">
     <property name="can-focus">False</property>
     <property name="border-width">6</property>
-    <property name="title" translatable="yes">Open URL</property>
+    <property name="title" translatable="yes">Open Torrent from URL or Magnet Link</property>
     <property name="type-hint">dialog</property>
     <child internal-child="vbox">
       <object class="GtkBox" id="dialog_layout">
@@ -65,7 +65,7 @@
                   <object class="GtkLabel" id="url_section_label">
                     <property name="visible">True</property>
                     <property name="can-focus">False</property>
-                    <property name="label" translatable="yes">Open torrent from URL</property>
+                    <property name="label" translatable="yes">Open torrent from URL or magnet link</property>
                     <attributes>
                       <attribute name="weight" value="bold"/>
                     </attributes>
@@ -81,7 +81,7 @@
                       <object class="GtkLabel" id="url_label">
                         <property name="visible">True</property>
                         <property name="can-focus">False</property>
-                        <property name="label" translatable="yes">_URL</property>
+                        <property name="label" translatable="yes">_URL or magnet link</property>
                         <property name="use-underline">True</property>
                         <property name="mnemonic-widget">url_entry</property>
                       </object>

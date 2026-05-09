@@ -59,7 +59,6 @@
 #if GTKMM_CHECK_VERSION(4, 0, 0)
 #include <gtkmm/droptarget.h>
 #include <gtkmm/eventcontrollerfocus.h>
-#include <gtkmm/shortcutcontroller.h>
 #else
 #include <gdkmm/dragcontext.h>
 #include <gtkmm/selectiondata.h>
@@ -656,18 +655,15 @@ void Application::Impl::on_startup()
     /* create main window now to be a parent to any error dialogs */
     wind_ = MainWindow::create(app_, actions, core_);
     wind_->set_show_menubar(true);
+
+    gtr_application_bind_menu_accels(app_);
+
 #if GTKMM_CHECK_VERSION(4, 0, 0)
     wind_->property_maximized().signal_changed().connect(sigc::mem_fun(*this, &Impl::on_main_window_size_allocated));
     wind_->property_default_width().signal_changed().connect(sigc::mem_fun(*this, &Impl::on_main_window_size_allocated));
     wind_->property_default_height().signal_changed().connect(sigc::mem_fun(*this, &Impl::on_main_window_size_allocated));
 #else
     wind_->signal_size_allocate().connect(sigc::hide<0>(sigc::mem_fun(*this, &Impl::on_main_window_size_allocated)));
-#endif
-
-#if GTKMM_CHECK_VERSION(4, 0, 0)
-    auto const shortcut_controller = Gtk::ShortcutController::create(gtr_shortcuts_get_from_menu(main_menu));
-    shortcut_controller->set_scope(Gtk::ShortcutScope::GLOBAL);
-    wind_->add_controller(shortcut_controller);
 #endif
 
     app_.hold();

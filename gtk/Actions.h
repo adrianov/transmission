@@ -8,12 +8,12 @@
 #include "GtkCompat.h"
 #include "Utils.h"
 
-#include <giomm/listmodel.h>
 #include <giomm/menumodel.h>
 #include <giomm/simpleactiongroup.h>
 #include <glibmm/object.h>
 #include <glibmm/refptr.h>
 #include <glibmm/ustring.h>
+#include <gtkmm/application.h>
 #include <gtkmm/builder.h>
 
 inline auto const GTR_KEY_copy_magnet_link_to_clipboard = Glib::ustring{ "copy_magnet_link_to_clipboard" };
@@ -61,9 +61,7 @@ void gtr_action_set_sensitive(Glib::ustring const& action_name, bool is_sensitiv
 void gtr_action_set_toggled(Glib::ustring const& action_name, bool is_toggled);
 Glib::RefPtr<Glib::Object> gtr_action_get_object(Glib::ustring const& name);
 
-#if GTKMM_CHECK_VERSION(4, 0, 0)
-Glib::RefPtr<Gio::ListModel> gtr_shortcuts_get_from_menu(Glib::RefPtr<Gio::MenuModel> const& menu);
-#endif
+void gtr_application_bind_menu_accels(Gtk::Application& app);
 
 template<typename T>
 inline Glib::RefPtr<T> gtr_action_get_object(Glib::ustring const& name)

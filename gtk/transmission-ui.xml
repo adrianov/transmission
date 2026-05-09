@@ -10,20 +10,17 @@
           <attribute name="action">win.open_torrent</attribute>
           <attribute name="icon">document-open</attribute>
           <attribute name="label" translatable="yes">_Open</attribute>
-          <attribute name="accel">&lt;control&gt;O</attribute>
           <attribute name="tooltip" translatable="yes">Open a torrent</attribute>
         </item>
         <item>
           <attribute name="action">win.open_torrent_from_url</attribute>
           <attribute name="icon">document-open</attribute>
           <attribute name="label" translatable="yes">Open _URL…</attribute>
-          <attribute name="accel">&lt;control&gt;U</attribute>
-          <attribute name="tooltip" translatable="yes">Open URL…</attribute>
+          <attribute name="tooltip" translatable="yes">Enter a torrent URL or magnet link</attribute>
         </item>
         <item>
           <attribute name="action">win.new_torrent</attribute>
           <attribute name="icon">document-new</attribute>
-          <attribute name="accel">&lt;control&gt;N</attribute>
           <attribute name="label" translatable="yes">_New…</attribute>
         </item>
       </section>
@@ -45,7 +42,6 @@
         <item>
           <attribute name="action">win.quit</attribute>
           <attribute name="icon">application-exit</attribute>
-          <attribute name="accel">&lt;control&gt;Q</attribute>
           <attribute name="label" translatable="yes">_Quit</attribute>
         </item>
       </section>
@@ -57,12 +53,10 @@
           <attribute name="action">win.select_all</attribute>
           <attribute name="icon">edit-select-all</attribute>
           <attribute name="label" translatable="yes">Select _All</attribute>
-          <attribute name="accel">&lt;control&gt;A</attribute>
         </item>
         <item>
           <attribute name="action">win.deselect_all</attribute>
           <attribute name="label" translatable="yes">Dese_lect All</attribute>
-          <attribute name="accel">&lt;shift&gt;&lt;control&gt;A</attribute>
         </item>
       </section>
       <section>
@@ -80,14 +74,12 @@
           <attribute name="action">win.show_torrent_properties</attribute>
           <attribute name="icon">document-properties</attribute>
           <attribute name="label" translatable="yes">_Properties</attribute>
-          <attribute name="accel">&lt;alt&gt;Return</attribute>
           <attribute name="tooltip" translatable="yes">Torrent properties</attribute>
         </item>
         <item>
           <attribute name="action">win.open_torrent_folder</attribute>
           <attribute name="icon">document-open</attribute>
           <attribute name="label" translatable="yes">Open Fold_er</attribute>
-          <attribute name="accel">&lt;control&gt;E</attribute>
         </item>
       </section>
       <section>
@@ -95,14 +87,12 @@
           <attribute name="action">win.torrent_start</attribute>
           <attribute name="icon">media-playback-start</attribute>
           <attribute name="label" translatable="yes">_Start</attribute>
-          <attribute name="accel">&lt;control&gt;S</attribute>
           <attribute name="tooltop" translatable="yes">Start torrent</attribute>
         </item>
         <item>
           <attribute name="action">win.torrent_start_now</attribute>
           <attribute name="icon">media-playback-start</attribute>
           <attribute name="label" translatable="yes">Start _Now</attribute>
-          <attribute name="accel">&lt;shift&gt;&lt;control&gt;S</attribute>
           <attribute name="tooltop" translatable="yes">Start torrent now</attribute>
         </item>
         <item>
@@ -139,7 +129,6 @@
           <attribute name="action">win.torrent_stop</attribute>
           <attribute name="icon">media-playback-pause</attribute>
           <attribute name="label" translatable="yes">_Pause</attribute>
-          <attribute name="accel">&lt;control&gt;P</attribute>
           <attribute name="tooltip" translatable="yes">Pause torrent</attribute>
         </item>
       </section>
@@ -151,7 +140,6 @@
         <item>
           <attribute name="action">win.torrent_verify</attribute>
           <attribute name="label" translatable="yes">_Verify Local Data</attribute>
-          <attribute name="accel">&lt;control&gt;V</attribute>
         </item>
         <item>
           <attribute name="action">win.copy_magnet_link_to_clipboard</attribute>
@@ -164,13 +152,11 @@
           <attribute name="action">win.remove_torrent</attribute>
           <attribute name="icon">list-remove</attribute>
           <attribute name="label" translatable="yes">Remove torrent</attribute>
-          <attribute name="accel">Delete</attribute>
         </item>
         <item>
           <attribute name="action">win.delete_torrent</attribute>
           <attribute name="icon">edit-delete</attribute>
           <attribute name="label" translatable="yes">_Delete Files and Remove</attribute>
-          <attribute name="accel">&lt;shift&gt;Delete</attribute>
         </item>
       </section>
     </submenu>
@@ -180,7 +166,6 @@
         <item>
           <attribute name="action">win.compact_view</attribute>
           <attribute name="label" translatable="yes">_Compact View</attribute>
-          <attribute name="accel">&lt;alt&gt;C</attribute>
         </item>
         <item>
           <attribute name="action">win.show_pieces_bar</attribute>
@@ -278,7 +263,6 @@
           <attribute name="action">win.help</attribute>
           <attribute name="icon">help-browser</attribute>
           <attribute name="label" translatable="yes">_Contents</attribute>
-          <attribute name="accel">F1</attribute>
         </item>
         <item>
           <attribute name="action">win.show_about_dialog</attribute>
@@ -295,14 +279,12 @@
         <attribute name="action">win.show_torrent_properties</attribute>
         <attribute name="icon">document-properties</attribute>
         <attribute name="label" translatable="yes">_Properties</attribute>
-        <attribute name="accel">&lt;alt&gt;Return</attribute>
         <attribute name="tooltip" translatable="yes">Torrent properties</attribute>
       </item>
       <item>
         <attribute name="action">win.open_torrent_folder</attribute>
         <attribute name="icon">document-open</attribute>
         <attribute name="label" translatable="yes">Open Fold_er</attribute>
-        <attribute name="accel">&lt;control&gt;E</attribute>
       </item>
     </section>
     <section>
@@ -368,14 +350,12 @@
         <attribute name="action">win.torrent_start</attribute>
         <attribute name="icon">media-playback-start</attribute>
         <attribute name="label" translatable="yes">_Start</attribute>
-        <attribute name="accel">&lt;control&gt;S</attribute>
         <attribute name="tooltop" translatable="yes">Start torrent</attribute>
       </item>
       <item>
         <attribute name="action">win.torrent_start_now</attribute>
         <attribute name="icon">media-playback-start</attribute>
         <attribute name="label" translatable="yes">Start _Now</attribute>
-        <attribute name="accel">&lt;shift&gt;&lt;control&gt;S</attribute>
         <attribute name="tooltop" translatable="yes">Start torrent now</attribute>
       </item>
       <item>
@@ -412,7 +392,6 @@
         <attribute name="action">win.torrent_stop</attribute>
         <attribute name="icon">media-playback-pause</attribute>
         <attribute name="label" translatable="yes">_Pause</attribute>
-        <attribute name="accel">&lt;control&gt;P</attribute>
         <attribute name="tooltip" translatable="yes">Pause torrent</attribute>
       </item>
     </section>
@@ -424,7 +403,6 @@
       <item>
         <attribute name="action">win.torrent_verify</attribute>
         <attribute name="label" translatable="yes">_Verify Local Data</attribute>
-        <attribute name="accel">&lt;control&gt;V</attribute>
       </item>
       <item>
         <attribute name="action">win.copy_magnet_link_to_clipboard</attribute>
@@ -437,13 +415,11 @@
         <attribute name="action">win.remove_torrent</attribute>
         <attribute name="icon">list-remove</attribute>
         <attribute name="label" translatable="yes">Remove torrent</attribute>
-        <attribute name="accel">Delete</attribute>
       </item>
       <item>
         <attribute name="action">win.delete_torrent</attribute>
         <attribute name="icon">edit-delete</attribute>
         <attribute name="label" translatable="yes">_Delete Files and Remove</attribute>
-        <attribute name="accel">&lt;shift&gt;Delete</attribute>
       </item>
     </section>
   </menu>
@@ -466,8 +442,7 @@
         <attribute name="action">win.open_torrent_from_url</attribute>
         <attribute name="icon">document-open</attribute>
         <attribute name="label" translatable="yes">Open _URL…</attribute>
-        <attribute name="accel"></attribute>
-        <attribute name="tooltip" translatable="yes">Open URL…</attribute>
+        <attribute name="tooltip" translatable="yes">Enter a torrent URL or magnet link</attribute>
       </item>
     </section>
     <section>
