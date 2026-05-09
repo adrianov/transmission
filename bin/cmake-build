@@ -1,0 +1,83 @@
+#!/usr/bin/env bash
+# Run `cmake --build` with:
+#   - parallel job count <= ncpu/2 and <= (MemAvailable in GiB) / 2
+#   - load-average limit ncpu/2 for Ninja / GNU make (ignored on Visual Studio / Xcode)
+#
+# Usage: cmake-build <build-dir> [cmake --build options...]
+# Example: cmake-build build
+#          cmake-build build -t transmission-gtk
+
+set -euo pipefail
+
+usage()
+{
+    echo "usage: cmake-build <build-dir> [cmake --build options...]" >&2
+    exit 1
+}
+
+[[ $# -ge 1 ]] || usage
+build_dir=$1
+shift
+
+avail_mem_kib()
+{
+    if [[ -r /proc/meminfo ]]; then
+        awk '/^MemAvailable:/ { print $2; exit }' /proc/meminfo
+        return
+    fi
+    case "$(uname -s)" in
+    Darwin*)
+        # Approximate reclaimable memory (KiB); rough stand-in for Linux MemAvailable.
+        local pagesize pages_free pages_inactive pages_spec
+        pagesize=$(vm_stat 2>/dev/null | head -1 | sed -n 's/.*page size of \([0-9][0-9]*\) bytes.*/\1/p')
+        [[ -n $pagesize ]] && [[ $pagesize -ge 4096 ]] || pagesize=$(pagesize 2>/dev/null || echo 4096)
+        pages_free=$(vm_stat 2>/dev/null | awk '/Pages free/ { gsub("\\.", "", $NF); print $NF; exit }')
+        pages_inactive=$(vm_stat 2>/dev/null | awk '/Pages inactive/ { gsub("\\.", "", $NF); print $NF; exit }')
+        pages_spec=$(vm_stat 2>/dev/null | awk '/Pages speculative/ { gsub("\\.", "", $NF); print $NF; exit }')
+        pages_free=${pages_free:-0}
+        pages_inactive=${pages_inactive:-0}
+        pages_spec=${pages_spec:-0}
+        echo $(((pages_free + pages_inactive + pages_spec) * pagesize / 1024))
+        ;;
+    *)
+        echo $((4 * 1024 * 1024))
+        ;;
+    esac
+}
+
+ncpu=$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 0)
+if [[ "$ncpu" -lt 1 ]]; then
+    ncpu=$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 1)
+fi
+
+load_lim=$((ncpu / 2))
+[[ $load_lim -lt 1 ]] && load_lim=1
+
+jobs_cpu=$((ncpu / 2))
+[[ $jobs_cpu -lt 1 ]] && jobs_cpu=1
+
+mem_kib=$(avail_mem_kib)
+[[ $mem_kib =~ ^[0-9]+$ ]] || mem_kib=$((4 * 1024 * 1024))
+mem_gib=$((mem_kib / 1024 / 1024))
+jobs_ram=$((mem_gib / 2))
+[[ $jobs_ram -lt 1 ]] && jobs_ram=1
+
+if [[ $jobs_cpu -le $jobs_ram ]]; then
+    jobs=$jobs_cpu
+else
+    jobs=$jobs_ram
+fi
+
+append_load=true
+if [[ -f $build_dir/CMakeCache.txt ]]; then
+    gen=$(grep -m1 '^CMAKE_GENERATOR:INTERNAL=' "$build_dir/CMakeCache.txt" | cut -d= -f2- || true)
+    case $gen in
+    'Visual Studio '* | Xcode) append_load=false ;;
+    esac
+fi
+
+if $append_load; then
+    exec cmake --build "$build_dir" --parallel "$jobs" "$@" -- -l "$load_lim"
+else
+    exec cmake --build "$build_dir" --parallel "$jobs" "$@"
+fi

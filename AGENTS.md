@@ -4,16 +4,22 @@ This file provides guidance for agentic coding agents working with the Transmiss
 
 ## Build Commands
 
+Parallel builds use **`bin/cmake-build`**, which picks a job count and load limit as follows:
+
+- **Jobs** = `min(floor(ncpu / 2), floor(MemAvailable_GiB / 2))` (at least 1).  
+  Linux uses `MemAvailable` from `/proc/meminfo`. macOS uses a `vm_stat` estimate.
+- **Load limit** (`-l` to Ninja / GNU make) = `max(1, ncpu / 2)` so the backend avoids starting work when load is above about half the CPU count.  
+  Omitted for Visual Studio and Xcode generators (see `CMakeCache.txt`).
+
 **Clean build from scratch:**
 ```bash
 cmake -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo -DENABLE_TESTS=ON
-cmake --build build -j$(nproc)    # Linux
-cmake --build build -j$(sysctl -n hw.ncpu)    # macOS
+./bin/cmake-build build
 ```
 
 **Rebuild after changes:**
 ```bash
-cmake --build build -j$(nproc) 2>&1 | tail -5
+./bin/cmake-build build 2>&1 | tail -5
 ```
 
 **Run all tests:**
@@ -51,10 +57,10 @@ cd build
 
 **Build specific target:**
 ```bash
-cmake --build build -t transmission-mac    # macOS
-cmake --build build -t transmission-daemon
-cmake --build build -t transmission-gtk
-cmake --build build -t transmission-qt
+./bin/cmake-build build -t transmission-mac    # macOS
+./bin/cmake-build build -t transmission-daemon
+./bin/cmake-build build -t transmission-gtk
+./bin/cmake-build build -t transmission-qt
 ```
 
 **macOS convenience script:** `bin/build-mac` configures with Ninja/Release, builds the transmission-mac target, and opens the app (or build folder) in Finder.

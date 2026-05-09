@@ -166,6 +166,8 @@ $ cmake --build .
 $ sudo cmake --install .
 ```
 
+From the repository root you can use **`./bin/cmake-build build`** instead of **`cmake --build`** after configure: job count is at most `ncpu / 2` and at most *MemAvailable* / 2 GiB, and Ninja or GNU make get **`-l ncpu/2`** so new jobs wait until load is below about half the CPU count. Visual Studio / Xcode builds skip the load option.
+
 ### Building Transmission from Git (updating) ###
 ```bash
 $ cd Transmission/build
