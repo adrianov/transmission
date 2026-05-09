@@ -15,6 +15,7 @@
 #include <string_view>
 #include <type_traits>
 #include <utility> // std::move
+#include <vector>
 
 #include <fmt/format.h>
 
@@ -31,19 +32,22 @@
 #include "libtransmission/utils.h"
 #include "libtransmission/variant.h"
 
-#define tr_logAddDebugMagnet(magnet, msg) tr_logAddDebug(msg, (magnet)->log_name())
+#define tr_logStderrMagnet(magnet, msg) tr_logStderr((magnet)->log_name(), (msg))
 
 namespace
 {
-// don't ask for the same metadata piece more than this often
-auto constexpr MinRepeatIntervalSecs = time_t{ 3 };
-
 template<typename T>
 [[nodiscard]] constexpr T n_metadata_pieces(T const& numerator) noexcept
 {
     auto const quot = numerator / MetadataPieceSize;
     auto const rem = numerator % MetadataPieceSize;
     return quot + (rem == 0 ? 0 : 1);
+}
+
+[[nodiscard]] constexpr size_t metadata_piece_byte_length(int64_t const total_bytes, int64_t const piece_index) noexcept
+{
+    auto const pc = n_metadata_pieces(total_bytes);
+    return piece_index + 1 == pc ? static_cast<size_t>(total_bytes - piece_index * MetadataPieceSize) : MetadataPieceSize;
 }
 } // namespace
 
@@ -58,22 +62,116 @@ void tr_metadata_download::create_all_needed(int64_t n_pieces) noexcept
     }
 }
 
+[[nodiscard]] bool tr_metadata_download::piece_is_still_needed(int64_t const piece) const noexcept
+{
+    return std::any_of(
+        std::begin(pieces_needed_),
+        std::end(pieces_needed_),
+        [piece](metadata_node const& n) { return n.piece == piece; });
+}
+
+[[nodiscard]] bool tr_metadata_download::can_retune_to_size(int64_t const new_size) const noexcept
+{
+    if (!is_valid_metadata_size(new_size))
+    {
+        return false;
+    }
+
+    auto const old_size = advertised_info_length();
+    if (new_size == old_size)
+    {
+        return true;
+    }
+
+    auto const old_pc = piece_count_;
+    auto const new_pc = n_metadata_pieces(new_size);
+
+    for (int64_t i = 0; i < old_pc; ++i)
+    {
+        if (piece_is_still_needed(i))
+        {
+            continue;
+        }
+
+        if (i >= new_pc)
+        {
+            return false;
+        }
+
+        if (metadata_piece_byte_length(old_size, i) != metadata_piece_byte_length(new_size, i))
+        {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+void tr_metadata_download::retune_to_size(int64_t const new_size) noexcept
+{
+    TR_ASSERT(can_retune_to_size(new_size));
+
+    if (new_size == advertised_info_length())
+    {
+        return;
+    }
+
+    std::vector<int64_t> completed;
+    auto const old_pc = piece_count_;
+    completed.reserve(static_cast<size_t>(old_pc));
+    for (int64_t i = 0; i < old_pc; ++i)
+    {
+        if (!piece_is_still_needed(i))
+        {
+            completed.push_back(i);
+        }
+    }
+
+    metadata_.resize(static_cast<size_t>(new_size));
+    piece_count_ = n_metadata_pieces(new_size);
+    create_all_needed(piece_count_);
+
+    for (auto const i : completed)
+    {
+        if (i >= piece_count_)
+        {
+            continue;
+        }
+
+        auto& needed = pieces_needed_;
+        if (auto iter = std::find_if(
+                std::begin(needed),
+                std::end(needed),
+                [i](metadata_node const& n) { return n.piece == i; });
+            iter != std::end(needed))
+        {
+            needed.erase(iter);
+        }
+    }
+
+    tr_logStderrMagnet(
+        this,
+        fmt::format(
+            "Magnet metadata: retuned assembly to {} bytes ({} piece(s) still needed)",
+            new_size,
+            static_cast<int64_t>(std::size(pieces_needed_))));
+}
+
 tr_metadata_download::tr_metadata_download(std::string_view log_name, int64_t const size)
     : log_name_{ std::string{ log_name } }
 {
     TR_ASSERT(is_valid_metadata_size(size));
 
     auto const n = n_metadata_pieces(size);
-    tr_logAddDebugMagnet(this, fmt::format("metadata is {} bytes in {} pieces", size, n));
-
     piece_count_ = n;
     metadata_.resize(size);
     create_all_needed(n);
+    tr_logStderrMagnet(this, fmt::format("Magnet metadata: collecting {} bytes ({} piece(s))", size, n));
 }
 
 void tr_torrent::maybe_start_metadata_transfer(int64_t const size) noexcept
 {
-    if (has_metainfo() || metadata_download_)
+    if (has_metainfo())
     {
         return;
     }
@@ -81,7 +179,51 @@ void tr_torrent::maybe_start_metadata_transfer(int64_t const size) noexcept
     if (!tr_metadata_download::is_valid_metadata_size(size))
     {
         TR_ASSERT(false);
+        tr_logStderrTor(this, fmt::format("Magnet metadata: ignored invalid metadata_size {:d}", size));
         return;
+    }
+
+    if (metadata_download_ != nullptr)
+    {
+        if (metadata_download_->advertised_info_length() == size)
+        {
+            return;
+        }
+
+        // LTEP can report conflicting sizes across peers; replacing the buffer after we
+        // have real ut_metadata pieces discards progress and often breaks the download.
+        if (metadata_download_->has_any_piece())
+        {
+            if (metadata_download_->can_retune_to_size(size))
+            {
+                tr_logStderrTor(
+                    this,
+                    fmt::format(
+                        "Magnet metadata: peer reports metadata_size {:d} (was {:d}); retuning compatible assembly",
+                        size,
+                        metadata_download_->advertised_info_length()));
+                metadata_download_->retune_to_size(size);
+            }
+            else
+            {
+                tr_logStderrTor(
+                    this,
+                    fmt::format(
+                        "Magnet metadata: ignoring metadata_size {:d} (have partial data for {:d} bytes; incompatible)",
+                        size,
+                        metadata_download_->advertised_info_length()));
+            }
+            return;
+        }
+
+        tr_logStderrTor(
+            this,
+            fmt::format(
+                "Magnet metadata: metadata_size {:d} replaces {:d}; restarting assembly (no pieces stored yet)",
+                size,
+                metadata_download_->advertised_info_length()));
+
+        metadata_download_.reset();
     }
 
     metadata_download_ = std::make_unique<tr_metadata_download>(name(), size);
@@ -191,6 +333,7 @@ tr_variant build_metainfo_except_info_dict(tr_torrent_metainfo const& tm)
         {
             webseed_vec.emplace_back(tm.webseed(i));
         }
+        top.try_emplace(TR_KEY_url_list, std::move(webseed_vec));
     }
 
     return tr_variant{ std::move(top) };
@@ -205,35 +348,71 @@ tr_variant build_metainfo_except_info_dict(tr_torrent_metainfo const& tm)
     auto const& m = metadata_download_;
     TR_ASSERT(m);
 
+    auto const raw_info = std::string_view{ std::data(m->get_metadata()), std::size(m->get_metadata()) };
+
     // test the info_dict checksum
-    if (tr_sha1::digest(m->get_metadata()) != info_hash())
+    auto const assembled_digest = tr_sha1::digest(raw_info);
+    if (assembled_digest != info_hash())
     {
+        tr_logStderrTor(
+            this,
+            fmt::format(
+                "Magnet metadata: SHA1 of assembled info dict ({:s}) does not match magnet info-hash ({:s}); "
+                "assembled size {:d} bytes — discarding (likely wrong metadata_size or corrupt pieces)",
+                tr_sha1_to_string(assembled_digest).sv(),
+                tr_sha1_to_string(info_hash()).sv(),
+                static_cast<int64_t>(std::size(raw_info))));
         return false;
     }
 
-    // checksum passed; now try to parse it as benc
-    auto serde = tr_variant_serde::benc().inplace();
-    auto info_dict_v = serde.parse(m->get_metadata());
-    if (!info_dict_v)
+    // Embed raw peer bytes for `info` (do not re-bencode through tr_variant); round-trip can change
+    // encoding and break metainfo parse even when the SHA1 still matches the assembled buffer.
+    auto serde = tr_variant_serde::benc();
+    auto top_var = build_metainfo_except_info_dict(metainfo());
+    auto outer = serde.to_string(top_var);
+    if (std::empty(outer) || outer.front() != 'd' || outer.back() != 'e')
     {
+        tr_logStderrTor(
+            this,
+            fmt::format(
+                "Magnet metadata: outer fields serialization invalid (len={}, first='{:c}' last='{:c}')",
+                std::size(outer),
+                std::empty(outer) ? '?' : outer.front(),
+                std::empty(outer) ? '?' : outer.back()));
         if (error != nullptr)
         {
-            *error = std::move(serde.error_);
-            serde.error_ = {};
+            error->set(EINVAL, "magnet outer metainfo bencode serialization failed");
         }
-
         return false;
     }
 
-    // yay we have an info dict. Let's make a torrent file
-    auto top_var = build_metainfo_except_info_dict(metainfo());
-    tr_variantMergeDicts(tr_variantDictAddDict(&top_var, TR_KEY_info, 0), &*info_dict_v);
-    auto const benc = serde.to_string(top_var);
+    outer.resize(std::size(outer) - 1U); // drop root's closing 'e'; append info + close root
+    outer.append("4:info");
+    outer.append(raw_info);
+    outer.push_back('e');
+
+    auto const& benc = outer;
 
     // does this synthetic torrent file parse?
     auto metainfo = tr_torrent_metainfo{};
-    if (!metainfo.parse_benc(benc))
+    auto parse_err = tr_error{};
+    if (!metainfo.parse_benc(benc, &parse_err))
     {
+        tr_logStderrTor(
+            this,
+            fmt::format(
+                "Magnet metadata: assembled .torrent failed parse_benc (info {:d} bytes, file {:d} bytes benc): {}",
+                static_cast<int64_t>(std::size(raw_info)),
+                static_cast<int64_t>(std::size(benc)),
+                parse_err ? parse_err.message() : "unknown error"));
+        if (error != nullptr)
+        {
+            *error = std::move(parse_err);
+            if (!*error)
+            {
+                error->set(EINVAL, "merged metainfo parse_benc failed");
+            }
+        }
         return false;
     }
 
@@ -249,6 +428,12 @@ tr_variant build_metainfo_except_info_dict(tr_torrent_metainfo const& tm)
     // tor should keep this metainfo
     set_metainfo(metainfo);
 
+    tr_logStderrTor(
+        this,
+        fmt::format(
+            "Magnet metadata: complete — info dict {:d} bytes, writing {}",
+            metainfo.info_dict_size(),
+            torrent_file()));
     return true;
 }
 
@@ -257,13 +442,14 @@ void tr_torrent::on_have_all_metainfo()
     auto& m = metadata_download_;
     if (!m)
     {
+        tr_logStderrTor(this, fmt::format("Magnet metadata: on_have_all_metainfo called but no download state (ignored)"));
         return;
     }
 
     if (auto error = tr_error{}; !use_new_metainfo(&error)) /* drat. */
     {
         auto msg = std::string_view{ error && !std::empty(error.message()) ? error.message() : "unknown error" };
-        tr_logAddWarnTor(
+        tr_logStderrTor(
             this,
             fmt::format("Couldn't parse magnet metainfo: '{error}'. Redownloading metadata", fmt::arg("error", msg)));
     }
@@ -278,12 +464,26 @@ bool tr_metadata_download::set_metadata_piece(int64_t const piece, void const* c
     // sanity test: is `piece` in range?
     if (piece < 0 || piece >= piece_count_)
     {
+        tr_logStderrMagnet(
+            this,
+            fmt::format(
+                "Rejected metadata piece {:d}: out of range (piece_count={:d})",
+                piece,
+                piece_count_));
         return false;
     }
 
     // sanity test: is `len` the right size?
-    if (get_piece_length(piece) != len)
+    if (auto const expected = get_piece_length(piece); expected != len)
     {
+        tr_logStderrMagnet(
+            this,
+            fmt::format(
+                "Rejected metadata piece {:d}: length {:d} != expected {:d} (advertised total {:d} bytes)",
+                piece,
+                static_cast<int64_t>(len),
+                static_cast<int64_t>(expected),
+                advertised_info_length()));
         return false;
     }
 
@@ -295,6 +495,7 @@ bool tr_metadata_download::set_metadata_piece(int64_t const piece, void const* c
         [piece](auto const& item) { return item.piece == piece; });
     if (iter == std::end(needed))
     {
+        tr_logStderrMagnet(this, fmt::format("Rejected metadata piece {:d}: already have it (duplicate)", piece));
         return false;
     }
 
@@ -302,7 +503,6 @@ bool tr_metadata_download::set_metadata_piece(int64_t const piece, void const* c
     std::copy_n(reinterpret_cast<char const*>(data), len, std::begin(metadata_) + offset);
 
     needed.erase(iter);
-    tr_logAddDebugMagnet(this, fmt::format("saving metainfo piece {}... {} remain", piece, std::size(needed)));
 
     return std::empty(needed);
 }
@@ -311,12 +511,17 @@ void tr_torrent::set_metadata_piece(int64_t const piece, void const* const data,
 {
     TR_ASSERT(data != nullptr);
 
-    tr_logAddDebugTor(this, fmt::format("got metadata piece {} of {} bytes", piece, len));
+    if (metadata_download_ == nullptr)
+    {
+        tr_logStderrTor(
+            this,
+            fmt::format(
+                "Magnet metadata: received piece but metadata download not started (no metadata_size from peers yet?)"));
+        return;
+    }
 
     if (auto& m = metadata_download_; m && m->set_metadata_piece(piece, data, len))
     {
-        tr_logAddDebugTor(this, fmt::format("we now have all the metainfo!"));
-
         // Why queue this invocation in session thread:
         // https://github.com/transmission/transmission/pull/6383#discussion_r1429202253
         session->queue_session_thread(
@@ -335,17 +540,24 @@ void tr_torrent::set_metadata_piece(int64_t const piece, void const* const data,
 [[nodiscard]] std::optional<int64_t> tr_metadata_download::get_next_metadata_request(time_t const now) noexcept
 {
     auto& needed = pieces_needed_;
-    if (std::empty(needed) || needed.front().requested_at + MinRepeatIntervalSecs >= now)
+    if (std::empty(needed))
     {
         return {};
     }
 
-    auto req = needed.front();
-    needed.pop_front();
-    req.requested_at = now;
-    needed.push_back(req);
-    tr_logAddDebugMagnet(this, fmt::format("next piece to request: {}", req.piece));
-    return req.piece;
+    // Prefer the missing piece least recently requested so we round-robin when several
+    // are outstanding. Throttling is per peer in peer-msgs so multiple peers can ask for
+    // the same piece (a single peer may never answer; others might).
+    auto const iter = std::min_element(
+        std::begin(needed),
+        std::end(needed),
+        [](metadata_node const& a, metadata_node const& b) noexcept
+        {
+            return a.requested_at < b.requested_at ||
+                (a.requested_at == b.requested_at && a.piece < b.piece);
+        });
+    iter->requested_at = now;
+    return iter->piece;
 }
 
 [[nodiscard]] std::optional<int64_t> tr_torrent::get_next_metadata_request(time_t const now) noexcept

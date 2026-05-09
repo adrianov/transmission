@@ -414,6 +414,10 @@ bool parse(
 
     if (err != 0)
     {
+        if (err == ECANCELED && !error->has_value())
+        {
+            error->set(ECANCELED, "bencode parse aborted (handler returned false)");
+        }
         errno = err;
         return false;
     }

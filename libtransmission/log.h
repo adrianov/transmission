@@ -109,6 +109,10 @@ void tr_logAddMessage(
 #define tr_logAddDebug(...) tr_logAddLevel(TR_LOG_DEBUG, __VA_ARGS__)
 #define tr_logAddTrace(...) tr_logAddLevel(TR_LOG_TRACE, __VA_ARGS__)
 
+// --- Always prints to stderr (for debugging). Ignores message_level and GUI log queue.
+
+void tr_logStderr(std::string_view module_name, std::string&& message);
+
 // ---
 
 std::string_view tr_logGetTimeStr(std::chrono::system_clock::time_point now, char* buf, size_t buflen);

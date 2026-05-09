@@ -6,7 +6,8 @@
 #include <array>
 #include <cerrno>
 #include <chrono>
-#include <cstddef> // size_t
+#include <cstddef>
+#include <cstdio> // size_t
 #include <iterator> // back_insert_iterator, empty
 #include <mutex>
 #include <optional>
@@ -292,6 +293,44 @@ void tr_logAddMessage(char const* file, long line, tr_log_level level, std::stri
         char const* final_msg = _("Too many messages like this! I won't log this message anymore this session.");
         logAddImpl(filename, line, level, final_msg, name);
     }
+
+    errno = err;
+}
+
+void tr_logStderr(std::string_view const module_name, std::string&& message)
+{
+    if (std::empty(message))
+    {
+        return;
+    }
+
+    int const err = errno;
+
+#if defined(__ANDROID__)
+    if (std::empty(module_name))
+    {
+        __android_log_write(ANDROID_LOG_INFO, "transmission", message.c_str());
+    }
+    else
+    {
+        auto const line = fmt::format("{:s}: {:s}", module_name, message);
+        __android_log_write(ANDROID_LOG_INFO, "transmission", line.c_str());
+    }
+#else
+    auto buf = std::array<char, 64U>{};
+    auto const timestr = tr_logGetTimeStr(std::data(buf), std::size(buf));
+
+    if (std::empty(module_name))
+    {
+        fmt::print(stderr, "[{:s}] {:s}\n", timestr, message);
+    }
+    else
+    {
+        fmt::print(stderr, "[{:s}] {:s}: {:s}\n", timestr, module_name, message);
+    }
+
+    std::fflush(stderr);
+#endif
 
     errno = err;
 }

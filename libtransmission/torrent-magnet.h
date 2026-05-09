@@ -25,6 +25,9 @@
 // defined by BEP #9
 inline constexpr auto MetadataPieceSize = 1024 * 16;
 
+/// Minimum seconds between ut_metadata requests from a single peer connection (limits churn).
+inline constexpr auto MetadataRequestMinIntervalSecs = time_t{ 3 };
+
 using tr_metadata_piece = small::max_size_vector<std::byte, MetadataPieceSize>;
 
 class tr_metadata_download
@@ -48,6 +51,24 @@ public:
         return metadata_;
     }
 
+    /// Byte length advertised for the info dictionary (matches BEP 9 metadata_size).
+    [[nodiscard]] int64_t advertised_info_length() const noexcept
+    {
+        return static_cast<int64_t>(std::size(metadata_));
+    }
+
+    /// True once at least one metadata piece has been stored (BEP 9 ut_metadata).
+    [[nodiscard]] bool has_any_piece() const noexcept
+    {
+        return piece_count_ > 0 && static_cast<int64_t>(std::size(pieces_needed_)) < piece_count_;
+    }
+
+    /// Whether \a new_size can replace the current advertised length without invalidating stored pieces.
+    [[nodiscard]] bool can_retune_to_size(int64_t new_size) const noexcept;
+
+    /// Resize the assembly buffer to \a new_size; only call when `can_retune_to_size(new_size)`.
+    void retune_to_size(int64_t new_size) noexcept;
+
     [[nodiscard]] TR_CONSTEXPR20 std::string_view log_name() const noexcept
     {
         return log_name_;
@@ -68,6 +89,8 @@ private:
     }
 
     void create_all_needed(int64_t n_pieces) noexcept;
+
+    [[nodiscard]] bool piece_is_still_needed(int64_t piece) const noexcept;
 
     std::vector<char> metadata_;
     std::deque<metadata_node> pieces_needed_;

@@ -272,9 +272,15 @@ struct tr_incoming
         } \
     } while (0)
 
+#define logmagnetstderr(msgs, text) \
+    tr_logStderr( \
+        (msgs)->tor_.name(), \
+        fmt::format("{:s} [{:s}]: {:s}", (msgs)->display_name(), (msgs)->user_agent().sv(), (text)))
+
 #define logdbg(msgs, text) myLogMacro(msgs, TR_LOG_DEBUG, text)
 #define logtrace(msgs, text) myLogMacro(msgs, TR_LOG_TRACE, text)
 #define logwarn(msgs, text) myLogMacro(msgs, TR_LOG_WARN, text)
+#define loginfo(msgs, text) myLogMacro(msgs, TR_LOG_INFO, text)
 
 using ReadResult = std::pair<ReadState, size_t /*n_piece_data_bytes_read*/>;
 
@@ -730,6 +736,8 @@ private:
     std::queue<int64_t> peer_requested_metadata_pieces_;
 
     time_t client_sent_at_ = 0;
+
+    mutable time_t last_ut_metadata_req_at_ = 0;
 
     time_t choke_changed_at_ = 0;
 
@@ -1299,10 +1307,18 @@ void tr_peerMsgsImpl::parse_ltep_handshake(MessageReader& payload)
         {
             if (!tr_metadata_download::is_valid_metadata_size(*metadata_size))
             {
+                logwarn(
+                    this,
+                    fmt::format(
+                        "LTEP: invalid metadata_size {:d} from peer; disabling ut_metadata for this connection",
+                        *metadata_size));
                 ut_metadata_id_ = 0U;
             }
             else
             {
+                logtrace(
+                    this,
+                    fmt::format("LTEP: peer metadata_size {:d} (ut_metadata id {:d})", *metadata_size, ut_metadata_id_));
                 tor_.maybe_start_metadata_transfer(*metadata_size);
             }
         }
@@ -1389,6 +1405,7 @@ void tr_peerMsgsImpl::parse_ut_metadata(MessageReader& payload_in)
     if (!var)
     {
         auto const base64 = tr_base64_encode(tmp);
+        logmagnetstderr(this, fmt::format("ut_metadata: failed to parse bencode (payload base64 len {:d})", std::size(base64)));
         logdbg(this, fmt::format("failed to parse ut_metadata msg: {}", base64));
         return;
     }
@@ -1397,6 +1414,7 @@ void tr_peerMsgsImpl::parse_ut_metadata(MessageReader& payload_in)
     if (map == nullptr)
     {
         auto const base64 = tr_base64_encode(tmp);
+        logmagnetstderr(this, "ut_metadata: message is not a bencode dict");
         logdbg(this, fmt::format("got ut_metadata msg that is not a dict: {}", base64));
         return;
     }
@@ -1416,7 +1434,17 @@ void tr_peerMsgsImpl::parse_ut_metadata(MessageReader& payload_in)
     case MetadataMsgType::Data:
         if (auto const piece_len = msg_end - serde.end(); piece * MetadataPieceSize + piece_len <= total_size)
         {
-            tor_.set_metadata_piece(piece, serde.end(), piece_len);
+            tor_.set_metadata_piece(piece, serde.end(), static_cast<size_t>(piece_len));
+        }
+        else
+        {
+            logmagnetstderr(
+                this,
+                fmt::format(
+                    "ut_metadata: dropped data piece {:d} — bounds check failed (payload {:d} bytes, total_size {:d})",
+                    piece,
+                    static_cast<int64_t>(msg_end - serde.end()),
+                    total_size));
         }
         break;
 
@@ -1437,7 +1465,10 @@ void tr_peerMsgsImpl::parse_ut_metadata(MessageReader& payload_in)
         break;
 
     case MetadataMsgType::Reject:
+        logmagnetstderr(this, fmt::format("ut_metadata: peer rejected request for piece {:d}", piece));
+        break;
     default:
+        logmagnetstderr(this, fmt::format("ut_metadata: unhandled msg_type {:d}, piece {:d}", msg_type, piece));
         break;
     }
 }
@@ -1909,8 +1940,15 @@ void tr_peerMsgsImpl::maybe_send_metadata_requests(time_t now) const
         return;
     }
 
+    if (last_ut_metadata_req_at_ + MetadataRequestMinIntervalSecs >= now)
+    {
+        return;
+    }
+
     if (auto const piece = tor_.get_next_metadata_request(now); piece)
     {
+        last_ut_metadata_req_at_ = now;
+        logtrace(this, fmt::format("ut_metadata: sending request for piece {:d}", *piece));
         auto tmp = tr_variant::Map{ 2U };
         tmp.try_emplace(TR_KEY_msg_type, MetadataMsgType::Request);
         tmp.try_emplace(TR_KEY_piece, *piece);
