@@ -315,6 +315,19 @@ std::optional<tr_url_parsed_t> tr_urlParse(std::string_view url)
         return parsed;
     }
 
+    // GIO maps "magnet:?…" to "magnet:///?…" (see g_file_get_uri). Treat like "magnet:?…".
+    if (auto constexpr MagnetSlash = "magnet:///"sv; tr_strv_starts_with(url, MagnetSlash))
+    {
+        if (auto const qmark = url.find('?'); qmark != std::string_view::npos)
+        {
+            parsed.scheme = "magnet"sv;
+            parsed.query = url.substr(qmark + 1U);
+            return parsed;
+        }
+
+        return std::nullopt;
+    }
+
     if (!urlCharsAreValid(url))
     {
         return std::nullopt;
