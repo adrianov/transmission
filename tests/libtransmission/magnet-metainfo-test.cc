@@ -92,6 +92,20 @@ TEST_F(MagnetMetainfoTest, magnetParse)
     }
 }
 
+TEST_F(MagnetMetainfoTest, parseMagnetGlibStyleUri)
+{
+    // GTK/GIO uses this URI form from GFile (g_file_get_uri) for pasted magnet:? links.
+    auto constexpr Uri =
+        "magnet:///?xt=urn:btih:d2354010a3ca4ade5b7427bb093a62a3899ff381"
+        "&dn=Display%20Name"
+        "&tr=http%3A%2F%2Ftracker.openbittorrent.com%2Fannounce"sv;
+
+    auto mm = tr_magnet_metainfo{};
+    EXPECT_TRUE(mm.parseMagnet(Uri));
+    EXPECT_EQ("Display Name"sv, mm.name());
+    EXPECT_EQ(1U, std::size(mm.announce_list()));
+}
+
 TEST_F(MagnetMetainfoTest, parseMagnetFuzzRegressions)
 {
     static auto constexpr Tests = std::array<std::string_view, 1>{

@@ -88,6 +88,37 @@ TEST_F(TorrentMetainfoTest, bucket)
     }
 }
 
+// BEP 52-style "file tree" (hybrid metainfo with v1 "pieces" + v2 tree)
+TEST(TorrentMetainfoParseStandaloneTest, parseBencV2FileTreeOneFile)
+{
+    static auto constexpr B64 =
+        "ZDQ6aW5mb2Q0Om5hbWU0OlJPT1QxMjpwaWVjZSBsZW5ndGhpMTYzODRlNjpwaWVjZXMyMDpBQUFBQUFBQUFBQUFBQUFBQUFBQTExOm1ldGEgdmVyc2lvbmkyZTk6ZmlsZSB0cmVlZDQ6ZmlsZWQwOmQ2Omxlbmd0aGkxMDAwZWVlZWVl"sv;
+
+    auto metainfo = tr_torrent_metainfo{};
+    auto const benc = tr_base64_decode(B64);
+    ASSERT_FALSE(std::empty(benc));
+    EXPECT_TRUE(metainfo.parse_benc({ std::data(benc), std::size(benc) }));
+    EXPECT_EQ(1U, metainfo.file_count());
+    EXPECT_EQ("ROOT/file"sv, metainfo.files().path(0));
+    EXPECT_EQ(1000U, metainfo.file_size(0));
+}
+
+// Like parseBencV2FileTreeOneFile, but info dict keys place `file tree` before `name` (some encoders).
+TEST(TorrentMetainfoParseStandaloneTest, parseBencV2FileTreeBeforeNameKey)
+{
+    static auto constexpr B64 =
+        "ZDQ6aW5mb2Q5OmZpbGUgdHJlZWQ0OmZpbGVkMDpkNjpsZW5ndGhpMTAwMGVlZWU0Om5hbWU0OlJPT1QxMjpwaWVjZSBsZW5ndGhpMTYzODRlNjpwaWVjZXMyMDpBQUFBQUFBQUFBQUFBQUFBQUFBQTExOm1ldGEgdmVyc2lvbmkyZWVl"sv;
+
+    auto metainfo = tr_torrent_metainfo{};
+    auto const benc = tr_base64_decode(B64);
+    ASSERT_FALSE(std::empty(benc));
+    auto err = tr_error{};
+    ASSERT_TRUE(metainfo.parse_benc({ std::data(benc), std::size(benc) }, &err)) << err.message();
+    EXPECT_EQ(1U, metainfo.file_count());
+    EXPECT_EQ("ROOT/file"sv, metainfo.files().path(0));
+    EXPECT_EQ(1000U, metainfo.file_size(0));
+}
+
 TEST_F(TorrentMetainfoTest, parseBencFuzzRegressions)
 {
     static auto constexpr Tests = std::array<std::string_view, 1>{

@@ -110,6 +110,24 @@ TEST_F(WebUtilsTest, urlParse)
         "&ws=http%3A%2F%2Ftransmissionbt.com"sv,
         parsed->query);
 
+    url =
+        "magnet:///"
+        "?xt=urn:btih:14ffe5dd23188fd5cb53a1d47f1289db70abf31e"
+        "&dn=ubuntu_12_04_1_desktop_32_bit"
+        "&tr=http%3A%2F%2Ftracker.publicbt.com%2Fannounce"
+        "&tr=udp%3A%2F%2Ftracker.publicbt.com%3A80"
+        "&ws=http%3A%2F%2Ftransmissionbt.com"sv;
+    parsed = tr_urlParse(url);
+    EXPECT_TRUE(parsed);
+    EXPECT_EQ("magnet"sv, parsed->scheme);
+    EXPECT_EQ(
+        "xt=urn:btih:14ffe5dd23188fd5cb53a1d47f1289db70abf31e"
+        "&dn=ubuntu_12_04_1_desktop_32_bit"
+        "&tr=http%3A%2F%2Ftracker.publicbt.com%2Fannounce"
+        "&tr=udp%3A%2F%2Ftracker.publicbt.com%3A80"
+        "&ws=http%3A%2F%2Ftransmissionbt.com"sv,
+        parsed->query);
+
     // test a host whose public suffix contains >1 dot
     url = "https://www.example.co.uk:8080/some/path"sv;
     parsed = tr_urlParse(url);
