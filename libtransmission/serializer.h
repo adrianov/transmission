@@ -9,6 +9,7 @@
 #include <cstddef>
 #include <iterator>
 #include <optional>
+#include <string>
 #include <tuple>
 #include <type_traits>
 #include <typeinfo>
@@ -34,6 +35,12 @@ namespace detail
 template<typename T>
 using remove_cvref_t = std::remove_cv_t<std::remove_reference_t<T>>;
 
+template<typename>
+inline constexpr bool is_std_basic_string_v = false;
+
+template<typename CharT, typename Traits, typename Alloc>
+inline constexpr bool is_std_basic_string_v<std::basic_string<CharT, Traits, Alloc>> = true;
+
 // Type trait: is C a container with push_back (but not a string)?
 template<typename C, typename = void>
 inline constexpr bool is_push_back_range_v = false;
@@ -46,7 +53,7 @@ inline constexpr bool is_push_back_range_v<
         decltype(std::begin(std::declval<C const&>())),
         decltype(std::end(std::declval<C const&>())),
         decltype(std::declval<C&>().push_back(
-            std::declval<typename C::value_type const&>()))>> = !std::is_same_v<C, std::basic_string<typename C::value_type>>;
+            std::declval<typename C::value_type const&>()))>> = !is_std_basic_string_v<C>;
 
 // Type trait: is C a container with insert (like std::set)?
 template<typename C, typename = void>
