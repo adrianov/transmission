@@ -30,4 +30,8 @@ void tr_x509_cert_free(tr_x509_cert_t /*handle*/)
 {
 }
 
+#else
+
+extern "C" __attribute__((used)) char const tr_crypto_fallback_empty_tu = 0;
+
 #endif /* TR_CRYPTO_X509_FALLBACK */

@@ -16,4 +16,8 @@
     abort();
 }
 
+#else
+
+extern "C" __attribute__((used)) char const tr_assert_empty_tu = 0;
+
 #endif
