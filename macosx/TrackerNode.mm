@@ -5,6 +5,8 @@
 #import "TrackerNode.h"
 #import "NSStringAdditions.h"
 
+static NSUInteger const kTrackerTableMaxErrorGraphemes = 256;
+
 @interface TrackerNode ()
 
 @property(nonatomic, readonly) tr_tracker_view fStat;
@@ -91,7 +93,7 @@
     return self.fStat.downloadCount;
 }
 
-- (NSString*)lastAnnounceStatusString
+- (NSString*)lastAnnounceStatusWithErrorDetailLimit:(NSUInteger)errorDetailMaxGraphemes
 {
     NSString* dateString;
     if (self.fStat.hasAnnounced)
@@ -118,6 +120,10 @@
         baseString = NSLocalizedString(@"Announce error", "Tracker last announce");
 
         NSString* errorString = @(self.fStat.lastAnnounceResult);
+        if (errorDetailMaxGraphemes > 0 && ![errorString isEqualToString:@""])
+        {
+            errorString = [errorString tr_stringLimitedToGraphemeClusters:errorDetailMaxGraphemes appendEllipsis:YES];
+        }
         if ([errorString isEqualToString:@""])
         {
             baseString = [baseString stringByAppendingFormat:@": %@", dateString];
@@ -147,6 +153,16 @@
     }
 
     return baseString;
+}
+
+- (NSString*)lastAnnounceStatusString
+{
+    return [self lastAnnounceStatusWithErrorDetailLimit:kTrackerTableMaxErrorGraphemes];
+}
+
+- (NSString*)lastAnnounceStatusTooltipString
+{
+    return [self lastAnnounceStatusWithErrorDetailLimit:0];
 }
 
 - (NSString*)nextAnnounceStatusString
@@ -185,7 +201,7 @@
     }
 }
 
-- (NSString*)lastScrapeStatusString
+- (NSString*)lastScrapeStatusWithErrorDetailLimit:(NSUInteger)errorDetailMaxGraphemes
 {
     NSString* dateString;
     if (self.fStat.hasScraped)
@@ -212,6 +228,10 @@
         baseString = NSLocalizedString(@"Scrape error", "Tracker last scrape");
 
         NSString* errorString = @(self.fStat.lastScrapeResult);
+        if (errorDetailMaxGraphemes > 0 && ![errorString isEqualToString:@""])
+        {
+            errorString = [errorString tr_stringLimitedToGraphemeClusters:errorDetailMaxGraphemes appendEllipsis:YES];
+        }
         if ([errorString isEqualToString:@""])
         {
             baseString = [baseString stringByAppendingFormat:@": %@", dateString];
@@ -227,6 +247,16 @@
     }
 
     return baseString;
+}
+
+- (NSString*)lastScrapeStatusString
+{
+    return [self lastScrapeStatusWithErrorDetailLimit:kTrackerTableMaxErrorGraphemes];
+}
+
+- (NSString*)lastScrapeStatusTooltipString
+{
+    return [self lastScrapeStatusWithErrorDetailLimit:0];
 }
 
 @end

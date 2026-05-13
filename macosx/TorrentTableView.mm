@@ -610,6 +610,16 @@ extern char const kPlayButtonRepresentedKey = '\0';
         if (![torrentCell.fTorrentStatusField.stringValue isEqualToString:statusString])
             torrentCell.fTorrentStatusField.stringValue = statusString;
 
+        if (torrent.anyErrorOrWarning)
+        {
+            NSString* const fullStatus = torrent.statusStringForTooltip;
+            torrentCell.fTorrentStatusField.toolTip = [statusString isEqualToString:fullStatus] ? nil : fullStatus;
+        }
+        else
+        {
+            torrentCell.fTorrentStatusField.toolTip = nil;
+        }
+
         BOOL iconHover = self.fHoverEventDict && [self.fHoverEventDict[@"row"] integerValue] == row &&
                          [self.fHoverEventDict[@"iconHover"] boolValue];
         if (torrentCell.fActionButton.hidden != !iconHover)
@@ -671,6 +681,16 @@ extern char const kPlayButtonRepresentedKey = '\0';
         statusString = torrent.statusString;
     if (![cell.fTorrentStatusField.stringValue isEqualToString:statusString])
         cell.fTorrentStatusField.stringValue = statusString;
+
+    if (torrent.anyErrorOrWarning)
+    {
+        NSString* const fullStatus = torrent.statusStringForTooltip;
+        cell.fTorrentStatusField.toolTip = [statusString isEqualToString:fullStatus] ? nil : fullStatus;
+    }
+    else
+    {
+        cell.fTorrentStatusField.toolTip = nil;
+    }
 
     BOOL iconHover = self.fHoverEventDict && [self.fHoverEventDict[@"row"] integerValue] == row &&
                      [self.fHoverEventDict[@"iconHover"] boolValue];

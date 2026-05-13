@@ -31,7 +31,9 @@
 @property(nonatomic, readonly) NSInteger totalDownloaded;
 
 @property(nonatomic, readonly) NSString* lastAnnounceStatusString;
+@property(nonatomic, readonly) NSString* lastAnnounceStatusTooltipString;
 @property(nonatomic, readonly) NSString* nextAnnounceStatusString;
 @property(nonatomic, readonly) NSString* lastScrapeStatusString;
+@property(nonatomic, readonly) NSString* lastScrapeStatusTooltipString;
 
 @end

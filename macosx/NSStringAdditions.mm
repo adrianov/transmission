@@ -31,6 +31,42 @@
     return [self stringByAppendingString:NSString.ellipsis];
 }
 
+- (NSString*)tr_stringLimitedToGraphemeClusters:(NSUInteger)max appendEllipsis:(BOOL)appendEllipsis
+{
+    if (max == 0 || self.length == 0)
+    {
+        return self;
+    }
+
+    __block NSUInteger n = 0;
+    __block NSUInteger end = 0;
+    [self enumerateSubstringsInRange:NSMakeRange(0, self.length)
+                             options:NSStringEnumerationByComposedCharacterSequences
+                          usingBlock:^(
+                              NSString* substring,
+                              NSRange substringRange,
+                              NSRange enclosingRange,
+                              BOOL* stop) {
+                              (void)substring;
+                              (void)enclosingRange;
+                              if (n >= max)
+                              {
+                                  *stop = YES;
+                                  return;
+                              }
+                              n++;
+                              end = NSMaxRange(substringRange);
+                          }];
+
+    if (end >= self.length)
+    {
+        return self;
+    }
+
+    NSString* out = [self substringToIndex:end];
+    return appendEllipsis ? out.stringByAppendingEllipsis : out;
+}
+
 // Maximum supported localization is 9.22 EB, which is the maximum supported filesystem size by macOS, 8 EiB.
 // https://developer.apple.com/library/archive/documentation/FileManagement/Conceptual/APFS_Guide/VolumeFormatComparison/VolumeFormatComparison.html
 + (NSString*)stringForFileSize:(uint64_t)size

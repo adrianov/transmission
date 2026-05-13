@@ -95,6 +95,9 @@ NS_ASSUME_NONNULL_BEGIN
 /// File URL from path safe for opening/revealing (percent-encodes ';' etc. so system/open apps do not misinterpret).
 - (NSURL*)fileURLForOpening;
 
+/// At most `max` composed character sequences; if `max` is 0, returns self. Optionally appends the standard ellipsis string.
+- (NSString*)tr_stringLimitedToGraphemeClusters:(NSUInteger)max appendEllipsis:(BOOL)appendEllipsis;
+
 @end
 
 __attribute__((annotate("returns_localized_nsstring"))) static inline NSString* LocalizationNotNeeded(NSString* s)

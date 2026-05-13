@@ -221,7 +221,15 @@ typedef NS_ENUM(NSInteger, TrackerSegmentTag) {
     id node = self.fTrackers[row];
     if ([node isKindOfClass:[TrackerNode class]])
     {
-        return ((TrackerNode*)node).fullAnnounceAddress;
+        TrackerNode* const tracker = (TrackerNode*)node;
+        NSMutableString* const tip = [NSMutableString stringWithString:tracker.fullAnnounceAddress];
+        [tip appendString:@"\n\n"];
+        [tip appendString:tracker.lastAnnounceStatusTooltipString];
+        [tip appendString:@"\n"];
+        [tip appendString:tracker.nextAnnounceStatusString];
+        [tip appendString:@"\n"];
+        [tip appendString:tracker.lastScrapeStatusTooltipString];
+        return tip;
     }
     else
     {

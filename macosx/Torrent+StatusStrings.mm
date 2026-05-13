@@ -30,6 +30,8 @@ static NSDateComponentsFormatter* etaFormatter()
     return formatter;
 }
 
+static NSUInteger const kTorrentTableStatusMaxErrorGraphemes = 256;
+
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wobjc-protocol-method-implementation"
 @implementation Torrent (StatusStrings)
@@ -105,7 +107,7 @@ static NSDateComponentsFormatter* etaFormatter()
     return string;
 }
 
-- (NSString*)statusString
+- (NSString*)buildStatusStringWithErrorDetailLimit:(NSUInteger)errorDetailMaxGraphemes
 {
     NSString* failedConversionPath = [DjvuConverter failedConversionPathForTorrent:self];
     if (failedConversionPath)
@@ -186,6 +188,11 @@ static NSDateComponentsFormatter* etaFormatter()
         NSString* errorString = self.errorMessage;
         if (errorString && ![errorString isEqualToString:@""])
         {
+            if (errorDetailMaxGraphemes > 0)
+            {
+                errorString = [errorString tr_stringLimitedToGraphemeClusters:errorDetailMaxGraphemes appendEllipsis:YES];
+            }
+
             string = [string stringByAppendingFormat:@": %@", errorString];
         }
     }
@@ -270,6 +277,16 @@ static NSDateComponentsFormatter* etaFormatter()
     }
 
     return string;
+}
+
+- (NSString*)statusString
+{
+    return [self buildStatusStringWithErrorDetailLimit:kTorrentTableStatusMaxErrorGraphemes];
+}
+
+- (NSString*)statusStringForTooltip
+{
+    return [self buildStatusStringWithErrorDetailLimit:0];
 }
 
 - (NSString*)stoppedStatusString

@@ -290,6 +290,7 @@ extern NSString* _Nonnull const kTorrentDidChangeGroupNotification;
 
 @property(nonatomic, readonly) NSString* _Nonnull progressString;
 @property(nonatomic, readonly) NSString* _Nonnull statusString;
+@property(nonatomic, readonly) NSString* _Nonnull statusStringForTooltip;
 @property(nonatomic, readonly) NSString* _Nonnull shortStatusString;
 @property(nonatomic, readonly) NSString* _Nonnull remainingTimeString;
 @property(nonatomic, readonly) NSUInteger statsGeneration;
