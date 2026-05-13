@@ -107,7 +107,9 @@ static NSString* normalizeTitleForTokenization(NSString* s);
     static NSSet<NSString*>* audioExts;
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
-        audioExts = [NSSet setWithArray:@[ @"mp3", @"flac", @"wav", @"aac", @"ogg", @"wma", @"m4a", @"ape", @"alac", @"aiff", @"opus", @"wv" ]];
+        audioExts = [NSSet
+            setWithArray:
+                @[ @"mp3", @"flac", @"wav", @"aac", @"ogg", @"wma", @"m4a", @"ape", @"alac", @"aiff", @"opus", @"wv" ]];
     });
     NSUInteger audioCount = 0, cueCount = 0;
     NSUInteger const n = self.fileCount;
@@ -147,11 +149,11 @@ static NSString* normalizeTitleForTokenization(NSString* s);
     case TorrentMediaTypeVideo:
         return @"videos";
     case TorrentMediaTypeAudio:
-    {
-        NSUInteger audioCount = 0, cueCount = 0;
-        [self audioAndCueCount:&audioCount cueCount:&cueCount];
-        return (audioCount > cueCount) ? @"audios" : @"albums";
-    }
+        {
+            NSUInteger audioCount = 0, cueCount = 0;
+            [self audioAndCueCount:&audioCount cueCount:&cueCount];
+            return (audioCount > cueCount) ? @"audios" : @"albums";
+        }
     case TorrentMediaTypeBooks:
         return @"books";
     case TorrentMediaTypeSoftware:
@@ -396,9 +398,8 @@ static NSString* normalizeTitleForTokenization(NSString* s);
             }
         }
     }
-    if (prefixDrop > 0 && !commonPrefixContainsSeasonToken(workArrays, prefixDrop) &&
-        !allTitlesHavePartMarkerAt(workArrays, prefixDrop) && !commonPrefixEndsWithArtistSeparator(workArrays, prefixDrop) &&
-        !allRemaindersMultiToken)
+    if (prefixDrop > 0 && !commonPrefixContainsSeasonToken(workArrays, prefixDrop) && !allTitlesHavePartMarkerAt(workArrays, prefixDrop) &&
+        !commonPrefixEndsWithArtistSeparator(workArrays, prefixDrop) && !allRemaindersMultiToken)
         prefixDrop = 0;
     // Do not strip when the remainder would be only an episode-only token (e.g. E126); keep full title.
     if (prefixDrop > 0 && allRemaindersAreSingleEpisodeOnlyToken(workArrays, prefixDrop, suffixDrop) &&
@@ -499,9 +500,9 @@ static BOOL isSeasonToken(NSString* token)
 static BOOL isPartMarkerWord(NSString* lowercaseToken)
 {
     return [lowercaseToken isEqualToString:@"cd"] || [lowercaseToken isEqualToString:@"disc"] ||
-           [lowercaseToken isEqualToString:@"disk"] || [lowercaseToken isEqualToString:@"scene"] ||
-           [lowercaseToken isEqualToString:@"part"] || [lowercaseToken isEqualToString:@"chapter"] ||
-           [lowercaseToken isEqualToString:@"volume"] || [lowercaseToken isEqualToString:@"vol"];
+        [lowercaseToken isEqualToString:@"disk"] || [lowercaseToken isEqualToString:@"scene"] ||
+        [lowercaseToken isEqualToString:@"part"] || [lowercaseToken isEqualToString:@"chapter"] ||
+        [lowercaseToken isEqualToString:@"volume"] || [lowercaseToken isEqualToString:@"vol"];
 }
 
 static BOOL isPartMarkerFromTokenIndex(NSArray<NSString*>* tokens, NSUInteger from)
@@ -950,10 +951,8 @@ static NSString* trimTrailingParenAndSpace(NSString* s)
         if ([ext isEqualToString:@"cue"])
             continue;
 
-        if ([ext isEqualToString:@"vob"] && [fileName.uppercaseString containsString:@"VIDEO_TS/"])
-            continue;
-        if ([ext isEqualToString:@"m2ts"] && [fileName.uppercaseString containsString:@"BDMV/"])
-            continue;
+        // Recognized DVD/Blu-ray torrents return earlier via fFolderItems; skipping VOB/m2ts here only
+        // removed playables when .ifo / index.bdmv was missing from the torrent metadata.
 
         if ([cueCompanionExtensions containsObject:ext])
         {
