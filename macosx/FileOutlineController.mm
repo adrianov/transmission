@@ -34,6 +34,9 @@ typedef NS_ENUM(NSUInteger, FilePriorityMenuTag) { //
 
 @property(nonatomic, readonly) NSMenu* menu;
 
+/// Resolves path, records open count, opens the file URL or reveals in Finder.
+- (void)openAndRecordNode:(FileListNode*)node;
+
 @end
 
 @implementation FileOutlineController
@@ -240,6 +243,18 @@ typedef NS_ENUM(NSUInteger, FilePriorityMenuTag) { //
             cellView.identifier = @"NameCell";
         }
         cellView.node = node;
+        if (node.isFolder)
+        {
+            cellView.playHandler = nil;
+        }
+        else
+        {
+            __weak FileOutlineController* weakSelf = self;
+            __weak FileListNode* weakNode = node;
+            cellView.playHandler = ^{
+                [weakSelf openFileForNode:weakNode];
+            };
+        }
 
         return cellView;
     }
@@ -402,6 +417,29 @@ typedef NS_ENUM(NSUInteger, FilePriorityMenuTag) { //
     }
 }
 
+- (void)openAndRecordNode:(FileListNode*)node
+{
+    if (!node || !self.torrent)
+        return;
+    NSString* path = [self.torrent pathToOpenForFileNode:node];
+    if (!path)
+        return;
+
+    [self.torrent recordOpenForFileNode:node];
+    NSURL* const fileURL = [path fileURLForOpening];
+    if (![NSWorkspace.sharedWorkspace openURL:fileURL])
+    {
+        (void)[NSWorkspace.sharedWorkspace activateFileViewerSelectingURLs:@[ fileURL ]];
+    }
+}
+
+- (void)openFileForNode:(FileListNode*)node
+{
+    if (!node || node.isFolder || !self.torrent)
+        return;
+    [self openAndRecordNode:node];
+}
+
 - (void)openFile:(id)sender
 {
     NSOutlineView* outline = self.fOutline;
@@ -409,17 +447,7 @@ typedef NS_ENUM(NSUInteger, FilePriorityMenuTag) { //
                                                                            outline.selectedRowIndexes;
     for (NSUInteger i = indexes.firstIndex; i != NSNotFound; i = [indexes indexGreaterThanIndex:i])
     {
-        FileListNode* node = [outline itemAtRow:i];
-        NSString* path = [self.torrent pathToOpenForFileNode:node];
-        if (path)
-        {
-            [self.torrent recordOpenForFileNode:node];
-            NSURL* const fileURL = [path fileURLForOpening];
-            if (![NSWorkspace.sharedWorkspace openURL:fileURL])
-            {
-                (void)[NSWorkspace.sharedWorkspace activateFileViewerSelectingURLs:@[ fileURL ]];
-            }
-        }
+        [self openAndRecordNode:[outline itemAtRow:i]];
     }
 }
 

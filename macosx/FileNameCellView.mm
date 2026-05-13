@@ -17,11 +17,35 @@ static CGFloat const kPaddingBetweenImageAndTitle = 4.0;
 static CGFloat const kPaddingAboveTitleFile = 2.0;
 static CGFloat const kPaddingBelowStatusFile = 2.0;
 static CGFloat const kPaddingBetweenNameAndFolderStatus = 4.0;
+static CGFloat const kPlayButtonSize = 22.0;
+static CGFloat const kNameToPlaySpacing = 4.0;
+
+/// Template play triangle for OS versions without SF Symbols (`play.fill`).
+static NSImage* fileNamePlayTemplateImage(CGFloat side)
+{
+    NSSize size = NSMakeSize(side, side);
+    NSImage* image = [NSImage imageWithSize:size flipped:NO drawingHandler:^BOOL(NSRect /*rect*/) {
+        CGFloat const w = size.width;
+        CGFloat const h = size.height;
+        CGFloat const margin = MAX(2.0, floor(w * 0.20));
+        NSBezierPath* path = [NSBezierPath bezierPath];
+        [path moveToPoint:NSMakePoint(margin, margin)];
+        [path lineToPoint:NSMakePoint(w - margin * 1.5, h * 0.5)];
+        [path lineToPoint:NSMakePoint(margin, h - margin)];
+        [path closePath];
+        [[NSColor blackColor] setFill];
+        [path fill];
+        return YES;
+    }];
+    image.template = YES;
+    return image;
+}
 
 @interface FileNameCellView ()
 @property(nonatomic, weak) NSImageView* iconView;
 @property(nonatomic, weak) NSTextField* nameField;
 @property(nonatomic, weak) NSTextField* statusField;
+@property(nonatomic) NSButton* playButton;
 @property(nonatomic, strong) NSArray<NSLayoutConstraint*>* dynamicConstraints;
 @end
 
@@ -64,10 +88,36 @@ static CGFloat const kPaddingBetweenNameAndFolderStatus = 4.0;
         [self addSubview:statusField];
         _statusField = statusField;
 
+        NSButton* playButton = [[NSButton alloc] initWithFrame:NSZeroRect];
+        playButton.translatesAutoresizingMaskIntoConstraints = NO;
+        playButton.bezelStyle = NSBezelStyleRoundRect;
+        playButton.controlSize = NSControlSizeSmall;
+        playButton.imagePosition = NSImageOnly;
+        playButton.target = self;
+        playButton.action = @selector(playPressed:);
+        NSImage* playGlyph = nil;
+        if (@available(macOS 11.0, *))
+        {
+            NSImage* playImg = [NSImage imageWithSystemSymbolName:@"play.fill"
+                                         accessibilityDescription:NSLocalizedString(@"Play", "Inspector Files -> play file")];
+            NSImageSymbolConfiguration* symCfg = [NSImageSymbolConfiguration configurationWithPointSize:11 weight:NSFontWeightMedium];
+            playGlyph = [playImg imageWithSymbolConfiguration:symCfg];
+        }
+        playButton.image = playGlyph ?: fileNamePlayTemplateImage(12.0);
+        playButton.hidden = YES;
+        [self addSubview:playButton];
+        _playButton = playButton;
+
         // Setup constraints
         [self setupConstraints];
     }
     return self;
+}
+
+- (void)playPressed:(id __unused)sender
+{
+    if (self.playHandler != nil)
+        self.playHandler();
 }
 
 - (void)setupConstraints
@@ -141,6 +191,7 @@ static CGFloat const kPaddingBetweenNameAndFolderStatus = 4.0;
     {
         // For folders, status appears next to name, both centered
         self.statusField.hidden = NO;
+        self.playButton.hidden = YES;
         self.dynamicConstraints = @[
             [nameField.centerYAnchor constraintEqualToAnchor:self.centerYAnchor],
             [nameField.trailingAnchor constraintLessThanOrEqualToAnchor:statusField.leadingAnchor
@@ -153,16 +204,38 @@ static CGFloat const kPaddingBetweenNameAndFolderStatus = 4.0;
     }
     else
     {
-        // For files, status appears below name
+        // For files, status appears below name; optional trailing Play (same as double-click).
         self.statusField.hidden = NO;
-        self.dynamicConstraints = @[
-            [nameField.topAnchor constraintEqualToAnchor:self.topAnchor constant:kPaddingAboveTitleFile],
-            [nameField.trailingAnchor constraintLessThanOrEqualToAnchor:self.trailingAnchor],
+        NSString* openPath = [torrent pathToOpenForFileNode:node];
+        BOOL const showPlay = openPath.length > 0 && [torrent mediaCategoryForFile:node.indexes.firstIndex] != nil;
+        self.playButton.hidden = !showPlay;
+        if (showPlay)
+        {
+            self.dynamicConstraints = @[
+                [nameField.topAnchor constraintEqualToAnchor:self.topAnchor constant:kPaddingAboveTitleFile],
+                [nameField.trailingAnchor constraintLessThanOrEqualToAnchor:self.playButton.leadingAnchor constant:-kNameToPlaySpacing],
 
-            [statusField.leadingAnchor constraintEqualToAnchor:nameField.leadingAnchor],
-            [statusField.trailingAnchor constraintEqualToAnchor:self.trailingAnchor],
-            [statusField.bottomAnchor constraintEqualToAnchor:self.bottomAnchor constant:-kPaddingBelowStatusFile],
-        ];
+                [statusField.leadingAnchor constraintEqualToAnchor:nameField.leadingAnchor],
+                [statusField.trailingAnchor constraintEqualToAnchor:self.trailingAnchor],
+                [statusField.bottomAnchor constraintEqualToAnchor:self.bottomAnchor constant:-kPaddingBelowStatusFile],
+
+                [self.playButton.trailingAnchor constraintEqualToAnchor:self.trailingAnchor constant:-kPaddingHorizontal],
+                [self.playButton.centerYAnchor constraintEqualToAnchor:self.centerYAnchor],
+                [self.playButton.widthAnchor constraintEqualToConstant:kPlayButtonSize],
+                [self.playButton.heightAnchor constraintEqualToConstant:kPlayButtonSize],
+            ];
+        }
+        else
+        {
+            self.dynamicConstraints = @[
+                [nameField.topAnchor constraintEqualToAnchor:self.topAnchor constant:kPaddingAboveTitleFile],
+                [nameField.trailingAnchor constraintLessThanOrEqualToAnchor:self.trailingAnchor],
+
+                [statusField.leadingAnchor constraintEqualToAnchor:nameField.leadingAnchor],
+                [statusField.trailingAnchor constraintEqualToAnchor:self.trailingAnchor],
+                [statusField.bottomAnchor constraintEqualToAnchor:self.bottomAnchor constant:-kPaddingBelowStatusFile],
+            ];
+        }
     }
 
     [NSLayoutConstraint activateConstraints:self.dynamicConstraints];

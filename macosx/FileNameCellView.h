@@ -9,5 +9,7 @@
 @interface FileNameCellView : NSTableCellView
 
 @property(nonatomic, weak) FileListNode* node;
+/// Opens the row’s file like double-click (Inspector). Set from `FileOutlineController` when the file is playable media.
+@property(nonatomic, copy) void (^playHandler)(void);
 
 @end
