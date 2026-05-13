@@ -5,6 +5,7 @@
 
 #include <array>
 #include <cstddef> // size_t
+#include <string>
 #include <string_view>
 #include <utility>
 #include <vector>
@@ -284,4 +285,43 @@ TEST_F(WebUtilsTest, urlPercentDecode)
     {
         EXPECT_EQ(decoded, tr_urlPercentDecode(encoded));
     }
+}
+
+TEST_F(WebUtilsTest, webGetResponseStrCloudflare)
+{
+    EXPECT_STREQ("Web Server Returned an Unknown Error", tr_webGetResponseStr(520));
+    EXPECT_STREQ("Too Many Requests", tr_webGetResponseStr(429));
+}
+
+TEST_F(WebUtilsTest, formatTrackerHttpError)
+{
+    auto const ok = tr_webFormatTrackerHttpError(520, ""sv);
+    EXPECT_NE(std::string::npos, ok.find("520"));
+    EXPECT_NE(std::string::npos, ok.find("Web Server"));
+
+    auto const html = "<html><title>Custom proxy failure</title></html>"sv;
+    auto const unknown = tr_webFormatTrackerHttpError(999, html);
+    EXPECT_NE(std::string::npos, unknown.find("999"));
+    EXPECT_NE(std::string::npos, unknown.find("Custom proxy failure"));
+
+    auto const with_detail = tr_webFormatTrackerHttpError(
+        520,
+        "<html><head><title>bt3.example | 520</title></head>"
+        "<p>Ray ID: 7abcd1234</p></html>"sv);
+    EXPECT_NE(std::string::npos, with_detail.find("520"));
+    EXPECT_NE(std::string::npos, with_detail.find("bt3.example"));
+    EXPECT_NE(std::string::npos, with_detail.find("Ray ID"));
+
+    auto const stripped = tr_webFormatTrackerHttpError(
+        500,
+        "<html><body><script>NEVER</script><p>Keep this <!--c--></p></body></html>"sv);
+    EXPECT_EQ(std::string::npos, stripped.find("<p>"));
+    EXPECT_EQ(std::string::npos, stripped.find("NEVER"));
+    EXPECT_NE(std::string::npos, stripped.find("Keep this"));
+
+    std::string const big(20000U, 'a');
+    auto const long_html = "<html><body><div>" + big + "</div></body></html>";
+    auto const clipped = tr_webFormatTrackerHttpError(502, long_html);
+    EXPECT_LT(std::size(clipped), big.size());
+    EXPECT_NE(std::string::npos, clipped.find("..."));
 }
