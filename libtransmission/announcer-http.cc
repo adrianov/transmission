@@ -115,8 +115,7 @@ bool handleAnnounceResponse(tr_web::FetchResponse const& web_response, tr_announ
 
     if (status != HTTP_OK)
     {
-        auto const* const response_str = tr_webGetResponseStr(status);
-        response.errmsg = fmt::format("Tracker HTTP response {:d} ({:s})", status, response_str);
+        response.errmsg = tr_webFormatTrackerHttpError(status, body);
 
         return false;
     }
@@ -199,6 +198,7 @@ void announce_url_new(tr_urlbuf& url, tr_session const* session, tr_announce_req
         "&numwant={numwant}"
         "&key={key:08X}"
         "&compact=1"
+        "&no_peer_id=1"
         "&supportcrypto=1",
         fmt::arg("url", req.announce_url),
         fmt::arg("sep", tr_strv_contains(req.announce_url.sv(), '?') ? '&' : '?'),
@@ -510,8 +510,7 @@ void onScrapeDone(tr_web::FetchResponse const& web_response)
 
     if (status != HTTP_OK)
     {
-        auto const* const response_str = tr_webGetResponseStr(status);
-        response.errmsg = fmt::format("Tracker HTTP response {:d} ({:s})", status, response_str);
+        response.errmsg = tr_webFormatTrackerHttpError(status, body);
     }
     else if (!std::empty(body))
     {

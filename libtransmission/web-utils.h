@@ -91,4 +91,7 @@ constexpr void tr_urlPercentEncode(BackInsertIter out, tr_sha1_digest_t const& d
 
 [[nodiscard]] char const* tr_webGetResponseStr(long response_code);
 
+/** @brief User-visible tracker HTTP error: status text plus HTML-stripped body (up to 256 KiB scanned, 16 KiB text kept). */
+[[nodiscard]] std::string tr_webFormatTrackerHttpError(long response_code, std::string_view response_body);
+
 [[nodiscard]] std::string tr_urlPercentDecode(std::string_view /*url*/);
