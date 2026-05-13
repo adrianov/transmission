@@ -37,7 +37,7 @@ static NSImage* fileNamePlayTemplateImage(CGFloat side)
         [path fill];
         return YES;
     }];
-    image.template = YES;
+    [image setTemplate:YES];
     return image;
 }
 
