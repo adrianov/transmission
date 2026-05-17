@@ -68,6 +68,8 @@ else
     jobs=$jobs_ram
 fi
 
+[[ $jobs -gt 4 ]] && jobs=4
+
 append_load=true
 if [[ -f $build_dir/CMakeCache.txt ]]; then
     gen=$(grep -m1 '^CMAKE_GENERATOR:INTERNAL=' "$build_dir/CMakeCache.txt" | cut -d= -f2- || true)
