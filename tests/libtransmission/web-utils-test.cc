@@ -325,3 +325,65 @@ TEST_F(WebUtilsTest, formatTrackerHttpError)
     EXPECT_LT(std::size(clipped), big.size());
     EXPECT_NE(std::string::npos, clipped.find("..."));
 }
+
+TEST_F(WebUtilsTest, formatTrackerHttpErrorHtmlEntities)
+{
+    auto const with_entities = tr_webFormatTrackerHttpError(
+        521,
+        "<html><body>"
+        "<p>Ray ID: abc123 &bull; Your IP: 1.2.3.4 &bull; Performance &amp; security by Cloudflare</p>"
+        "</body></html>"sv);
+    EXPECT_NE(std::string::npos, with_entities.find("abc123"));
+    EXPECT_NE(std::string::npos, with_entities.find("\xE2\x80\xA2")); // bullet character
+    EXPECT_NE(std::string::npos, with_entities.find("Performance & security"));
+    EXPECT_EQ(std::string::npos, with_entities.find("&amp;"));
+    EXPECT_EQ(std::string::npos, with_entities.find("&bull;"));
+
+    auto const with_lt_gt = tr_webFormatTrackerHttpError(
+        500,
+        "<html><body><p>Use &lt;tag&gt; for markup</p></body></html>"sv);
+    EXPECT_NE(std::string::npos, with_lt_gt.find("<tag>"));
+    EXPECT_EQ(std::string::npos, with_lt_gt.find("&lt;"));
+
+    auto const with_numeric = tr_webFormatTrackerHttpError(
+        500,
+        "<html><body><p>&#65;&#66;&#67;</p></body></html>"sv);
+    EXPECT_NE(std::string::npos, with_numeric.find("ABC"));
+
+    auto const with_hex = tr_webFormatTrackerHttpError(
+        500,
+        "<html><body><p>&#x41;&#x42;&#x43;</p></body></html>"sv);
+    EXPECT_NE(std::string::npos, with_hex.find("ABC"));
+
+    auto const with_nbsp = tr_webFormatTrackerHttpError(
+        500,
+        "<html><body><p>hello&nbsp;world</p></body></html>"sv);
+    EXPECT_NE(std::string::npos, with_nbsp.find("hello"));
+    EXPECT_NE(std::string::npos, with_nbsp.find("world"));
+}
+
+TEST_F(WebUtilsTest, formatTrackerHttpErrorShortExcerpt)
+{
+    auto const cloudflare = tr_webFormatTrackerHttpError(
+        521,
+        "<html><head><title>t-ru.org | 521: Web server is down</title></head>"
+        "<body>"
+        "<h1>Web server is down</h1>"
+        "<p>Error code 521</p>"
+        "<p>What happened? The web server is not returning a connection.</p>"
+        "<p>If you are a visitor of this website: Please try again in a few minutes.</p>"
+        "<p>If you are the owner of this website: Contact your hosting provider.</p>"
+        "<p>Cloudflare Ray ID: 9fd41627f8c30050 &bull; Your IP: 192.0.2.1"
+        " &bull; Performance &amp; security by Cloudflare</p>"
+        "</body></html>"sv);
+    EXPECT_NE(std::string::npos, cloudflare.find("521"));
+    EXPECT_NE(std::string::npos, cloudflare.find("Web server"));
+    EXPECT_NE(std::string::npos, cloudflare.find("Error code"));
+    EXPECT_LT(std::size(cloudflare), 512U);
+
+    auto const short_with_entities = tr_webFormatTrackerHttpError(
+        520,
+        "<html><body><p>&bull; Item 1 &bull; Item 2 &amp; more</p></body></html>"sv);
+    EXPECT_NE(std::string::npos, short_with_entities.find("\xE2\x80\xA2")); // decoded &bull;
+    EXPECT_NE(std::string::npos, short_with_entities.find("& more")); // decoded &amp;
+}

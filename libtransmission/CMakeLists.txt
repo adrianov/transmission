@@ -197,6 +197,7 @@ target_sources(${TR_NAME}
         watchdir-win32.cc
         watchdir.cc
         watchdir.h
+        web-utils-html.cc
         web-utils.cc
         web-utils.h
         web.cc
