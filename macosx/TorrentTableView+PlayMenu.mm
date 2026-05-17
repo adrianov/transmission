@@ -6,6 +6,7 @@
 
 #import "CocoaCompatibility.h"
 #import "NSStringAdditions.h"
+#import "PlayButtonStateBuilder.h"
 #import "Torrent.h"
 #import "TorrentPrivate.h"
 #import "TorrentTableView.h"
@@ -159,8 +160,8 @@
     NSMenu* menu = [[NSMenu alloc] initWithTitle:mainTitle];
     menu.delegate = self;
 
-    NSArray<NSDictionary*>* state = [self playButtonStateForTorrent:torrent];
-    NSArray<NSDictionary*>* layout = [self playButtonLayoutForTorrent:torrent state:state];
+    NSArray<NSDictionary*>* state = [PlayButtonStateBuilder stateForTorrent:torrent];
+    NSArray<NSDictionary*>* layout = [PlayButtonStateBuilder layoutForTorrent:torrent state:state];
     NSMenuItem* pendingHeaderItem = nil;
     NSMenu* currentMenu = menu;
     for (NSDictionary* entry in layout)

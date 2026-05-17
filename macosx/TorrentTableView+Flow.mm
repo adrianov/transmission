@@ -54,20 +54,7 @@ static NSString* flowViewTorrentHash(FlowLayoutView* flowView)
     return NO;
 }
 
-- (NSDictionary*)buildFlowSnapshotForTorrent:(Torrent*)torrent
-{
-    return [PlayButtonStateBuilder buildSnapshotForTorrent:torrent];
-}
 
-- (NSMutableArray<NSMutableDictionary*>*)playButtonStateForTorrent:(Torrent*)torrent
-{
-    return [PlayButtonStateBuilder stateForTorrent:torrent];
-}
-
-- (NSArray<NSDictionary*>*)playButtonLayoutForTorrent:(Torrent*)torrent state:(NSArray<NSDictionary*>*)state
-{
-    return [PlayButtonStateBuilder layoutForTorrent:torrent state:state];
-}
 
 - (CGFloat)playButtonsAvailableWidthForCell:(TorrentCell*)cell
 {
@@ -208,55 +195,9 @@ static NSString* flowViewTorrentHash(FlowLayoutView* flowView)
     objc_setAssociatedObject(playButton, &kPlayButtonFolderKey, folder.length > 0 ? folder : nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     NSDictionary* represented = @{ @"torrent" : torrent, @"item" : entry };
     objc_setAssociatedObject(playButton, &kPlayButtonRepresentedKey, represented, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    NSImage* icon = [self flowIconForEntry:entry torrent:torrent];
+    NSImage* icon = [self iconForPlayableFileItem:entry torrent:torrent];
     playButton.image = icon;
     playButton.imagePosition = icon ? NSImageLeft : NSNoImage;
-}
-
-- (NSImage*)flowIconForEntry:(NSDictionary*)entry torrent:(Torrent*)torrent
-{
-    if (@available(macOS 11.0, *))
-    {
-        NSString* type = entry[@"type"] ?: @"file";
-        NSString* category = entry[@"category"] ?: @"";
-        NSString* path = [entry[@"path"] isKindOfClass:[NSString class]] ? entry[@"path"] : nil;
-        BOOL useAlbumIcon = [type isEqualToString:@"album"];
-        if (!useAlbumIcon && [type isEqualToString:@"file"] && [category isEqualToString:@"audio"] && path.length > 0)
-        {
-            // Metadata-only cue detection: no filesystem probing.
-            useAlbumIcon = ([torrent cueFilePathForAudioPath:path] != nil);
-        }
-
-        NSString* symbolName = @"play";
-        if ([type isEqualToString:@"document-books"] || [category isEqualToString:@"books"])
-            symbolName = @"book";
-        else if (useAlbumIcon)
-            symbolName = @"music.note.list";
-        else if ([type isEqualToString:@"track"] || [category isEqualToString:@"audio"])
-            symbolName = @"music.note";
-        else if ([category isEqualToString:@"software"])
-            symbolName = @"gearshape";
-
-        NSString* cacheKey = [NSString stringWithFormat:@"flow:%@:%@:%d", type, category, useAlbumIcon ? 1 : 0];
-        NSImage* cached = [self.fIconCache objectForKey:cacheKey];
-        if (cached)
-            return cached;
-
-        NSImage* icon = [NSImage imageWithSystemSymbolName:symbolName accessibilityDescription:nil];
-        if (!icon)
-            icon = [NSImage imageWithSystemSymbolName:@"play" accessibilityDescription:nil];
-        if (icon)
-        {
-            NSImageSymbolConfiguration* cfg = [NSImageSymbolConfiguration configurationWithPointSize:11 weight:NSFontWeightMedium
-                                                                                                scale:NSImageSymbolScaleSmall];
-            icon = [icon imageWithSymbolConfiguration:cfg];
-            [icon setTemplate:YES];
-            [self.fIconCache setObject:icon forKey:cacheKey];
-        }
-        return icon;
-    }
-
-    return nil;
 }
 
 - (NSString*)pathUiTokenForEntry:(NSDictionary*)entry
@@ -334,22 +275,14 @@ static NSString* flowViewTorrentHash(FlowLayoutView* flowView)
     setFlowViewTorrentHash(flowView, currentHash);
     cell.fPlayButtonsSourceFiles = playableFiles;
 
-    NSDictionary* snapshotDict = [self buildFlowSnapshotForTorrent:torrent];
-    if (!snapshotDict)
+    NSArray<NSDictionary*>* state = [PlayButtonStateBuilder stateForTorrent:torrent];
+    if (!state || state.count == 0)
+    {
+        [self hideFlowViewAndResetRowHeightForCell:cell torrent:torrent];
         return;
-    NSArray* snapshot = snapshotDict[@"snapshot"];
-    NSArray* playableFilesForApply = snapshotDict[@"playableFiles"];
-    NSDictionary* result = [PlayButtonStateBuilder stateAndLayoutFromSnapshot:snapshot];
-    NSMutableArray* state = result[@"state"];
-    NSArray* layout = result[@"layout"];
-
-    torrent.cachedPlayButtonSource = playableFilesForApply;
-    torrent.cachedPlayButtonState = state;
-    [PlayButtonStateBuilder updateStateLookupsForTorrent:torrent state:state];
-    torrent.cachedPlayButtonLayout = layout;
-    torrent.cachedPlayButtonProgressGeneration = torrent.statsGeneration;
-
-    if (layout.count == 0)
+    }
+    NSArray<NSDictionary*>* layout = [PlayButtonStateBuilder layoutForTorrent:torrent state:state];
+    if (!layout || layout.count == 0)
     {
         [self hideFlowViewAndResetRowHeightForCell:cell torrent:torrent];
         return;
@@ -415,8 +348,8 @@ static NSString* flowViewTorrentHash(FlowLayoutView* flowView)
     FlowLayoutView* flowView = (FlowLayoutView*)cell.fPlayButtonsView;
     if (!flowView || ![flowView isKindOfClass:[FlowLayoutView class]])
         return;
-    NSArray<NSDictionary*>* state = [self playButtonStateForTorrent:torrent];
-    if (state.count == 0)
+    NSArray<NSDictionary*>* state = [PlayButtonStateBuilder stateForTorrent:torrent];
+    if (!state || state.count == 0)
     {
         flowView.hidden = YES;
         if (cell.fPlayButtonsHeightConstraint)

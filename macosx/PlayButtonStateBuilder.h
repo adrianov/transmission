@@ -9,12 +9,6 @@
 /// Builds play button state and layout for a torrent's content buttons (video/audio/books, seasons).
 @interface PlayButtonStateBuilder : NSObject
 
-/// Returns @{ @"snapshot": NSArray, @"playableFiles": NSArray } or nil if no playable files.
-+ (NSDictionary*)buildSnapshotForTorrent:(Torrent*)torrent;
-
-/// Pure function: computes state and layout from snapshot; safe on background queue.
-+ (NSDictionary*)stateAndLayoutFromSnapshot:(NSArray<NSDictionary*>*)snapshot;
-
 /// Asynchronously fills iinaUnwatched for video (by extension) entries using IINA cache checks off main thread.
 + (void)enrichStateWithIinaUnwatched:(NSMutableArray<NSMutableDictionary*>*)state forTorrent:(Torrent*)torrent;
 
@@ -23,8 +17,5 @@
 
 /// Returns cached or newly built layout for the given state.
 + (NSArray<NSDictionary*>*)layoutForTorrent:(Torrent*)torrent state:(NSArray<NSDictionary*>*)state;
-
-/// Updates index/folder lookup maps on torrent for O(1) play-state entry access. Pass nil to clear.
-+ (void)updateStateLookupsForTorrent:(Torrent*)torrent state:(NSArray<NSMutableDictionary*>*)state;
 
 @end

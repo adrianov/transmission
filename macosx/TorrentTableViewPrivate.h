@@ -50,8 +50,6 @@
 - (void)recycleSubviewsFromFlowView:(FlowLayoutView*)flowView;
 - (void)updatePlayButtonProgressForCell:(TorrentCell*)cell torrent:(Torrent*)torrent;
 - (void)noteHeightUpdateForRow:(NSInteger)row;
-- (NSMutableArray<NSMutableDictionary*>*)playButtonStateForTorrent:(Torrent*)torrent;
-- (NSArray<NSDictionary*>*)playButtonLayoutForTorrent:(Torrent*)torrent state:(NSArray<NSDictionary*>*)state;
 @end
 
 @interface TorrentTableView (PlayMenu)

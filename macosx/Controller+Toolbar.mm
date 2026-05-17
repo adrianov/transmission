@@ -329,13 +329,10 @@
     NSMutableArray<NSArray*>* result = [NSMutableArray array];
     for (Torrent* torrent in self.fTorrents)
     {
-        NSDictionary* snapshotDict = [PlayButtonStateBuilder buildSnapshotForTorrent:torrent];
-        if (!snapshotDict)
+        NSArray<NSDictionary*>* state = [PlayButtonStateBuilder stateForTorrent:torrent];
+        if (!state || state.count == 0)
             continue;
-        NSArray* playableFiles = snapshotDict[@"playableFiles"];
-        NSArray* snapshot = snapshotDict[@"snapshot"];
-        NSDictionary* stateAndLayout = [PlayButtonStateBuilder stateAndLayoutFromSnapshot:snapshot];
-        NSArray* state = stateAndLayout[@"state"];
+        NSArray<NSDictionary*>* playableFiles = torrent.playableFiles;
         if (state.count != playableFiles.count)
             continue;
         for (NSUInteger i = 0; i < state.count; i++)
