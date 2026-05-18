@@ -1163,7 +1163,10 @@
         @"1080p", @"720p",    @"2160p",  @"480p",   @"8K",   @"4K",        @"UHD",     @"WEB-DL", @"WEBDL", @"WEBRip",
         @"BDRip", @"BDRemux", @"BluRay", @"HDRip",  @"DVDRip", @"HDTV", @"WEB-DLRip", @"DLRip", @"H264", @"H.264",
         @"H265",  @"H.265",   @"x264",   @"x265",   @"HEVC",   @"AVC",  @"AMZN",      @"NF",    @"DSNP", @"HMAX",
-        @"PCOK",  @"ATVP",    @"APTV",   @"2xRu",   @"Ru",     @"En",   @"qqss44",    @"WEB",   @"DL"
+        @"PCOK",  @"ATVP",    @"APTV",   @"2xRu",   @"Ru",     @"En",   @"qqss44",    @"WEB",   @"DL",
+        @"DD5.1", @"DD2.0",   @"DD5",    @"DD2",    @"DDP5.1", @"DDP2.0", @"DDP5", @"DDP2", @"Atmos", @"TrueHD",
+        @"DTS",   @"DTS-HD",  @"EAC3",   @"EAC",    @"AC3",    @"AAC",  @"AAC2.0",    @"AAC5.1", @"PROPER", @"REPACK",
+        @"EXTENDED", @"UNRATED", @"REMUX", @"10bit", @"HDR", @"HDR10", @"DV", @"DoVi", @"SDR", @"IMAX"
     ];
 
     // Remove any [Source]-?Rip variants from episode title (before dot replacement)
