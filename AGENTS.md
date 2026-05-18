@@ -149,8 +149,8 @@ npm run lint:fix          # Fix
 - Prefer dependency injection or other decoupling methods for testability
 - KISS principle: Try simpler approaches first in complex codebase
 - New features must be accessible via both C API (`transmission.h`) and RPC/JSON API
-- **File size**: Keep project-owned source files at **≤300 lines** (apply to C/C++, Objective-C++, headers, and repo-owned scripts; skip `third-party/`, generated outputs, and vendored trees). Prefer extracting modules, helpers, or small types over growing a file past the limit; remove unused or duplicate code when splitting.
-- **After each coherent change** (one task or PR-sized edit): among **files you modified**, if the **longest** is still over 300 lines, refactor **only that file**—extract or DRY until it is **≤300 lines** or its line count drops by **at least 100 lines** (moved logic lives in existing or new modules). Do not refactor other long files in the same pass unless asked. See also `.cursor/rules/source-file-size.mdc`.
+- **File size**: Keep project-owned source files at **≤300 lines** (C/C++, Objective-C++, headers, repo-owned scripts; skip `third-party/`, generated outputs, vendored trees). Prefer extracting modules, helpers, or small types over growing a file past the limit.
+- **Post-edit refactoring**: After every coherent change (one task or PR-sized edit), check the longest file you modified. If it exceeds 300 lines, refactor **only that file** — extract helpers, types, or DRY duplicated logic into new or existing modules until the file is ≤300 lines **or** has shrunk by ≥100 lines. Do not refactor other long files in the same pass unless asked.
 
 ### API Boundaries
 

@@ -7,18 +7,16 @@ alwaysApply: true
 
 ## Limits
 
-- **Target**: No *project source* file should exceed **300 lines** (excluding blanks-only lines if helpful to count; be consistent). Applies to code you add or touch (C, C++, Objective-C++, headers, JS/TS in `web/`, scripts owned by the repo). **Skip** `third-party/`, generated outputs, and vendored trees.
+- **Target**: No project source file exceeds **300 lines**. Applies to C, C++, Objective-C++, headers, JS/TS in `web/`, repo-owned scripts. **Skip** `third-party/`, generated outputs, vendored trees.
 - If staying under 300 is impossible without harming the feature, say so briefly in the PR/summary and prefer the smallest reasonable split.
 
 ## After each change
 
 When you finish a coherent change (one task or one PR-worth of edits):
 
-1. Among **files you modified** in that change, pick **only the single longest** by line count.
-2. If that file is **over 300 lines**, refactor **that file only** (extract types/functions, shared helpers, or DRY duplicated blocks—no unrelated rewrites) until:
-   - the file is **≤300 lines**, or
-   - you have removed at least **100 lines** from that file’s line count via extraction/DRY (extracted code moves into existing or new modules; **net** shrink of this file ≥100 lines).
-3. Do **not** refactor other long files in the same pass unless the user explicitly asks.
+1. Among **files you modified**, pick the **single longest** by line count.
+2. If that file is **over 300 lines**, refactor it — extract types/functions, shared helpers, or DRY duplicated blocks (no unrelated rewrites) until the file is **≤300 lines** **or** has shrunk by **≥100 lines**. Extracted code moves into existing or new modules.
+3. Do **not** refactor other long files in the same pass unless asked.
 
 ## Extraction
 
