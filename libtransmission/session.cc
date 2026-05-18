@@ -1032,6 +1032,8 @@ void tr_session::closeImplPart2(std::promise<void>* closed_promise, std::chrono:
 
     stats().save();
     peer_mgr_.reset();
+    tr_shutdown_background_queues();
+    tr_torrent_delete_queue_shutdown();
     openFiles().close_all();
     tr_utp_close(this);
     this->udp_core_.reset();

@@ -77,3 +77,7 @@ private:
     static constexpr size_t MaxOpenFiles = 32U;
     tr_lru_cache<Key, Val, MaxOpenFiles> pool_;
 };
+
+// Shut down background file I/O queues. Call during session close
+// to ensure background threads finish before file descriptors are released.
+void tr_shutdown_background_queues();

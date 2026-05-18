@@ -7,12 +7,12 @@
 #include <string>
 #include <string_view>
 #include <unordered_set>
-#include <vector>
 
 #include <fmt/format.h>
 
 #include "libtransmission/transmission.h"
 #include "libtransmission/announcer.h"
+#include "libtransmission/background-work-queue.h"
 #include "libtransmission/error.h"
 #include "libtransmission/log.h"
 #include "libtransmission/resume.h"
@@ -84,6 +84,69 @@ bool removeTorrentFile(char const* filename, void* /*user_data*/, tr_error* erro
     return keep_paths;
 }
 
+void onDeleteDone(tr_torrent* tor, tr_torrent_remove_done_func callback, void* callback_user_data, bool ok, tr_error const& error);
+void freeTorrentDuringShutdown(tr_torrent* tor);
+
+struct DeleteItem
+{
+    tr_torrent_files files;
+    std::string current_dir;
+    std::string name;
+    tr_torrent_files::FileFunc delete_func;
+    tr_torrent_files::KeepFunc keep;
+    tr_session* session = nullptr;
+    tr_torrent* tor = nullptr;
+    tr_torrent_remove_done_func callback = nullptr;
+    void* callback_user_data = nullptr;
+};
+
+class DeleteQueue final : public BackgroundWorkQueue<DeleteItem>
+{
+private:
+    auto process(DeleteItem& item) -> bool override
+    {
+        tr_error error;
+        item.files.remove(item.current_dir, item.name, item.delete_func, &error, item.keep);
+        bool const ok = !error.has_value();
+
+        if (running_)
+        {
+            item.session->run_in_session_thread([tor = item.tor,
+                                                 callback = item.callback,
+                                                 callback_user_data = item.callback_user_data,
+                                                 ok,
+                                                 error = std::move(error)]()
+                                                    { onDeleteDone(tor, callback, callback_user_data, ok, error); });
+        }
+        else
+        {
+            if (item.callback != nullptr)
+            {
+                item.callback(item.tor->id(), ok, item.callback_user_data);
+            }
+
+            freeTorrentDuringShutdown(item.tor);
+        }
+
+        return true;
+    }
+};
+
+DeleteQueue& delete_queue()
+{
+    static DeleteQueue queue;
+    return queue;
+}
+
+// Minimal cleanup for the shutdown path: removes the torrent from the
+// session's torrents list and deletes it.  No mutex is acquired because
+// the session thread is blocked in thread_.join() during this call.
+void freeTorrentDuringShutdown(tr_torrent* tor)
+{
+    tor->session->torrents().remove(tor, tr_time());
+    delete tor;
+}
+
 void freeTorrent(tr_torrent* tor)
 {
     auto const lock = tor->unique_lock();
@@ -105,8 +168,41 @@ void freeTorrent(tr_torrent* tor)
 
     delete tor;
 }
+
+// Called on the session thread after background deletion completes.
+void onDeleteDone(tr_torrent* tor, tr_torrent_remove_done_func callback, void* callback_user_data, bool ok, tr_error const& error)
+{
+    if (ok)
+    {
+        if (callback != nullptr)
+        {
+            callback(tor->id(), true, callback_user_data);
+        }
+        tr_torrentFreeInSessionThread(tor);
+    }
+    else
+    {
+        tor->set_is_deleting(false);
+        tor->error().set_local_error(
+            fmt::format(
+                fmt::runtime(_("Couldn't remove all torrent files: {error} ({error_code})")),
+                fmt::arg("error", error.message()),
+                fmt::arg("error_code", error.code())));
+        tr_torrentStop(tor);
+
+        if (callback != nullptr)
+        {
+            callback(tor->id(), false, callback_user_data);
+        }
+    }
+}
 } // namespace start_stop_helpers
 } // namespace
+
+void tr_torrent_delete_queue_shutdown()
+{
+    start_stop_helpers::delete_queue().shutdown();
+}
 
 void tr_torrent::stop_if_seed_limit_reached()
 {
@@ -316,7 +412,6 @@ void tr_torrentRemoveInSessionThread(
 
     auto const lock = tor->unique_lock();
 
-    bool ok = true;
     if (delete_flag && tor->has_metainfo())
     {
         tor->session->close_torrent_files(tor->id());
@@ -327,44 +422,50 @@ void tr_torrentRemoveInSessionThread(
             delete_func = removeTorrentFile;
         }
 
-        auto const delete_func_wrapper = [&delete_func, delete_user_data](char const* filename)
+        // NOTE: delete_user_data and callback_user_data must outlive this call.
+        // Both are captured by value into the background DeleteQueue item.
+        // For delete_user_data: callers pass nullptr or a heap pointer that the
+        // delete_func knows how to free. For callback_user_data: callers pass a
+        // heap pointer whose ownership transfers to the callback. The callback
+        // fires exactly once on the session thread, then frees callback_user_data.
+        auto delete_func_wrapper = [delete_func, delete_user_data](char const* filename)
         {
             delete_func(filename, delete_user_data, nullptr);
         };
 
         auto const keep_paths = build_keep_paths(tor);
+
         auto keep = tr_torrent_files::KeepFunc{};
         if (!std::empty(keep_paths))
         {
-            keep = [&keep_paths](std::string_view filename)
+            keep = [keep_paths](std::string_view filename)
             {
                 return keep_paths.find(std::string{ filename }) != std::end(keep_paths);
             };
         }
 
-        tr_error error;
-        tor->files().remove(tor->current_dir(), tor->name(), delete_func_wrapper, &error, keep);
-        if (error)
+        // The torrent stays alive until background deletion finishes.
+        // On success the background thread posts tr_torrentFreeInSessionThread.
+        // On failure it sets a local error and calls tr_torrentStop, keeping
+        // the torrent visible in the UI.
+        delete_queue().schedule(
+            { tor->files(),
+              std::string{ tor->current_dir() },
+              std::string{ tor->name() },
+              std::move(delete_func_wrapper),
+              std::move(keep),
+              tor->session,
+              tor,
+              callback,
+              callback_user_data });
+    }
+    else
+    {
+        // No deletion: invoke callback and free immediately
+        if (callback != nullptr)
         {
-            ok = false;
-            tor->is_deleting_ = false;
-
-            tor->error().set_local_error(
-                fmt::format(
-                    fmt::runtime(_("Couldn't remove all torrent files: {error} ({error_code})")),
-                    fmt::arg("error", error.message()),
-                    fmt::arg("error_code", error.code())));
-            tr_torrentStop(tor);
+            callback(tor->id(), true, callback_user_data);
         }
-    }
-
-    if (callback != nullptr)
-    {
-        callback(tor->id(), ok, callback_user_data);
-    }
-
-    if (ok)
-    {
         tr_torrentFreeInSessionThread(tor);
     }
 }

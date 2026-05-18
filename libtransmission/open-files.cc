@@ -6,6 +6,7 @@
 #include <algorithm> // std::min
 #include <array>
 #include <cstdint> // uint8_t, uint64_t
+#include <string>
 #include <string_view>
 #include <utility>
 
@@ -13,6 +14,7 @@
 
 #include "libtransmission/transmission.h"
 
+#include "libtransmission/background-work-queue.h"
 #include "libtransmission/error-types.h"
 #include "libtransmission/error.h"
 #include "libtransmission/file.h"
@@ -118,7 +120,50 @@ bool preallocate_file_full(tr_sys_file_t fd, uint64_t length, tr_error* error)
     return false;
 }
 
+// --- Background preallocation for Full mode ---
+
+// Background serial queue for Full-mode preallocation. The session thread
+// truncates the file to its final size, then hands the path here.  We open a
+// separate fd for zero-fill so the session thread's cached fd is never touched.
+struct PreallocItem
+{
+    std::string path;
+    uint64_t size = 0;
+};
+
+class PreallocQueue final : public BackgroundWorkQueue<PreallocItem>
+{
+private:
+    auto process(PreallocItem& item) -> bool override
+    {
+        if (!running_)
+        {
+            return false;
+        }
+
+        auto const fd = tr_sys_file_open(item.path.c_str(), TR_SYS_FILE_READ | TR_SYS_FILE_WRITE, 0, nullptr);
+        if (is_open(fd))
+        {
+            preallocate_file_full(fd, item.size, nullptr);
+            tr_sys_file_close(fd);
+        }
+
+        return true;
+    }
+};
+
+PreallocQueue& prealloc_queue()
+{
+    static PreallocQueue queue;
+    return queue;
+}
+
 } // unnamed namespace
+
+void tr_shutdown_background_queues()
+{
+    prealloc_queue().shutdown();
+}
 
 // ---
 
@@ -205,8 +250,15 @@ std::optional<tr_sys_file_t> tr_open_files::get(
 
         if (allocation == Preallocation::Full)
         {
-            success = preallocate_file_full(fd, file_size, &error);
-            type = "full";
+            // Set file size immediately (fast, metadata-only) so the session
+            // thread can start writing blocks without waiting for full allocation.
+            // The actual block allocation runs in a background thread.
+            success = tr_sys_file_truncate(fd, file_size, &error);
+            if (success)
+            {
+                prealloc_queue().schedule(PreallocItem{ std::string{ filename }, file_size });
+            }
+            type = "full (background)";
         }
         else if (allocation == Preallocation::Sparse)
         {

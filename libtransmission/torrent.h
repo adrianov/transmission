@@ -52,6 +52,9 @@ struct tr_torrent_announcer;
 
 void tr_torrentFreeInSessionThread(tr_torrent* tor);
 
+// Shut down the background torrent-delete queue. Call during session close.
+void tr_torrent_delete_queue_shutdown();
+
 // ---
 
 void tr_torrentChangeMyPort(tr_torrent* tor);
@@ -843,6 +846,11 @@ struct tr_torrent
     [[nodiscard]] constexpr bool is_deleting() const noexcept
     {
         return is_deleting_;
+    }
+
+    constexpr void set_is_deleting(bool deleting) noexcept
+    {
+        is_deleting_ = deleting;
     }
 
     [[nodiscard]] constexpr bool is_running() const noexcept
