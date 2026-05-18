@@ -332,6 +332,12 @@ static NSString* flowViewTorrentHash(FlowLayoutView* flowView)
         {
             return;
         }
+        // Visibility changes invalidate the layout; rebuild buttons to add/remove visible items
+        if (torrent.cachedPlayButtonLayout == nil)
+        {
+            [self configurePlayButtonsForCell:cell torrent:torrent];
+            return;
+        }
         [self updatePlayButtonProgressForCell:cell torrent:torrent];
     }
     else if (torrent.playableFiles.count > 0)

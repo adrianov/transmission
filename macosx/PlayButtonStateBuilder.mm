@@ -75,7 +75,30 @@ static BOOL videoDisplayAllowed(Torrent* torrent, NSDictionary* entry, CGFloat p
     return etaSec < durationSec;
 }
 
-/// When multiple buttons share the same stripped title within the same season, prepend humanized parent directory and re-strip so labels are distinct (e.g. "Part 01 — Monte Cristo").
+static NSString* preEpisodeTextFromFilename(NSString* filename)
+{
+    NSString* base = filename.stringByDeletingPathExtension;
+    if (base.length == 0)
+        return nil;
+    static NSRegularExpression* regex;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        regex = [NSRegularExpression regularExpressionWithPattern:@"\\bS\\d{1,2}[.\\s]?E\\d{1,3}\\b|\\b\\d{1,2}x\\d{1,3}\\b"
+                                                         options:NSRegularExpressionCaseInsensitive
+                                                           error:nil];
+    });
+    NSTextCheckingResult* match = [regex firstMatchInString:base options:0 range:NSMakeRange(0, base.length)];
+    if (!match || match.range.location == 0)
+        return nil;
+    NSString* preText = [[base substringToIndex:match.range.location] stringByTrimmingCharactersInSet:
+                             [NSCharacterSet characterSetWithCharactersInString:@". "]];
+    if (preText.length == 0)
+        return nil;
+    NSString* humanized = preText.humanReadableFileName;
+    return humanized.length > 0 ? humanized : nil;
+}
+
+/// When multiple buttons share the same stripped title within the same season, prepend humanized distinguishing text and re-strip so labels are distinct (e.g. "Career of Evil — S1 E1").
 /// Duplicates across different seasons are expected (e.g. "E1" in Season 1 and "E1" in Season 2) and not disambiguated.
 static void disambiguateDuplicateTitles(NSMutableArray<NSMutableDictionary*>* state, NSArray<NSNumber*>* seasons)
 {
@@ -106,16 +129,21 @@ static void disambiguateDuplicateTitles(NSMutableArray<NSMutableDictionary*>* st
             continue;
         NSMutableDictionary* e = state[i];
         NSString* path = e[@"path"];
-        NSString* folder = e[@"folder"];
-        NSString* parent = (path.length > 0) ? [path stringByDeletingLastPathComponent].lastPathComponent :
-                                               (folder.length > 0 ? (folder.lastPathComponent ?: folder) : @"");
-        if (parent.length == 0)
-            continue;
-        NSString* humanized = parent.humanReadableFileName;
-        if (humanized.length == 0)
+        NSString* prefix = nil;
+        if (path.length > 0)
+            prefix = preEpisodeTextFromFilename(path.lastPathComponent);
+        if (prefix.length == 0)
+        {
+            NSString* folder = e[@"folder"];
+            NSString* parent = (path.length > 0) ? [path stringByDeletingLastPathComponent].lastPathComponent :
+                                                   (folder.length > 0 ? (folder.lastPathComponent ?: folder) : @"");
+            if (parent.length > 0)
+                prefix = parent.humanReadableFileName;
+        }
+        if (prefix.length == 0)
             continue;
         NSString* base = e[@"baseTitle"] ?: @"";
-        e[@"baseTitle"] = [NSString stringWithFormat:@"%@ — %@", humanized, base];
+        e[@"baseTitle"] = [NSString stringWithFormat:@"%@ — %@", prefix, base];
     }
     NSArray<NSString*>* newTitles = [Torrent displayTitlesByStrippingCommonPrefixSuffix:[state valueForKey:@"baseTitle"]
                                                                                 seasons:seasons];
@@ -157,13 +185,8 @@ static void applyTitleStripping(NSMutableArray<NSMutableDictionary*>* state)
             state[i][@"title"] = stripped[i];
     }
     disambiguateDuplicateTitles(state, seasons);
-    for (NSUInteger i = 0; i < state.count; i++)
-    {
-        NSMutableDictionary* e = state[i];
-        if ([e[@"visible"] boolValue] && ![e[@"type"] hasPrefix:@"document"] && [e[@"progress"] doubleValue] < 1.0 &&
-            [e[@"progressPercent"] intValue] < 100)
-            e[@"title"] = [NSString stringWithFormat:@"%@ (%d%%)", e[@"title"], [e[@"progressPercent"] intValue]];
-    }
+    for (NSMutableDictionary* e in state)
+        e[@"strippedTitle"] = e[@"title"] ?: @"";
 }
 
 static dispatch_queue_t iinaStateQueue()
@@ -337,13 +360,22 @@ static void setStateLookups(Torrent* torrent, NSArray<NSMutableDictionary*>* sta
                 ([torrent checkForFiles:[NSIndexSet indexSetWithIndex:indexNum.unsignedIntegerValue]] == NSControlStateValueOn) :
                 YES;
             BOOL visible = isPlayableItemVisible(type, progress, wanted);
-            visible = videoDisplayAllowed(torrent, entry, progress, visible);
             entry[@"visible"] = @(visible);
-            if (visible && ![type hasPrefix:@"document"] && progress < 1.0 && progressPct < 100)
-                entry[@"title"] = [NSString stringWithFormat:@"%@ (%d%%)", entry[@"baseTitle"], progressPct];
             [state addObject:entry];
         }
         applyTitleStripping(state);
+        // For single items applyTitleStripping returns early; ensure strippedTitle is set
+        if (state.count == 1)
+            state[0][@"strippedTitle"] = state[0][@"title"] ?: @"";
+        // Add progress percentage to display title (both single and multi items)
+        for (NSMutableDictionary* e in state)
+        {
+            if (![e[@"visible"] boolValue] || [e[@"type"] hasPrefix:@"document"] || [e[@"progress"] doubleValue] >= 1.0 ||
+                [e[@"progressPercent"] intValue] >= 100)
+                continue;
+            NSString* stripped = e[@"strippedTitle"] ?: @"";
+            e[@"title"] = [NSString stringWithFormat:@"%@ (%d%%)", stripped, [e[@"progressPercent"] intValue]];
+        }
         torrent.cachedPlayButtonState = state;
         state = (NSMutableArray<NSMutableDictionary*>*)torrent.cachedPlayButtonState;
         setStateLookups(torrent, state);
@@ -389,10 +421,10 @@ static void setStateLookups(Torrent* torrent, NSArray<NSMutableDictionary*>* sta
             entry[@"visible"] = @(visible);
             if (visible != wasVisible)
                 visibilityChanged = YES;
-            NSString* baseTitle = entry[@"baseTitle"] ?: @"";
-            NSString* title = baseTitle;
+            NSString* strippedTitle = entry[@"strippedTitle"] ?: entry[@"baseTitle"] ?: @"";
+            NSString* title = strippedTitle;
             if (visible && ![type hasPrefix:@"document"] && progress < 1.0 && progressPct < 100)
-                title = [NSString stringWithFormat:@"%@ (%d%%)", baseTitle, progressPct];
+                title = [NSString stringWithFormat:@"%@ (%d%%)", strippedTitle, progressPct];
             entry[@"title"] = title;
         }
         else
@@ -407,14 +439,13 @@ static void setStateLookups(Torrent* torrent, NSArray<NSMutableDictionary*>* sta
                 {
                     entry[@"visible"] = @(visible);
                     visibilityChanged = YES;
-                    NSString* baseTitle = entry[@"baseTitle"] ?: @"";
+                    NSString* strippedTitle = entry[@"strippedTitle"] ?: entry[@"baseTitle"] ?: @"";
                     entry[@"title"] = (visible && ![type hasPrefix:@"document"] && progressPct < 100) ?
-                        [NSString stringWithFormat:@"%@ (%d%%)", baseTitle, progressPct] : baseTitle;
+                        [NSString stringWithFormat:@"%@ (%d%%)", strippedTitle, progressPct] : strippedTitle;
                 }
             }
         }
     }
-    applyTitleStripping(state);
 
     if (visibilityChanged)
         torrent.cachedPlayButtonLayout = nil;
@@ -482,6 +513,8 @@ static void setStateLookups(Torrent* torrent, NSArray<NSMutableDictionary*>* sta
         {
             if (totalFilesShown >= maxFiles)
                 break;
+            if (![fileInfo[@"visible"] boolValue])
+                continue;
             [layout addObject:@{ @"kind" : @"item", @"item" : fileInfo }];
             totalFilesShown++;
         }
