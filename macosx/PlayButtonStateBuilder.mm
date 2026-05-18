@@ -4,76 +4,12 @@
 
 #include <cmath>
 
-#import <AVFoundation/AVFoundation.h>
-
 #import "PlayButtonStateBuilder.h"
 #import "IINAWatchHelper.h"
 #import "NSStringAdditions.h"
 #import "Torrent.h"
 #import "TorrentPrivate.h"
-
-static NSTimeInterval durationForVideoAtPath(NSString* path)
-{
-    if (!path || path.length == 0)
-        return 0;
-    static NSCache<NSString*, NSNumber*>* sDurationCache;
-    static dispatch_once_t onceToken;
-    dispatch_once(&onceToken, ^{
-        sDurationCache = [[NSCache alloc] init];
-        sDurationCache.countLimit = 200;
-    });
-    NSNumber* cached = [sDurationCache objectForKey:path];
-    if (cached != nil)
-        return cached.doubleValue;
-    NSURL* url = [NSURL fileURLWithPath:path];
-    if (!url)
-        return 0;
-    AVURLAsset* asset = [AVURLAsset assetWithURL:url];
-    CMTime cm = asset.duration;
-    if (!CMTIME_IS_NUMERIC(cm))
-    {
-        [sDurationCache setObject:@(0) forKey:path];
-        return 0;
-    }
-    NSTimeInterval sec = CMTimeGetSeconds(cm);
-    if (sec <= 0 || !isfinite(sec))
-    {
-        [sDurationCache setObject:@(0) forKey:path];
-        return 0;
-    }
-    [sDurationCache setObject:@(sec) forKey:path];
-    return sec;
-}
-
-/// For video files (by extension): show play button when file is playable (path + duration) and ETA < duration.
-static BOOL videoDisplayAllowed(Torrent* torrent, NSDictionary* entry, CGFloat progress, BOOL visible)
-{
-    if (!visible || progress >= 1.0)
-        return visible;
-    if (![Torrent isVideoFileExtension:[torrent pathExtensionOfPlayableItem:entry]])
-        return visible;
-    if (progress < 0.01)
-        return NO;
-    NSNumber* indexNum = entry[@"index"];
-    if (indexNum == nil)
-        return visible;
-    NSString* pathOnDisk = [torrent pathToOpenForPlayableItemIfExists:entry];
-    if (!pathOnDisk)
-        return NO;
-    NSTimeInterval durationSec = durationForVideoAtPath(pathOnDisk);
-    if (durationSec <= 0)
-        return NO;
-    uint64_t fileSize = [torrent fileSizeForIndex:indexNum.unsignedIntegerValue];
-    if (fileSize == 0)
-        return visible;
-    double remainingBytes = (1.0 - progress) * (double)fileSize;
-    CGFloat speedKBps = [torrent downloadRate];
-    if (speedKBps <= 0)
-        return NO;
-    double speedBytesPerSec = (double)speedKBps * 1024.0;
-    double etaSec = remainingBytes / speedBytesPerSec;
-    return etaSec < durationSec;
-}
+#import "VideoDurationHelper.h"
 
 static NSString* preEpisodeTextFromFilename(NSString* filename)
 {
@@ -417,7 +353,7 @@ static void setStateLookups(Torrent* torrent, NSArray<NSMutableDictionary*>* sta
             if (wasVisible && isVideoFile)
                 visible = YES; // Do not re-evaluate ETA < duration once button is shown
             else
-                visible = videoDisplayAllowed(torrent, entry, progress, visible);
+                visible = videoDisplayAllowedForItem(torrent, entry, progress, visible);
             entry[@"visible"] = @(visible);
             if (visible != wasVisible)
                 visibilityChanged = YES;
@@ -434,7 +370,7 @@ static void setStateLookups(Torrent* torrent, NSArray<NSMutableDictionary*>* sta
             {
                 int progressPct = [entry[@"progressPercent"] intValue];
                 BOOL visible = isPlayableItemVisible(type, progress, wanted);
-                visible = videoDisplayAllowed(torrent, entry, progress, visible);
+                visible = videoDisplayAllowedForItem(torrent, entry, progress, visible);
                 if (visible != wasVisible)
                 {
                     entry[@"visible"] = @(visible);
