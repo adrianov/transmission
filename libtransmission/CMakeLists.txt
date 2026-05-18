@@ -79,6 +79,7 @@ target_sources(${TR_NAME}
         mime-types.h
         net.cc
         net.h
+        background-work-queue.h
         observable.h
         open-files.cc
         open-files.h
