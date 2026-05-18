@@ -222,6 +222,8 @@ target_sources(${TR_NAME}-mac
         PlayButton.mm
         PlayButtonStateBuilder.h
         PlayButtonStateBuilder.mm
+        PlayButtonTitleHelper.h
+        PlayButtonTitleHelper.mm
         VideoDurationHelper.h
         VideoDurationHelper.mm
         FlowLayoutView.h
