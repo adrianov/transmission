@@ -83,7 +83,26 @@ const techTagsCodec = [
   'AVC',
   '10bit',
 ];
-const techTagsAudio = ['AAC', 'AC3', 'DTS', 'Atmos', 'TrueHD', 'FLAC', 'EAC3'];
+const techTagsAudio = [
+  'AAC',
+  'AAC2.0',
+  'AAC5.1',
+  'AC3',
+  'DD5.1',
+  'DD2.0',
+  'DD5',
+  'DD2',
+  'DDP5.1',
+  'DDP2.0',
+  'DDP5',
+  'DDP2',
+  'DTS',
+  'DTS-HD',
+  'Atmos',
+  'TrueHD',
+  'FLAC',
+  'EAC3',
+];
 const techTagsHdr = ['SDR', 'HDR', 'HDR10', 'DV', 'DoVi'];
 const techTagsSource = ['AMZN', 'NF', 'DSNP', 'HMAX', 'PCOK', 'ATVP', 'APTV'];
 const techTagsOther = [
@@ -608,6 +627,36 @@ export const Formatter = {
       'x265',
       'HEVC',
       'AVC',
+      '10bit',
+      'DD5.1',
+      'DD2.0',
+      'DD5',
+      'DD2',
+      'DDP5.1',
+      'DDP2.0',
+      'DDP5',
+      'DDP2',
+      'Atmos',
+      'TrueHD',
+      'DTS',
+      'DTS-HD',
+      'EAC3',
+      'EAC',
+      'AC3',
+      'AAC',
+      'AAC2.0',
+      'AAC5.1',
+      'PROPER',
+      'REPACK',
+      'EXTENDED',
+      'UNRATED',
+      'REMUX',
+      'HDR',
+      'HDR10',
+      'DV',
+      'DoVi',
+      'SDR',
+      'IMAX',
       'AMZN',
       'NF',
       'DSNP',
@@ -628,6 +677,9 @@ export const Formatter = {
 
     // Remove any [Source]HD variants from episode title
     title = title.replaceAll(/\b[a-z0-9]+HD\b/gi, '');
+
+    // Remove any [Source]-?SbR variants from episode title
+    title = title.replaceAll(/\b[a-z0-9]*-?SbR\b/gi, '');
 
     for (const tag of tagsToStrip) {
       const regex = new RegExp(`\\b${tag}\\b`, 'gi');
