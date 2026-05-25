@@ -475,8 +475,8 @@ public:
         return std::count_if(std::begin(peers), std::end(peers), [](auto const& peer) { return peer->is_encrypted(); });
     }
 
-    // session lock must be held. Removes peer from swarm without destroying it.
-    [[nodiscard]] std::shared_ptr<tr_peerMsgs> detach_peer(std::shared_ptr<tr_peerMsgs> const& peer)
+    // session lock must be held. Updates stats and emits disconnect for a peer about to leave the swarm.
+    void record_peer_detach(std::shared_ptr<tr_peerMsgs> const& peer)
     {
         peer_disconnect.emit(tor, peer->has(), peer->active_requests);
 
@@ -485,6 +485,12 @@ public:
 
         --stats.peer_count;
         --stats.peer_from_count[peer_info->from_first()];
+    }
+
+    // session lock must be held. Removes peer from swarm without destroying it.
+    [[nodiscard]] std::shared_ptr<tr_peerMsgs> detach_peer(std::shared_ptr<tr_peerMsgs> const& peer)
+    {
+        record_peer_detach(peer);
 
         if (auto iter = std::find(std::begin(peers), std::end(peers), peer); iter != std::end(peers))
         {
@@ -514,13 +520,7 @@ public:
 
             for (auto const& peer : peers)
             {
-                peer_disconnect.emit(tor, peer->has(), peer->active_requests);
-
-                auto const& peer_info = peer->peer_info;
-                TR_ASSERT(peer_info);
-
-                --stats.peer_count;
-                --stats.peer_from_count[peer_info->from_first()];
+                record_peer_detach(peer);
             }
 
             tmp.swap(peers);
