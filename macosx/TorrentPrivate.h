@@ -40,6 +40,10 @@ typedef NS_ENUM(NSInteger, TorrentMediaType) {
 @property(nonatomic, copy) NSArray<NSString*>* fFolderItems; // Disc or album folders (relative paths)
 @property(nonatomic, copy) NSArray<NSDictionary*>* fPlayableFiles;
 @property(nonatomic, copy) NSDictionary<NSString*, NSArray<NSNumber*>*>* fFolderToFiles; // Cache: folder -> file indices
+@property(nonatomic, copy) NSDictionary<NSString*, NSArray<NSDictionary*>*>* fFolderTracksCache;
+@property(nonatomic) BOOL fAudioCueCountCached;
+@property(nonatomic) NSUInteger fCachedAudioCount;
+@property(nonatomic) NSUInteger fCachedCueCount;
 @property(nonatomic) NSUInteger fStatsGeneration;
 @property(nonatomic) NSUInteger fProgressCacheGeneration;
 @property(nonatomic) NSMutableDictionary<NSNumber*, NSNumber*>* fFileProgressCache;

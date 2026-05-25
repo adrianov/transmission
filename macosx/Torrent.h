@@ -142,8 +142,8 @@ extern NSString* _Nonnull const kTorrentDidChangeGroupNotification;
 @property(nonatomic, copy) NSArray<NSDictionary*>* _Nullable cachedPlayButtonLayout;
 /// Cached stats generation for play button progress.
 @property(nonatomic) NSUInteger cachedPlayButtonProgressGeneration;
-/// Cached stats generation for play menu.
-@property(nonatomic) NSUInteger cachedPlayMenuGeneration;
+/// Cached play button layout used to build the play context menu (structure cache; not invalidated every stats tick).
+@property(nonatomic, copy) NSArray<NSDictionary*>* _Nullable cachedPlayMenuLayout;
 
 /// Returns current file progress (0.0-1.0) for a file index.
 - (CGFloat)fileProgressForIndex:(NSUInteger)index;
@@ -207,6 +207,8 @@ extern NSString* _Nonnull const kTorrentDidChangeGroupNotification;
 - (NSString* _Nullable)cueFilePathForAudioPath:(NSString* _Nonnull)audioPath;
 /// Counts audio files and CUE files. Used for icon subtitle and icon selection (tracks > cues → audios).
 - (void)audioAndCueCount:(NSUInteger* _Nonnull)outAudioCount cueCount:(NSUInteger* _Nonnull)outCueCount;
+/// Audio tracks for an album folder (metadata paths only; cached until playable list is invalidated).
+- (NSArray<NSDictionary*>* _Nullable)tracksForFolder:(NSString* _Nonnull)folder;
 
 // Returns .cue file path for a given folder, or nil if no .cue file found in the folder
 - (NSString* _Nullable)cueFilePathForFolder:(NSString* _Nonnull)folder;

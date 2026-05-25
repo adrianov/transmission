@@ -104,29 +104,96 @@ static NSString* normalizeTitleForTokenization(NSString* s);
 /// Counts audio files (excluding CUE) and CUE files. For icon subtitle: tracks > cues → audios, else → albums.
 - (void)audioAndCueCount:(NSUInteger*)outAudioCount cueCount:(NSUInteger*)outCueCount
 {
-    static NSSet<NSString*>* audioExts;
-    static dispatch_once_t onceToken;
-    dispatch_once(&onceToken, ^{
-        audioExts = [NSSet
-            setWithArray:
-                @[ @"mp3", @"flac", @"wav", @"aac", @"ogg", @"wma", @"m4a", @"ape", @"alac", @"aiff", @"opus", @"wv" ]];
-    });
-    NSUInteger audioCount = 0, cueCount = 0;
-    NSUInteger const n = self.fileCount;
-    for (NSUInteger i = 0; i < n; i++)
+    if (!self.fAudioCueCountCached)
     {
-        auto const file = tr_torrentFile(self.fHandle, (tr_file_index_t)i);
-        NSString* name = [NSString convertedStringFromCString:file.name];
-        NSString* ext = name.pathExtension.lowercaseString;
-        if ([ext isEqualToString:@"cue"])
-            cueCount++;
-        else if ([audioExts containsObject:ext])
-            audioCount++;
+        static NSSet<NSString*>* audioExts;
+        static dispatch_once_t onceToken;
+        dispatch_once(&onceToken, ^{
+            audioExts = [NSSet
+                setWithArray:@[ @"mp3", @"flac", @"wav", @"aac", @"ogg", @"wma", @"m4a", @"ape", @"alac", @"aiff", @"opus",
+                                @"wv" ]];
+        });
+        NSUInteger audioCount = 0, cueCount = 0;
+        NSUInteger const n = self.fileCount;
+        for (NSUInteger i = 0; i < n; i++)
+        {
+            auto const file = tr_torrentFile(self.fHandle, (tr_file_index_t)i);
+            NSString* name = [NSString convertedStringFromCString:file.name];
+            NSString* ext = name.pathExtension.lowercaseString;
+            if ([ext isEqualToString:@"cue"])
+                cueCount++;
+            else if ([audioExts containsObject:ext])
+                audioCount++;
+        }
+        self.fCachedAudioCount = audioCount;
+        self.fCachedCueCount = cueCount;
+        self.fAudioCueCountCached = YES;
     }
     if (outAudioCount)
-        *outAudioCount = audioCount;
+        *outAudioCount = self.fCachedAudioCount;
     if (outCueCount)
-        *outCueCount = cueCount;
+        *outCueCount = self.fCachedCueCount;
+}
+
+- (NSArray<NSDictionary*>*)tracksForFolder:(NSString*)folder
+{
+    if (folder.length == 0)
+        return nil;
+
+    NSArray<NSDictionary*>* cached = self.fFolderTracksCache[folder];
+    if (cached)
+        return cached.count > 0 ? cached : nil;
+
+    NSIndexSet* fileIndexes = [self fileIndexesForFolder:folder];
+    if (!fileIndexes || fileIndexes.count == 0)
+    {
+        self.fFolderTracksCache = self.fFolderTracksCache ?: @{};
+        NSMutableDictionary* mutableCache = [self.fFolderTracksCache mutableCopy];
+        mutableCache[folder] = @[];
+        self.fFolderTracksCache = mutableCache;
+        return nil;
+    }
+
+    static NSSet<NSString*>* audioExtensions;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        audioExtensions = [NSSet
+            setWithArray:@[ @"mp3", @"flac", @"wav", @"aac", @"ogg", @"wma", @"m4a", @"ape", @"alac", @"aiff", @"opus" ]];
+    });
+
+    NSMutableArray<NSDictionary*>* tracks = [NSMutableArray array];
+    [fileIndexes enumerateIndexesUsingBlock:^(NSUInteger idx, BOOL* _Nonnull stop) {
+        (void)stop;
+        auto const file = tr_torrentFile(self.fHandle, (tr_file_index_t)idx);
+        NSString* fileName = [NSString convertedStringFromCString:file.name];
+        NSString* ext = fileName.pathExtension.lowercaseString;
+        if (![audioExtensions containsObject:ext])
+            return;
+
+        NSString* displayName = fileName.lastPathComponent.stringByDeletingPathExtension.humanReadableFileName;
+        if (!displayName || displayName.length == 0)
+            displayName = fileName.lastPathComponent;
+        NSString* path = [self.currentDirectory stringByAppendingPathComponent:fileName];
+
+        [tracks addObject:@{
+            @"type" : @"track",
+            @"category" : @"audio",
+            @"folder" : folder,
+            @"index" : @(idx),
+            @"name" : displayName,
+            @"title" : displayName,
+            @"path" : path,
+        }];
+    }];
+    [tracks sortUsingComparator:^NSComparisonResult(NSDictionary* a, NSDictionary* b) {
+        return [a[@"name"] localizedStandardCompare:b[@"name"]];
+    }];
+
+    self.fFolderTracksCache = self.fFolderTracksCache ?: @{};
+    NSMutableDictionary* mutableCache = [self.fFolderTracksCache mutableCopy];
+    mutableCache[folder] = tracks;
+    self.fFolderTracksCache = mutableCache;
+    return tracks.count > 0 ? tracks : nil;
 }
 
 /// Count to show in file-based icon subtitle. Used by iconSubtitle.

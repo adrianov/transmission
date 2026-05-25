@@ -196,6 +196,7 @@ extern char const kPlayButtonRepresentedKey = '\0';
     torrent.cachedPlayButtonStateByIndex = nil;
     torrent.cachedPlayButtonStateByFolder = nil;
     torrent.cachedPlayButtonLayout = nil;
+    torrent.cachedPlayMenuLayout = nil;
     [self updateVisiblePlayButtons];
 }
 
@@ -1411,6 +1412,7 @@ static BOOL openWithIINAIfAvailable(NSURL* fileURL)
     {
         torrent.cachedPlayButtonState = nil;
         torrent.cachedPlayButtonLayout = nil;
+        torrent.cachedPlayMenuLayout = nil;
         torrent.cachedPlayButtonStateByIndex = nil;
         torrent.cachedPlayButtonStateByFolder = nil;
     }

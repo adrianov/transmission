@@ -33,16 +33,15 @@
         NSString* type = fileItem[@"type"] ?: @"file";
         NSString* category = fileItem[@"category"];
         BOOL const isCueFile = [self isCueAlbumFileItem:fileItem torrent:torrent];
-        BOOL singleTrackAlbum = (
-            [type isEqualToString:@"album"] && !isCueFile && torrent && [self tracksForAlbumItem:fileItem torrent:torrent].count == 1);
-        NSString* pathToOpen = torrent ? [torrent pathToOpenForPlayableItem:fileItem] : nil;
-        BOOL opensAsCue = pathToOpen.length > 0 && [pathToOpen.pathExtension.lowercaseString isEqualToString:@"cue"];
+        NSNumber* trackCountNum = fileItem[@"trackCount"];
+        BOOL singleTrackAlbum = [type isEqualToString:@"album"] && !isCueFile && trackCountNum != nil &&
+            trackCountNum.unsignedIntegerValue == 1;
         NSUInteger audioCount = 0, cueCount = 0;
         if (torrent)
             [torrent audioAndCueCount:&audioCount cueCount:&cueCount];
-        BOOL useAlbumsIcon = opensAsCue || [type isEqualToString:@"album"] ||
+        BOOL useAlbumsIcon = isCueFile || [type isEqualToString:@"album"] ||
             ([type isEqualToString:@"file"] && [category isEqualToString:@"audio"] && audioCount <= cueCount);
-        NSString* cacheKey = [NSString stringWithFormat:@"%@:%@:%d:%d:%d", type, category ?: @"", singleTrackAlbum ? 1 : 0, opensAsCue ? 1 : 0,
+        NSString* cacheKey = [NSString stringWithFormat:@"%@:%@:%d:%d", type, category ?: @"", singleTrackAlbum ? 1 : 0,
             useAlbumsIcon ? 1 : 0];
         NSImage* cached = [self.fIconCache objectForKey:cacheKey];
         if (cached)
@@ -78,62 +77,41 @@
     return nil;
 }
 
-- (NSArray<NSDictionary*>*)tracksForAlbumItem:(NSDictionary*)albumItem torrent:(Torrent*)torrent
+- (NSMutableArray<NSDictionary*>*)visibleTracksForFolder:(NSString*)folder torrent:(Torrent*)torrent
 {
-    NSString* folder = albumItem[@"folder"];
-    if (!folder || folder.length == 0)
-        return nil;
-    NSIndexSet* fileIndexes = [torrent fileIndexesForFolder:folder];
-    if (!fileIndexes || fileIndexes.count == 0)
+    NSArray<NSDictionary*>* tracks = [torrent tracksForFolder:folder];
+    if (tracks.count == 0)
         return nil;
 
-    static NSSet<NSString*>* audioExtensions;
-    static dispatch_once_t onceToken;
-    dispatch_once(&onceToken, ^{
-        audioExtensions = [NSSet
-            setWithArray:@[ @"mp3", @"flac", @"wav", @"aac", @"ogg", @"wma", @"m4a", @"ape", @"alac", @"aiff", @"opus" ]];
-    });
-
-    NSMutableArray<NSDictionary*>* tracks = [NSMutableArray array];
-    [fileIndexes enumerateIndexesUsingBlock:^(NSUInteger idx, BOOL* _Nonnull stop) {
-        (void)stop;
-        auto const file = tr_torrentFile(torrent.torrentStruct, (tr_file_index_t)idx);
-        NSString* fileName = [NSString convertedStringFromCString:file.name];
-        NSString* ext = fileName.pathExtension.lowercaseString;
-        if (![audioExtensions containsObject:ext])
-            return;
-        CGFloat progress = (CGFloat)tr_torrentFileConsecutiveProgress(torrent.torrentStruct, (tr_file_index_t)idx);
+    NSMutableArray<NSDictionary*>* visible = [NSMutableArray arrayWithCapacity:tracks.count];
+    for (NSDictionary* track in tracks)
+    {
+        NSNumber* indexNum = track[@"index"];
+        if (!indexNum)
+            continue;
+        tr_file_index_t const idx = (tr_file_index_t)indexNum.unsignedIntegerValue;
+        auto const file = tr_torrentFile(torrent.torrentStruct, idx);
+        CGFloat progress = (CGFloat)tr_torrentFileConsecutiveProgress(torrent.torrentStruct, idx);
         if (progress < 0)
             progress = 0;
         if (!file.wanted && progress < 1.0)
-            return; // hide unwanted incomplete files; show all wanted tracks so menu lists every .m4a with its title
+            continue;
 
-        NSString* displayName = fileName.lastPathComponent.stringByDeletingPathExtension.humanReadableFileName;
-        if (!displayName || displayName.length == 0)
-            displayName = fileName.lastPathComponent;
-        auto const location = tr_torrentFindFile(torrent.torrentStruct, (tr_file_index_t)idx);
-        NSString* path = !std::empty(location) ? @(location.c_str()) : [torrent.currentDirectory stringByAppendingPathComponent:fileName];
-
-        [tracks addObject:@{
-            @"type" : @"track",
-            @"category" : @"audio",
-            @"folder" : folder,
-            @"index" : @(idx),
-            @"name" : displayName,
-            @"path" : path,
-            @"progress" : @(progress)
-        }];
-    }];
-    [tracks sortUsingComparator:^NSComparisonResult(NSDictionary* a, NSDictionary* b) {
-        return [a[@"name"] localizedStandardCompare:b[@"name"]];
-    }];
-    return tracks.count > 0 ? tracks : nil;
+        NSMutableDictionary* entry = [track mutableCopy];
+        entry[@"progress"] = @(progress);
+        [visible addObject:entry];
+    }
+    return visible.count > 0 ? visible : nil;
 }
 
 /// Single source for playable item display title. Prefers state title (stripped when 2+ items); otherwise displayNameForPlayableItem. Used by content buttons and context menu.
 - (NSString*)menuTitleForPlayableItem:(NSDictionary*)item torrent:(Torrent*)torrent includeProgress:(BOOL)includeProgress
 {
-    NSString* base = (item[@"title"] && [item[@"title"] length] > 0) ? item[@"title"] : [torrent displayNameForPlayableItem:item];
+    NSString* base = (item[@"title"] && [item[@"title"] length] > 0) ? item[@"title"] : nil;
+    if (base.length == 0)
+        base = (item[@"name"] && [item[@"name"] length] > 0) ? item[@"name"] : nil;
+    if (base.length == 0)
+        base = [torrent displayNameForPlayableItem:item];
     if (!includeProgress || base.length == 0)
         return base;
     if (item[@"title"] && [item[@"title"] length] > 0)
@@ -150,9 +128,18 @@
     NSArray<NSDictionary*>* playableFiles = torrent.playableFiles;
     if (playableFiles.count == 0)
         return nil;
-    NSUInteger statsGeneration = torrent.statsGeneration;
+
     NSMenu* cachedMenu = [self.fPlayMenuCache objectForKey:torrent];
-    if (cachedMenu && torrent.cachedPlayMenuGeneration == statsGeneration)
+    if (cachedMenu && torrent.cachedPlayMenuLayout != nil &&
+        torrent.cachedPlayButtonLayout == torrent.cachedPlayMenuLayout)
+        return cachedMenu;
+
+    NSArray<NSDictionary*>* state = [PlayButtonStateBuilder stateForTorrent:torrent];
+    NSArray<NSDictionary*>* layout = [PlayButtonStateBuilder layoutForTorrent:torrent state:state];
+    if (layout.count == 0)
+        return nil;
+
+    if (cachedMenu && torrent.cachedPlayMenuLayout == layout)
         return cachedMenu;
 
     BOOL const isBooks = [torrent.detectedMediaCategory isEqualToString:@"books"];
@@ -160,8 +147,6 @@
     NSMenu* menu = [[NSMenu alloc] initWithTitle:mainTitle];
     menu.delegate = self;
 
-    NSArray<NSDictionary*>* state = [PlayButtonStateBuilder stateForTorrent:torrent];
-    NSArray<NSDictionary*>* layout = [PlayButtonStateBuilder layoutForTorrent:torrent state:state];
     NSMenuItem* pendingHeaderItem = nil;
     NSMenu* currentMenu = menu;
     for (NSDictionary* entry in layout)
@@ -192,17 +177,20 @@
             NSString* menuTitle = [self menuTitleForPlayableItem:fileItem torrent:torrent includeProgress:YES];
             if ([type isEqualToString:@"album"])
             {
-                NSArray<NSDictionary*>* tracks = [self tracksForAlbumItem:fileItem torrent:torrent];
-                if (tracks && tracks.count == 1)
+                NSString* folder = fileItem[@"folder"];
+                NSMutableArray<NSDictionary*>* tracks = folder.length > 0 ? [self visibleTracksForFolder:folder torrent:torrent] : nil;
+                if (tracks.count == 1)
                 {
                     NSDictionary* track = tracks.firstObject;
                     menuTitle = [self menuTitleForPlayableItem:track torrent:torrent includeProgress:YES];
-                    fileItem = track; // play the track, not the folder
+                    fileItem = track;
                 }
-                else if (tracks && tracks.count > 1)
+                else if (tracks.count > 1)
                 {
+                    NSMutableDictionary* albumItemInfo = [fileItem mutableCopy];
+                    albumItemInfo[@"trackCount"] = @(tracks.count);
                     NSMenuItem* albumItem = [[NSMenuItem alloc] initWithTitle:menuTitle action:nil keyEquivalent:@""];
-                    albumItem.image = [self iconForPlayableFileItem:fileItem torrent:torrent];
+                    albumItem.image = [self iconForPlayableFileItem:albumItemInfo torrent:torrent];
                     NSMenu* albumMenu = [[NSMenu alloc] initWithTitle:menuTitle];
                     albumMenu.delegate = self;
                     albumItem.submenu = albumMenu;
@@ -225,7 +213,6 @@
                                                                     keyEquivalent:@""];
                         trackItem.target = self;
                         trackItem.representedObject = @{ @"torrent" : torrent, @"item" : track };
-                        trackItem.image = [self iconForPlayableFileItem:track torrent:torrent];
                         [albumMenu addItem:trackItem];
                     }
                     [currentMenu addItem:albumItem];
@@ -242,7 +229,7 @@
     if (menu.numberOfItems == 0)
         return nil;
     [self.fPlayMenuCache setObject:menu forKey:torrent];
-    torrent.cachedPlayMenuGeneration = statsGeneration;
+    torrent.cachedPlayMenuLayout = layout;
     return menu;
 }
 

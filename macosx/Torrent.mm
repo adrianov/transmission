@@ -1332,12 +1332,15 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
     {
         // Invalidate playable files cache so companion files are detected
         self.fPlayableFiles = nil;
+        self.fFolderTracksCache = nil;
+        self.fAudioCueCountCached = NO;
         // Also invalidate cached button state
         self.cachedPlayButtonState = nil;
         self.cachedPlayButtonStateByIndex = nil;
         self.cachedPlayButtonStateByFolder = nil;
         self.cachedPlayButtonSource = nil;
         self.cachedPlayButtonLayout = nil;
+        self.cachedPlayMenuLayout = nil;
 
         // Trigger UI refresh
         [NSNotificationCenter.defaultCenter postNotificationName:@"UpdateUI" object:nil];
@@ -1441,11 +1444,14 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
     free(files);
 
     self.fPlayableFiles = nil;
+    self.fFolderTracksCache = nil;
+    self.fAudioCueCountCached = NO;
     self.cachedPlayButtonState = nil;
     self.cachedPlayButtonStateByIndex = nil;
     self.cachedPlayButtonStateByFolder = nil;
     self.cachedPlayButtonSource = nil;
     self.cachedPlayButtonLayout = nil;
+    self.cachedPlayMenuLayout = nil;
     self.cachedPlayButtonProgressGeneration = 0;
 
     [self update];
@@ -1809,6 +1815,8 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
     self.fMediaTypeDetected = NO;
     self.fPlayableFiles = nil;
     self.fFolderToFiles = nil;
+    self.fFolderTracksCache = nil;
+    self.fAudioCueCountCached = NO;
     self.fFileProgressCache = nil;
     self.fFolderProgressCache = nil;
     self.fFolderFirstMediaProgressCache = nil;
