@@ -44,6 +44,7 @@
 #include "libtransmission/bandwidth.h"
 #include "libtransmission/blocklist.h"
 #include "libtransmission/cache.h"
+#include "libtransmission/disk-io.h"
 #include "libtransmission/interned-string.h"
 #include "libtransmission/ip-cache.h"
 #include "libtransmission/log.h" // for tr_log_level
@@ -1191,9 +1192,16 @@ private:
     WebMediator web_mediator_{ this };
     std::unique_ptr<tr_web> web_ = tr_web::create(this->web_mediator_);
 
+    std::unique_ptr<tr_disk_io_queue> disk_io_;
+
 public:
-    // depends-on: settings_, open_files_, torrents_
-    std::unique_ptr<Cache> cache = std::make_unique<Cache>(torrents_, Memory{ 2U, Memory::Units::MBytes });
+    // depends-on: settings_, open_files_, torrents_, disk_io_
+    std::unique_ptr<Cache> cache;
+
+    [[nodiscard]] tr_disk_io_queue& disk_io() noexcept
+    {
+        return *disk_io_;
+    }
 
 private:
     // depends-on: timer_maker_, blocklists_, top_bandwidth_, utp_context, torrents_, web_

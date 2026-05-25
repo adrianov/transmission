@@ -11,6 +11,8 @@
 
 #include <cstddef> // size_t
 #include <cstdint> // uint8_t, uint32_t
+#include <string>
+#include <vector>
 
 #include "libtransmission/transmission.h"
 

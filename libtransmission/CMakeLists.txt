@@ -41,6 +41,7 @@ target_sources(${TR_NAME}
         blocklist.h
         cache.cc
         cache.h
+        cache-flush.cc
         clients.cc
         clients.h
         completion.cc
@@ -52,6 +53,8 @@ target_sources(${TR_NAME}
         crypto-utils-wolfssl.cc
         crypto-utils.cc
         crypto-utils.h
+        disk-io.cc
+        disk-io.h
         error-types.h
         error.cc
         error.h

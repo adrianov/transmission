@@ -4,13 +4,11 @@
 // License text can be found in the licenses/ folder.
 
 #include <algorithm>
-#include <cerrno> // EINVAL
-#include <cstddef>
-#include <cstdint> // uint8_t
-#include <iterator> // std::distance(), std::next(), std::prev()
+#include <cerrno>
+#include <iterator>
 #include <memory>
-#include <numeric> // std::accumulate()
-#include <utility> // std::make_pair()
+#include <mutex>
+#include <utility>
 #include <vector>
 
 #include <fmt/format.h>
@@ -18,8 +16,10 @@
 #include "libtransmission/transmission.h"
 
 #include "libtransmission/cache.h"
+#include "libtransmission/disk-io.h"
 #include "libtransmission/inout.h"
 #include "libtransmission/log.h"
+#include "libtransmission/session.h"
 #include "libtransmission/torrent.h"
 #include "libtransmission/torrents.h"
 #include "libtransmission/tr-assert.h"
@@ -29,87 +29,12 @@ Cache::Key Cache::make_key(tr_torrent const& tor, tr_block_info::Location const 
     return std::make_pair(tor.id(), loc.block);
 }
 
-Cache::CIter Cache::find_span_end(CIter const& span_begin, CIter const& end) noexcept
+size_t Cache::active_block_count_locked() const noexcept
 {
-    static constexpr auto NotAdjacent = [](CacheBlock const& block1, CacheBlock const& block2)
-    {
-        return block1.key.first != block2.key.first || block1.key.second + 1 != block2.key.second;
-    };
-    auto const span_end = std::adjacent_find(span_begin, end, NotAdjacent);
-    return span_end == end ? end : std::next(span_end);
-}
-
-std::pair<Cache::CIter, Cache::CIter> Cache::find_biggest_span(CIter const& begin, CIter const& end) noexcept
-{
-    auto biggest_begin = begin;
-    auto biggest_end = begin;
-    auto biggest_len = std::distance(biggest_begin, biggest_end);
-
-    for (auto span_begin = begin; span_begin < end;)
-    {
-        auto span_end = find_span_end(span_begin, end);
-
-        if (auto const len = std::distance(span_begin, span_end); len > biggest_len)
-        {
-            biggest_begin = span_begin;
-            biggest_end = span_end;
-            biggest_len = len;
-        }
-
-        span_begin = span_end;
-    }
-
-    return { biggest_begin, biggest_end };
-}
-
-int Cache::write_contiguous(CIter const& begin, CIter const& end) const
-{
-    // The most common case without an extra data copy.
-    auto const* out = std::data(*begin->buf);
-    auto outlen = std::size(*begin->buf);
-
-    // Contiguous area to join more than one block, if any.
-    auto buf = std::vector<uint8_t>{};
-
-    if (end - begin > 1)
-    {
-        // copy blocks into contiguous memory
-        auto const buflen = std::accumulate(
-            begin,
-            end,
-            size_t{},
-            [](size_t sum, auto const& block) { return sum + std::size(*block.buf); });
-        buf.resize(buflen);
-        auto* walk = std::data(buf);
-        for (auto iter = begin; iter != end; ++iter)
-        {
-            TR_ASSERT(begin->key.first == iter->key.first);
-            TR_ASSERT(begin->key.second + std::distance(begin, iter) == iter->key.second);
-            walk = std::copy_n(std::data(*iter->buf), std::size(*iter->buf), walk);
-        }
-        TR_ASSERT(std::data(buf) + std::size(buf) == walk);
-        out = std::data(buf);
-        outlen = std::size(buf);
-    }
-
-    // save it
-    auto const& [torrent_id, block] = begin->key;
-    auto* const tor = torrents_.get(torrent_id);
-    if (tor == nullptr)
-    {
-        return EINVAL;
-    }
-
-    auto const loc = tor->block_loc(block);
-
-    if (auto const err = tr_ioWrite(*tor, loc, outlen, out); err != 0)
-    {
-        return err;
-    }
-
-    ++disk_writes_;
-    disk_write_bytes_ += outlen;
-    return {};
+    return static_cast<size_t>(std::count_if(
+        std::begin(blocks_),
+        std::end(blocks_),
+        [](CacheBlock const& block) { return !block.flushing; }));
 }
 
 int Cache::set_limit(Memory const max_size)
@@ -126,33 +51,35 @@ Cache::Cache(tr_torrents const& torrents, Memory const max_size)
 {
 }
 
-// ---
-
 int Cache::write_block(tr_torrent_id_t const tor_id, tr_block_index_t const block, std::unique_ptr<BlockData> writeme)
 {
     if (max_blocks_ == 0U)
     {
-        TR_ASSERT(std::empty(blocks_));
+        {
+            auto const lock = std::scoped_lock{ blocks_mutex_ };
+            TR_ASSERT(std::empty(blocks_));
+        }
 
-        // Bypass cache. This may be helpful for those whose filesystem
-        // already has a cache layer for the very purpose of this cache
-        // https://github.com/transmission/transmission/pull/5668
         auto* const tor = torrents_.get(tor_id);
         return tor == nullptr ? EINVAL : tr_ioWrite(*tor, tor->block_loc(block), std::size(*writeme), std::data(*writeme));
     }
 
-    auto const key = Key{ tor_id, block };
-    auto iter = std::lower_bound(std::begin(blocks_), std::end(blocks_), key, CompareCacheBlockByKey);
-    if (iter == std::end(blocks_) || iter->key != key)
     {
-        iter = blocks_.emplace(iter);
-        iter->key = key;
+        auto const lock = std::scoped_lock{ blocks_mutex_ };
+
+        auto const key = Key{ tor_id, block };
+        auto iter = std::lower_bound(std::begin(blocks_), std::end(blocks_), key, CompareCacheBlockByKey);
+        if (iter == std::end(blocks_) || iter->key != key)
+        {
+            iter = blocks_.emplace(iter);
+            iter->key = key;
+        }
+
+        iter->buf = std::move(writeme);
+
+        ++cache_writes_;
+        cache_write_bytes_ += std::size(*iter->buf);
     }
-
-    iter->buf = std::move(writeme);
-
-    ++cache_writes_;
-    cache_write_bytes_ += std::size(*iter->buf);
 
     return cache_trim();
 }
@@ -174,79 +101,58 @@ Cache::CIter Cache::get_block(tr_torrent const& tor, tr_block_info::Location con
 
 int Cache::read_block(tr_torrent const& tor, tr_block_info::Location const& loc, size_t len, uint8_t* setme)
 {
-    if (auto const iter = get_block(tor, loc); iter != std::end(blocks_))
     {
-        std::copy_n(std::begin(*iter->buf), len, setme);
-        return {};
+        auto const lock = std::scoped_lock{ blocks_mutex_ };
+        if (auto const iter = get_block(tor, loc); iter != std::end(blocks_))
+        {
+            std::copy_n(std::begin(*iter->buf), len, setme);
+            return {};
+        }
     }
 
     return tr_ioRead(tor, loc, len, setme);
 }
 
-// ---
-
-int Cache::flush_span(CIter const& begin, CIter const& end)
+void Cache::release_flushed_blocks(std::vector<Key> const& keys)
 {
-    for (auto span_begin = begin; span_begin < end;)
-    {
-        auto const span_end = find_span_end(span_begin, end);
+    auto const lock = std::scoped_lock{ blocks_mutex_ };
 
-        if (auto const err = write_contiguous(span_begin, span_end); err != 0)
+    for (auto const& key : keys)
+    {
+        if (auto const iter = std::lower_bound(std::begin(blocks_), std::end(blocks_), key, CompareCacheBlockByKey);
+            iter != std::end(blocks_) && iter->key == key)
         {
-            return err;
+            blocks_.erase(iter);
         }
-
-        span_begin = span_end;
     }
-
-    blocks_.erase(begin, end);
-    return {};
-}
-
-int Cache::flush_file(tr_torrent const& tor, tr_file_index_t const file)
-{
-    auto const tor_id = tor.id();
-    auto const [block_begin, block_end] = tor.block_span_for_file(file);
-
-    return flush_span(
-        std::lower_bound(std::begin(blocks_), std::end(blocks_), std::make_pair(tor_id, block_begin), CompareCacheBlockByKey),
-        std::lower_bound(std::begin(blocks_), std::end(blocks_), std::make_pair(tor_id, block_end), CompareCacheBlockByKey));
-}
-
-int Cache::flush_torrent(tr_torrent_id_t const tor_id)
-{
-    return flush_span(
-        std::lower_bound(std::begin(blocks_), std::end(blocks_), std::make_pair(tor_id, 0), CompareCacheBlockByKey),
-        std::lower_bound(std::begin(blocks_), std::end(blocks_), std::make_pair(tor_id + 1, 0), CompareCacheBlockByKey));
-}
-
-int Cache::flush_biggest()
-{
-    auto const [begin, end] = find_biggest_span(std::begin(blocks_), std::end(blocks_));
-
-    if (begin == end) // nothing to flush
-    {
-        return 0;
-    }
-
-    if (auto const err = write_contiguous(begin, end); err != 0)
-    {
-        return err;
-    }
-
-    blocks_.erase(begin, end);
-    return 0;
 }
 
 int Cache::cache_trim()
 {
-    while (std::size(blocks_) > max_blocks_)
+    for (;;)
     {
-        if (auto const err = flush_biggest(); err != 0)
-        {
-            return err;
-        }
-    }
+        auto job = tr_disk_write_job{};
+        auto* session = static_cast<tr_session*>(nullptr);
 
-    return 0;
+        {
+            auto const lock = std::scoped_lock{ blocks_mutex_ };
+
+            if (active_block_count_locked() <= max_blocks_)
+            {
+                return 0;
+            }
+
+            if (auto const err = flush_biggest_locked(session, job); err != 0)
+            {
+                return err;
+            }
+
+            if (std::empty(job.blocks_to_release))
+            {
+                return 0;
+            }
+        }
+
+        session->disk_io().schedule(std::move(job));
+    }
 }
