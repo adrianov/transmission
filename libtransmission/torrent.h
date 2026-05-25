@@ -1231,22 +1231,33 @@ private:
 
     void set_files_wanted(tr_file_index_t const* files, size_t n_files, bool wanted, bool is_bootstrapping)
     {
-        auto const lock = unique_lock();
+        auto should_recheck = false;
+        auto should_create_empty = false;
 
-        files_wanted_.set(files, n_files, wanted);
-        completion_.invalidate_size_when_done();
-
-        // Recalculate file order BEFORE emitting, so observers get updated order
-        recalculate_file_order();
-        files_wanted_changed_.emit(this, files, n_files, wanted);
-
-        if (!is_bootstrapping)
         {
-            set_dirty();
+            auto const lock = unique_lock();
+
+            files_wanted_.set(files, n_files, wanted);
+            completion_.invalidate_size_when_done();
+
+            // Recalculate file order BEFORE emitting, so observers get updated order
+            recalculate_file_order();
+            files_wanted_changed_.emit(this, files, n_files, wanted);
+
+            if (!is_bootstrapping)
+            {
+                set_dirty();
+                should_recheck = true;
+                should_create_empty = is_running();
+            }
+        }
+
+        if (should_recheck)
+        {
             recheck_completeness();
 
             // Create empty files for newly wanted zero-byte files when torrent is running
-            if (is_running())
+            if (should_create_empty)
             {
                 create_empty_files();
             }
