@@ -174,7 +174,7 @@ public:
             TR_PREFER_UTP,
             TR_PREFER_TCP,
         };
-        std::chrono::milliseconds sleep_per_seconds_during_verify = std::chrono::milliseconds{ 100 };
+        std::chrono::milliseconds sleep_per_seconds_during_verify = {};
         std::optional<std::string> proxy_url;
         std::string announce_ip;
         std::string bind_address_ipv4;
