@@ -29,6 +29,47 @@ namespace
 {
     return std::chrono::time_point_cast<std::chrono::seconds>(std::chrono::steady_clock::now());
 }
+
+// libtorrent's default checking_mem_usage is 256 x 16 KiB blocks (~4 MiB).
+auto constexpr VerifyBufSize = size_t{ 4U * 1024U * 1024U };
+
+void close_file(tr_sys_file_t& fd)
+{
+    if (fd != TR_BAD_SYS_FILE)
+    {
+        tr_sys_file_close(fd);
+        fd = TR_BAD_SYS_FILE;
+    }
+}
+
+void open_file(tr_sys_file_t& fd, tr_verify_worker::Mediator& verify_mediator, tr_file_index_t const file_index)
+{
+    close_file(fd);
+
+    auto const found = verify_mediator.find_file(file_index);
+    fd = !found ? TR_BAD_SYS_FILE : tr_sys_file_open(found->c_str(), TR_SYS_FILE_READ | TR_SYS_FILE_SEQUENTIAL, 0);
+}
+
+uint64_t read_or_skip(
+    tr_sys_file_t fd,
+    std::byte* buffer,
+    uint64_t const bytes_wanted,
+    tr_sha1& sha)
+{
+    if (fd == TR_BAD_SYS_FILE || bytes_wanted == 0U)
+    {
+        return bytes_wanted;
+    }
+
+    auto num_read = uint64_t{};
+    if (tr_sys_file_read(fd, buffer, bytes_wanted, &num_read) && num_read > 0U)
+    {
+        sha.add(buffer, num_read);
+        return num_read;
+    }
+
+    return bytes_wanted;
+}
 } // namespace
 
 void tr_verify_worker::verify_torrent(
@@ -38,94 +79,74 @@ void tr_verify_worker::verify_torrent(
 {
     verify_mediator.on_verify_started();
 
-    tr_sys_file_t fd = TR_BAD_SYS_FILE;
-    uint64_t file_pos = 0U;
-    uint32_t piece_pos = 0U;
-    tr_file_index_t file_index = 0U;
-    tr_file_index_t prev_file_index = ~file_index;
-    tr_piece_index_t piece = 0U;
-    auto buffer = std::vector<std::byte>(1024U * 256U);
+    auto fd = tr_sys_file_t{ TR_BAD_SYS_FILE };
+    auto file_index = tr_file_index_t{ 0U };
+    auto off = uint64_t{ 0U };
+    auto piece = tr_piece_index_t{ 0U };
+    auto buffer = std::vector<std::byte>(VerifyBufSize);
     auto sha = tr_sha1{};
     auto last_slept_at = current_time_secs();
 
     auto const& metainfo = verify_mediator.metainfo();
     while (!abort_flag && piece < metainfo.piece_count())
     {
-        auto const file_length = metainfo.file_size(file_index);
+        sha.clear();
+        auto left_in_piece = metainfo.piece_size(piece);
 
-        /* if we're starting a new file... */
-        if (file_pos == 0U && fd == TR_BAD_SYS_FILE && file_index != prev_file_index)
+        while (!abort_flag && left_in_piece > 0U)
         {
-            auto const found = verify_mediator.find_file(file_index);
-            fd = !found ? TR_BAD_SYS_FILE : tr_sys_file_open(found->c_str(), TR_SYS_FILE_READ | TR_SYS_FILE_SEQUENTIAL, 0);
-            prev_file_index = file_index;
-        }
-
-        /* figure out how much we can read this pass */
-        uint64_t left_in_piece = metainfo.piece_size(piece) - piece_pos;
-        uint64_t left_in_file = file_length - file_pos;
-        uint64_t bytes_this_pass = std::min(left_in_file, left_in_piece);
-        bytes_this_pass = std::min(bytes_this_pass, uint64_t(std::size(buffer)));
-
-        /* read a bit */
-        if (fd != TR_BAD_SYS_FILE)
-        {
-            auto num_read = uint64_t{};
-            if (tr_sys_file_read_at(fd, std::data(buffer), bytes_this_pass, file_pos, &num_read) && num_read > 0U)
+            if (file_index >= metainfo.file_count())
             {
-                bytes_this_pass = num_read;
-                sha.add(std::data(buffer), bytes_this_pass);
+                left_in_piece = 0U;
+                break;
+            }
+
+            if (fd == TR_BAD_SYS_FILE)
+            {
+                open_file(fd, verify_mediator, file_index);
+                off = 0U;
+            }
+
+            auto const file_length = metainfo.file_size(file_index);
+            auto const left_in_file = file_length - off;
+            if (left_in_file == 0U)
+            {
+                close_file(fd);
+                ++file_index;
+                continue;
+            }
+
+            auto const bytes_this_pass = std::min(
+                { uint64_t{ left_in_piece }, left_in_file, uint64_t{ buffer.size() } });
+            auto const bytes_done = read_or_skip(fd, std::data(buffer), bytes_this_pass, sha);
+            off += bytes_done;
+            left_in_piece -= bytes_done;
+
+            if (off == file_length)
+            {
+                close_file(fd);
+                ++file_index;
             }
         }
 
-        /* move our offsets */
-        left_in_piece -= bytes_this_pass;
-        left_in_file -= bytes_this_pass;
-        piece_pos += bytes_this_pass;
-        file_pos += bytes_this_pass;
+        auto const has_piece = sha.finish() == metainfo.piece_hash(piece);
+        verify_mediator.on_piece_checked(piece, has_piece);
 
-        /* if we're finishing a piece... */
-        if (left_in_piece == 0U)
+        if (sleep_per_seconds_during_verify > std::chrono::milliseconds::zero())
         {
-            auto const has_piece = sha.finish() == metainfo.piece_hash(piece);
-            verify_mediator.on_piece_checked(piece, has_piece);
-
-            if (sleep_per_seconds_during_verify > std::chrono::milliseconds::zero())
+            /* sleeping even just a few msec per second goes a long
+             * way towards reducing IO load... */
+            if (auto const now = current_time_secs(); last_slept_at != now)
             {
-                /* sleeping even just a few msec per second goes a long
-                 * way towards reducing IO load... */
-                if (auto const now = current_time_secs(); last_slept_at != now)
-                {
-                    last_slept_at = now;
-                    std::this_thread::sleep_for(sleep_per_seconds_during_verify);
-                }
+                last_slept_at = now;
+                std::this_thread::sleep_for(sleep_per_seconds_during_verify);
             }
-
-            sha.clear();
-            ++piece;
-            piece_pos = 0U;
         }
 
-        /* if we're finishing a file... */
-        if (left_in_file == 0U)
-        {
-            if (fd != TR_BAD_SYS_FILE)
-            {
-                tr_sys_file_close(fd);
-                fd = TR_BAD_SYS_FILE;
-            }
-
-            ++file_index;
-            file_pos = 0U;
-        }
+        ++piece;
     }
 
-    /* cleanup */
-    if (fd != TR_BAD_SYS_FILE)
-    {
-        tr_sys_file_close(fd);
-    }
-
+    close_file(fd);
     verify_mediator.on_verify_done(abort_flag);
 }
 
