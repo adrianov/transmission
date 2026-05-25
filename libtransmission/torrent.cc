@@ -776,27 +776,36 @@ namespace completeness_helpers
 
 void tr_torrent::create_empty_files() const
 {
-    auto const base = current_dir();
-    TR_ASSERT(!std::empty(base));
-    if (!has_metainfo() || std::empty(base))
-    {
-        return;
-    }
+    auto filenames = std::vector<tr_pathbuf>{};
 
-    auto const file_count = this->file_count();
-    for (tr_file_index_t file_index = 0U; file_index < file_count; ++file_index)
     {
-        if (file_size(file_index) != 0U || !file_is_wanted(file_index) || find_file(file_index))
+        auto const lock = unique_lock();
+
+        auto const base = current_dir();
+        TR_ASSERT(!std::empty(base));
+        if (!has_metainfo() || std::empty(base))
         {
-            continue;
+            return;
         }
 
-        // torrent contains a wanted zero-bytes file and that file isn't on disk yet.
-        // We attempt to create that file.
-        auto filename = tr_pathbuf{};
-        auto const& subpath = file_subpath(file_index);
-        filename.assign(base, '/', subpath);
+        auto const file_count = this->file_count();
+        filenames.reserve(file_count);
+        for (tr_file_index_t file_index = 0U; file_index < file_count; ++file_index)
+        {
+            if (file_size(file_index) != 0U || !file_is_wanted(file_index) || find_file(file_index))
+            {
+                continue;
+            }
 
+            auto filename = tr_pathbuf{};
+            auto const& subpath = file_subpath(file_index);
+            filename.assign(base, '/', subpath);
+            filenames.emplace_back(std::move(filename));
+        }
+    }
+
+    for (auto const& filename : filenames)
+    {
         // create subfolders, if any
         auto dir = tr_pathbuf{ filename.sv() };
         dir.popdir();

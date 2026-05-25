@@ -1254,9 +1254,13 @@ private:
 
         if (should_recheck)
         {
+            // Release the lock before recheck_completeness(): it acquires the session lock itself, and
+            // done_.emit() may tear down peer connections (libevent) that must not run while this
+            // caller still holds the lock from set_files_wanted().
             recheck_completeness();
 
-            // Create empty files for newly wanted zero-byte files when torrent is running
+            // Create empty files for newly wanted zero-byte files when torrent is running.
+            // create_empty_files() snapshots wanted paths under the session lock, then creates on disk.
             if (should_create_empty)
             {
                 create_empty_files();
