@@ -1,0 +1,43 @@
+#!/usr/bin/env python3
+# Return 0 if a .ninja_deps file is complete; 1 if missing, corrupt, or unreadable.
+# Usage: ./bin/ninja-deps-ok <path-to-.ninja_deps>
+
+import struct
+import sys
+
+SIG = b"# ninjadeps\n"
+VER = 4
+MAX_RECORD = (1 << 19) - 1
+
+
+def deps_ok(path: str) -> bool:
+    try:
+        with open(path, "rb") as f:
+            if f.read(len(SIG)) != SIG:
+                return False
+            if struct.unpack("<I", f.read(4))[0] != VER:
+                return False
+            while True:
+                size_bytes = f.read(4)
+                if not size_bytes:
+                    return True
+                if len(size_bytes) != 4:
+                    return False
+                size = struct.unpack("<I", size_bytes)[0] & 0x7FFFFFFF
+                if size == 0 or size > MAX_RECORD:
+                    return False
+                if len(f.read(size)) != size:
+                    return False
+    except OSError:
+        return False
+
+
+def main() -> int:
+    if len(sys.argv) != 2:
+        print("usage: ninja-deps-ok <path-to-.ninja_deps>", file=sys.stderr)
+        return 2
+    return 0 if deps_ok(sys.argv[1]) else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

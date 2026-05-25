@@ -4,12 +4,22 @@ set -euo pipefail
 root_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 build_dir="${root_dir}/build"
 app_path="${build_dir}/macosx/Transmission.app"
+bin_dir="${root_dir}/bin"
 
-if cmake -B "${build_dir}" -G Ninja -DCMAKE_BUILD_TYPE=Release 2>&1 | grep -q "generator.*does not match"; then
-    rm -rf "${build_dir}"
-    cmake -B "${build_dir}" -G Ninja -DCMAKE_BUILD_TYPE=Release
+if [[ -f "${build_dir}/CMakeCache.txt" ]]; then
+    gen=$(grep -m1 '^CMAKE_GENERATOR:INTERNAL=' "${build_dir}/CMakeCache.txt" | cut -d= -f2- || true)
+    if [[ -n "${gen}" && "${gen}" != "Ninja" ]]; then
+        rm -rf "${build_dir}"
+    fi
 fi
-cmake --build "${build_dir}" -t transmission-mac
+
+cmake -B "${build_dir}" -G Ninja -DCMAKE_BUILD_TYPE=Release
+
+if [[ -f "${build_dir}/.ninja_deps" ]] && ! python3 "${bin_dir}/ninja-deps-ok" "${build_dir}/.ninja_deps"; then
+    rm -f "${build_dir}/.ninja_deps"
+fi
+
+"${bin_dir}/cmake-build" "${build_dir}" -t transmission-mac
 
 if [[ -d "${app_path}" ]]; then
     open -R "${app_path}"

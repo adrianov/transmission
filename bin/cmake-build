@@ -9,6 +9,8 @@
 
 set -euo pipefail
 
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 usage()
 {
     echo "usage: cmake-build <build-dir> [cmake --build options...]" >&2
@@ -18,6 +20,17 @@ usage()
 [[ $# -ge 1 ]] || usage
 build_dir=$1
 shift
+
+lock_dir="$build_dir/.cmake-build.lock"
+while ! mkdir "$lock_dir" 2>/dev/null; do
+    echo "Waiting for another build on $build_dir..." >&2
+    sleep 1
+done
+trap 'rmdir "$lock_dir" 2>/dev/null || true' EXIT
+
+if [[ -f $build_dir/.ninja_deps ]] && ! python3 "$script_dir/ninja-deps-ok" "$build_dir/.ninja_deps"; then
+    rm -f "$build_dir/.ninja_deps"
+fi
 
 avail_mem_kib()
 {
@@ -79,7 +92,7 @@ if [[ -f $build_dir/CMakeCache.txt ]]; then
 fi
 
 if $append_load; then
-    exec cmake --build "$build_dir" --parallel "$jobs" "$@" -- -l "$load_lim"
+    cmake --build "$build_dir" --parallel "$jobs" "$@" -- -l "$load_lim"
 else
-    exec cmake --build "$build_dir" --parallel "$jobs" "$@"
+    cmake --build "$build_dir" --parallel "$jobs" "$@"
 fi
