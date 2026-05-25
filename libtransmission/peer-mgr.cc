@@ -475,10 +475,9 @@ public:
         return std::count_if(std::begin(peers), std::end(peers), [](auto const& peer) { return peer->is_encrypted(); });
     }
 
-    void remove_peer(std::shared_ptr<tr_peerMsgs> const& peer)
+    // session lock must be held. Removes peer from swarm without destroying it.
+    [[nodiscard]] std::shared_ptr<tr_peerMsgs> detach_peer(std::shared_ptr<tr_peerMsgs> const& peer)
     {
-        auto const lock = unique_lock();
-
         peer_disconnect.emit(tor, peer->has(), peer->active_requests);
 
         auto const& peer_info = peer->peer_info;
@@ -489,21 +488,44 @@ public:
 
         if (auto iter = std::find(std::begin(peers), std::end(peers), peer); iter != std::end(peers))
         {
+            auto detached = std::move(*iter);
             peers.erase(iter);
             TR_ASSERT(stats.peer_count == peerCount());
+            return detached;
+        }
+
+        return {};
+    }
+
+    void remove_peer(std::shared_ptr<tr_peerMsgs> const& peer)
+    {
+        auto detached = std::shared_ptr<tr_peerMsgs>{};
+        {
+            auto const lock = unique_lock();
+            detached = detach_peer(peer);
         }
     }
 
     void remove_all_peers()
     {
         auto tmp = Peers{};
-        std::swap(tmp, peers);
-        for (auto const& peer : tmp)
         {
-            remove_peer(peer);
-        }
+            auto const lock = unique_lock();
 
-        TR_ASSERT(stats.peer_count == 0);
+            for (auto const& peer : peers)
+            {
+                peer_disconnect.emit(tor, peer->has(), peer->active_requests);
+
+                auto const& peer_info = peer->peer_info;
+                TR_ASSERT(peer_info);
+
+                --stats.peer_count;
+                --stats.peer_from_count[peer_info->from_first()];
+            }
+
+            tmp.swap(peers);
+            TR_ASSERT(stats.peer_count == 0);
+        }
     }
 
     [[nodiscard]] TR_CONSTEXPR20 auto is_all_upload_only() const noexcept
@@ -780,37 +802,50 @@ private:
 
     void on_torrent_done()
     {
-        auto const lock = unique_lock();
+        auto detached_peers = std::vector<std::shared_ptr<tr_peerMsgs>>{};
 
-        // Tell all peers we're no longer interested in downloading
-        std::for_each(std::begin(peers), std::end(peers), [](auto const& peer) { peer->set_interested(false); });
-
-        // Free the wishlist - not needed when only seeding
-        wishlist.reset();
-
-        // Free webseeds - they're only used for downloading, not seeding
-        webseeds.clear();
-        webseeds.shrink_to_fit();
-        stats.active_webseed_count = 0;
-
-        // Disconnect from upload-only peers since we can't exchange data
-        // Keep peers that might want to download from us
-        auto peers_to_remove = std::vector<std::shared_ptr<tr_peerMsgs>>{};
-        for (auto const& peer : peers)
         {
-            if (peer->is_seed() || peer->peer_info->is_upload_only())
+            auto const lock = unique_lock();
+
+            // Tell all peers we're no longer interested in downloading
+            std::for_each(std::begin(peers), std::end(peers), [](auto const& peer) { peer->set_interested(false); });
+
+            // Free the wishlist - not needed when only seeding
+            wishlist.reset();
+
+            // Free webseeds - they're only used for downloading, not seeding
+            webseeds.clear();
+            webseeds.shrink_to_fit();
+            stats.active_webseed_count = 0;
+
+            // Disconnect from upload-only peers since we can't exchange data.
+            // Keep peers that might want to download from us.
+            auto peers_to_remove = std::vector<std::shared_ptr<tr_peerMsgs>>{};
+            for (auto const& peer : peers)
             {
-                peers_to_remove.push_back(peer);
+                if (peer->is_seed() || peer->peer_info->is_upload_only())
+                {
+                    peers_to_remove.push_back(peer);
+                }
             }
-        }
-        for (auto const& peer : peers_to_remove)
-        {
-            remove_peer(peer);
+
+            for (auto const& peer : peers_to_remove)
+            {
+                if (auto detached = detach_peer(peer))
+                {
+                    detached_peers.push_back(std::move(detached));
+                }
+            }
+
+            // Reset dynamic peer limit tracking - seeding has different needs
+            speed_at_peer_count.clear();
+            dynamic_peer_limit = 0;
         }
 
-        // Reset dynamic peer limit tracking - seeding has different needs
-        speed_at_peer_count.clear();
-        dynamic_peer_limit = 0;
+        // Destroy peer connections outside the session lock. tr_peerIo::clear() can block in
+        // libevent while the session thread is in tr_peerIo::can_read_wrapper() waiting for
+        // the same lock.
+        detached_peers.clear();
     }
 
     void on_swarm_is_all_upload_only()
