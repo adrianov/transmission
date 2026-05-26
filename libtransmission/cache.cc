@@ -5,7 +5,6 @@
 
 #include <algorithm>
 #include <cerrno>
-#include <iterator>
 #include <memory>
 #include <mutex>
 #include <utility>
@@ -16,10 +15,8 @@
 #include "libtransmission/transmission.h"
 
 #include "libtransmission/cache.h"
-#include "libtransmission/disk-io.h"
 #include "libtransmission/inout.h"
 #include "libtransmission/log.h"
-#include "libtransmission/session.h"
 #include "libtransmission/torrent.h"
 #include "libtransmission/torrents.h"
 #include "libtransmission/tr-assert.h"
@@ -29,20 +26,12 @@ Cache::Key Cache::make_key(tr_torrent const& tor, tr_block_info::Location const 
     return std::make_pair(tor.id(), loc.block);
 }
 
-size_t Cache::active_block_count_locked() const noexcept
-{
-    return static_cast<size_t>(std::count_if(
-        std::begin(blocks_),
-        std::end(blocks_),
-        [](CacheBlock const& block) { return !block.flushing; }));
-}
-
 int Cache::set_limit(Memory const max_size)
 {
     max_blocks_ = get_max_blocks(max_size);
     tr_logAddDebug(fmt::format("Maximum cache size set to {} ({} blocks)", max_size.to_string(), max_blocks_));
 
-    return cache_trim();
+    return trim();
 }
 
 Cache::Cache(tr_torrents const& torrents, Memory const max_size)
@@ -64,24 +53,22 @@ int Cache::write_block(tr_torrent_id_t const tor_id, tr_block_index_t const bloc
         return tor == nullptr ? EINVAL : tr_ioWrite(*tor, tor->block_loc(block), std::size(*writeme), std::data(*writeme));
     }
 
+    auto const lock = std::scoped_lock{ blocks_mutex_ };
+
+    auto const key = Key{ tor_id, block };
+    auto iter = std::lower_bound(std::begin(blocks_), std::end(blocks_), key, CompareCacheBlockByKey);
+    if (iter == std::end(blocks_) || iter->key != key)
     {
-        auto const lock = std::scoped_lock{ blocks_mutex_ };
-
-        auto const key = Key{ tor_id, block };
-        auto iter = std::lower_bound(std::begin(blocks_), std::end(blocks_), key, CompareCacheBlockByKey);
-        if (iter == std::end(blocks_) || iter->key != key)
-        {
-            iter = blocks_.emplace(iter);
-            iter->key = key;
-        }
-
-        iter->buf = std::move(writeme);
-
-        ++cache_writes_;
-        cache_write_bytes_ += std::size(*iter->buf);
+        iter = blocks_.emplace(iter);
+        iter->key = key;
     }
 
-    return cache_trim();
+    iter->buf = std::move(writeme);
+
+    ++cache_writes_;
+    cache_write_bytes_ += std::size(*iter->buf);
+
+    return 0;
 }
 
 Cache::CIter Cache::get_block(tr_torrent const& tor, tr_block_info::Location const& loc) noexcept
@@ -113,46 +100,22 @@ int Cache::read_block(tr_torrent const& tor, tr_block_info::Location const& loc,
     return tr_ioRead(tor, loc, len, setme);
 }
 
-void Cache::release_flushed_blocks(std::vector<Key> const& keys)
+int Cache::trim()
 {
-    auto const lock = std::scoped_lock{ blocks_mutex_ };
-
-    for (auto const& key : keys)
-    {
-        if (auto const iter = std::lower_bound(std::begin(blocks_), std::end(blocks_), key, CompareCacheBlockByKey);
-            iter != std::end(blocks_) && iter->key == key)
-        {
-            blocks_.erase(iter);
-        }
-    }
+    return cache_trim();
 }
 
 int Cache::cache_trim()
 {
-    for (;;)
+    auto const lock = std::scoped_lock{ blocks_mutex_ };
+
+    while (std::size(blocks_) > max_blocks_)
     {
-        auto job = tr_disk_write_job{};
-        auto* session = static_cast<tr_session*>(nullptr);
-
+        if (auto const err = flush_biggest_locked(); err != 0)
         {
-            auto const lock = std::scoped_lock{ blocks_mutex_ };
-
-            if (active_block_count_locked() <= max_blocks_)
-            {
-                return 0;
-            }
-
-            if (auto const err = flush_biggest_locked(session, job); err != 0)
-            {
-                return err;
-            }
-
-            if (std::empty(job.blocks_to_release))
-            {
-                return 0;
-            }
+            return err;
         }
-
-        session->disk_io().schedule(std::move(job));
     }
+
+    return 0;
 }

@@ -1169,6 +1169,8 @@ void tr_torrent::on_block_received(tr_block_index_t const block)
             on_piece_failed(piece);
         }
     }
+
+    session->cache->trim();
 }
 
 // ---

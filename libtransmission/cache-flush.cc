@@ -6,7 +6,6 @@
 #include <algorithm>
 #include <cerrno>
 #include <iterator>
-#include <memory>
 #include <mutex>
 #include <numeric>
 #include <utility>
@@ -15,8 +14,7 @@
 #include "libtransmission/transmission.h"
 
 #include "libtransmission/cache.h"
-#include "libtransmission/disk-io.h"
-#include "libtransmission/session.h"
+#include "libtransmission/inout.h"
 #include "libtransmission/torrent.h"
 #include "libtransmission/torrents.h"
 #include "libtransmission/tr-assert.h"
@@ -25,44 +23,37 @@ Cache::CIter Cache::find_span_end(CIter const& span_begin, CIter const& end) noe
 {
     static constexpr auto NotAdjacent = [](CacheBlock const& block1, CacheBlock const& block2)
     {
-        return block1.key.first != block2.key.first || block1.key.second + 1 != block2.key.second || block2.flushing;
+        return block1.key.first != block2.key.first || block1.key.second + 1 != block2.key.second;
     };
     auto const span_end = std::adjacent_find(span_begin, end, NotAdjacent);
     return span_end == end ? end : std::next(span_end);
 }
 
-std::pair<Cache::CIter, Cache::CIter> Cache::find_biggest_non_flushing_span(CIter const& begin, CIter const& end) noexcept
+std::pair<Cache::CIter, Cache::CIter> Cache::find_biggest_span(CIter const& begin, CIter const& end) noexcept
 {
-    auto biggest_begin = end;
-    auto biggest_end = end;
-    auto biggest_len = std::ptrdiff_t{ 0 };
+    auto biggest_begin = begin;
+    auto biggest_end = begin;
+    auto biggest_len = std::distance(biggest_begin, biggest_end);
 
-    for (auto span_begin = begin; span_begin < end; span_begin = find_span_end(span_begin, end))
+    for (auto span_begin = begin; span_begin < end;)
     {
-        if (span_begin->flushing)
-        {
-            continue;
-        }
+        auto span_end = find_span_end(span_begin, end);
 
-        auto const span_end = find_span_end(span_begin, end);
         if (auto const len = std::distance(span_begin, span_end); len > biggest_len)
         {
             biggest_begin = span_begin;
             biggest_end = span_end;
             biggest_len = len;
         }
+
+        span_begin = span_end;
     }
 
     return { biggest_begin, biggest_end };
 }
 
-int Cache::prepare_flush_span(CIter const& begin, CIter const& end, tr_disk_write_job& out_job, tr_session*& out_session)
+int Cache::write_contiguous(CIter const& begin, CIter const& end)
 {
-    if (begin == end)
-    {
-        return 0;
-    }
-
     auto const* out = std::data(*begin->buf);
     auto outlen = std::size(*begin->buf);
     auto buf = std::vector<uint8_t>{};
@@ -94,140 +85,82 @@ int Cache::prepare_flush_span(CIter const& begin, CIter const& end, tr_disk_writ
         return EINVAL;
     }
 
-    out_job = tr_disk_write_job{};
-    out_job.tor_id = torrent_id;
-    out_job.block = block;
-    out_job.data.assign(out, out + outlen);
-
     auto const loc = tor->block_loc(block);
-    if (!tr_ioResolveWriteSegments(*tor, loc, outlen, out_job.segments))
+    if (auto const err = tr_ioWrite(*tor, loc, outlen, out); err != 0)
     {
-        return EINVAL;
+        return err;
     }
-
-    out_job.blocks_to_release.reserve(static_cast<size_t>(end - begin));
-    for (auto iter = begin; iter != end; ++iter)
-    {
-        const_cast<CacheBlock&>(*iter).flushing = true;
-        out_job.blocks_to_release.push_back(iter->key);
-    }
-
-    out_session = tor->session;
 
     ++disk_writes_;
     disk_write_bytes_ += outlen;
     return 0;
 }
 
-int Cache::flush_biggest_locked(tr_session*& out_session, tr_disk_write_job& out_job)
+int Cache::flush_spans_locked(CIter const& begin, CIter const& end)
 {
-    auto const [begin, end] = find_biggest_non_flushing_span(std::begin(blocks_), std::end(blocks_));
+    for (auto span_begin = begin; span_begin < end;)
+    {
+        auto const span_end = find_span_end(span_begin, end);
+
+        if (auto const err = write_contiguous(span_begin, span_end); err != 0)
+        {
+            return err;
+        }
+
+        span_begin = span_end;
+    }
+
+    blocks_.erase(begin, end);
+    return 0;
+}
+
+int Cache::flush_biggest_locked()
+{
+    auto const [begin, end] = find_biggest_span(std::begin(blocks_), std::end(blocks_));
 
     if (begin == end)
     {
         return 0;
     }
 
-    return prepare_flush_span(begin, end, out_job, out_session);
-}
-
-static void schedule_jobs(std::vector<tr_disk_write_job>& jobs, std::vector<tr_session*>& sessions)
-{
-    TR_ASSERT(std::size(jobs) == std::size(sessions));
-
-    for (size_t i = 0; i < std::size(jobs); ++i)
+    if (auto const err = write_contiguous(begin, end); err != 0)
     {
-        if (sessions[i] != nullptr)
-        {
-            sessions[i]->disk_io().schedule(std::move(jobs[i]));
-        }
+        return err;
     }
+
+    blocks_.erase(begin, end);
+    return 0;
 }
 
 int Cache::flush_file(tr_torrent const& tor, tr_file_index_t const file)
 {
     auto const tor_id = tor.id();
     auto const [block_begin, block_end] = tor.block_span_for_file(file);
-    auto jobs = std::vector<tr_disk_write_job>{};
-    auto sessions = std::vector<tr_session*>{};
-    {
-        auto const lock = std::scoped_lock{ blocks_mutex_ };
-        auto const span_end_bound = std::lower_bound(
+
+    auto const lock = std::scoped_lock{ blocks_mutex_ };
+
+    return flush_spans_locked(
+        std::lower_bound(
+            std::begin(blocks_),
+            std::end(blocks_),
+            std::make_pair(tor_id, block_begin),
+            CompareCacheBlockByKey),
+        std::lower_bound(
             std::begin(blocks_),
             std::end(blocks_),
             std::make_pair(tor_id, block_end),
-            CompareCacheBlockByKey);
-
-        for (CIter span_begin = std::lower_bound(
-                 std::begin(blocks_),
-                 std::end(blocks_),
-                 std::make_pair(tor_id, block_begin),
-                 CompareCacheBlockByKey);
-             span_begin < span_end_bound;)
-        {
-            auto const span_end = find_span_end(span_begin, span_end_bound);
-
-            auto job = tr_disk_write_job{};
-            auto* session = static_cast<tr_session*>(nullptr);
-            if (auto const err = prepare_flush_span(span_begin, span_end, job, session); err != 0)
-            {
-                return err;
-            }
-
-            jobs.push_back(std::move(job));
-            sessions.push_back(session);
-            span_begin = span_end;
-        }
-    }
-
-    schedule_jobs(jobs, sessions);
-    tor.session->disk_io().wait_for_torrent(tor_id);
-    return 0;
+            CompareCacheBlockByKey));
 }
 
 int Cache::flush_torrent(tr_torrent_id_t const tor_id)
 {
-    auto jobs = std::vector<tr_disk_write_job>{};
-    auto sessions = std::vector<tr_session*>{};
-    tr_session* wait_session = nullptr;
+    auto const lock = std::scoped_lock{ blocks_mutex_ };
 
-    {
-        auto const lock = std::scoped_lock{ blocks_mutex_ };
-        auto const span_end_bound = std::lower_bound(
+    return flush_spans_locked(
+        std::lower_bound(std::begin(blocks_), std::end(blocks_), std::make_pair(tor_id, 0), CompareCacheBlockByKey),
+        std::lower_bound(
             std::begin(blocks_),
             std::end(blocks_),
             std::make_pair(tor_id + 1, 0),
-            CompareCacheBlockByKey);
-
-        for (CIter span_begin = std::lower_bound(
-                 std::begin(blocks_),
-                 std::end(blocks_),
-                 std::make_pair(tor_id, 0),
-                 CompareCacheBlockByKey);
-             span_begin < span_end_bound;)
-        {
-            auto const span_end = find_span_end(span_begin, span_end_bound);
-
-            auto job = tr_disk_write_job{};
-            auto* session = static_cast<tr_session*>(nullptr);
-            if (auto const err = prepare_flush_span(span_begin, span_end, job, session); err != 0)
-            {
-                return err;
-            }
-
-            jobs.push_back(std::move(job));
-            sessions.push_back(session);
-            wait_session = session;
-            span_begin = span_end;
-        }
-    }
-
-    schedule_jobs(jobs, sessions);
-
-    if (wait_session != nullptr)
-    {
-        wait_session->disk_io().wait_for_torrent(tor_id);
-    }
-
-    return 0;
+            CompareCacheBlockByKey));
 }

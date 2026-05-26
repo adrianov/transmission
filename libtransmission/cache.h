@@ -24,8 +24,6 @@
 #include "libtransmission/values.h"
 
 class tr_torrents;
-struct tr_disk_write_job;
-struct tr_session;
 struct tr_torrent;
 
 class Cache
@@ -45,7 +43,8 @@ public:
     int flush_torrent(tr_torrent_id_t tor_id);
     int flush_file(tr_torrent const& tor, tr_file_index_t file);
 
-    void release_flushed_blocks(std::vector<std::pair<tr_torrent_id_t, tr_block_index_t>> const& keys);
+    // Flush excess cache blocks to disk. Call after block completion bookkeeping.
+    int trim();
 
 private:
     using Key = std::pair<tr_torrent_id_t, tr_block_index_t>;
@@ -54,7 +53,6 @@ private:
     {
         Key key;
         std::unique_ptr<BlockData> buf;
-        bool flushing = false;
     };
 
     using Blocks = std::vector<CacheBlock>;
@@ -62,20 +60,21 @@ private:
 
     [[nodiscard]] static Key make_key(tr_torrent const& tor, tr_block_info::Location loc) noexcept;
 
-    [[nodiscard]] static std::pair<CIter, CIter> find_biggest_non_flushing_span(CIter const& begin, CIter const& end) noexcept;
+    [[nodiscard]] static std::pair<CIter, CIter> find_biggest_span(CIter const& begin, CIter const& end) noexcept;
 
     [[nodiscard]] static CIter find_span_end(CIter const& span_begin, CIter const& end) noexcept;
 
-    // Caller must hold blocks_mutex_. Marks blocks as flushing and fills out_job.
-    [[nodiscard]] int prepare_flush_span(CIter const& begin, CIter const& end, tr_disk_write_job& out_job, tr_session*& out_session);
+    // @return any error code from tr_ioWrite()
+    [[nodiscard]] int write_contiguous(CIter const& begin, CIter const& end);
 
-    // @return any error code from prepare_flush_span()
-    [[nodiscard]] int flush_biggest_locked(tr_session*& out_session, tr_disk_write_job& out_job);
+    // Caller must hold blocks_mutex_. Writes contiguous spans and erases them from the cache.
+    [[nodiscard]] int flush_spans_locked(CIter const& begin, CIter const& end);
+
+    // @return any error code from write_contiguous()
+    [[nodiscard]] int flush_biggest_locked();
 
     // @return any error code from flush_biggest_locked()
     [[nodiscard]] int cache_trim();
-
-    [[nodiscard]] size_t active_block_count_locked() const noexcept;
 
     [[nodiscard]] static constexpr size_t get_max_blocks(Memory const max_size) noexcept
     {

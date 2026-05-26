@@ -1004,7 +1004,6 @@ void tr_session::closeImplPart1(std::promise<void>* closed_promise, std::chrono:
     auto const now = std::chrono::steady_clock::now();
     auto const remaining_ms = now < deadline ? std::chrono::duration_cast<std::chrono::milliseconds>(deadline - now) : 0ms;
     this->web_->startShutdown(remaining_ms);
-    disk_io_->wait_for_all();
     this->cache.reset();
 
     // recycle the now-unused save_timer_ here to wait for UDP shutdown
@@ -1033,7 +1032,6 @@ void tr_session::closeImplPart2(std::promise<void>* closed_promise, std::chrono:
 
     stats().save();
     peer_mgr_.reset();
-    disk_io_->shutdown();
     tr_shutdown_background_queues();
     tr_torrent_delete_queue_shutdown();
     openFiles().close_all();
@@ -1224,7 +1222,6 @@ tr_session::tr_session(std::string_view config_dir, tr_variant const& settings_d
     , queue_timer_{ timer_maker_->create([this]() { on_queue_timer(); }) }
     , save_timer_{ timer_maker_->create([this]() { on_save_timer(); }) }
     , disk_space_timer_{ timer_maker_->create([this]() { on_disk_space_timer(); }) }
-    , disk_io_{ std::make_unique<tr_disk_io_queue>(*this) }
     , cache{ std::make_unique<Cache>(torrents_, Memory{ 2U, Memory::Units::MBytes }) }
 {
     now_timer_->start_repeating(1s);
