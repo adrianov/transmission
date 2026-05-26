@@ -52,84 +52,111 @@ std::pair<Cache::CIter, Cache::CIter> Cache::find_biggest_span(CIter const& begi
     return { biggest_begin, biggest_end };
 }
 
-int Cache::write_contiguous(CIter const& begin, CIter const& end)
+Cache::ContiguousWrite Cache::make_contiguous_write(CIter const& begin, CIter const& end)
 {
-    auto const* out = std::data(*begin->buf);
-    auto outlen = std::size(*begin->buf);
-    auto buf = std::vector<uint8_t>{};
+    auto write = ContiguousWrite{};
+    write.first_key = begin->key;
+    write.last_key = std::prev(end)->key;
+    write.tor_id = begin->key.first;
+    write.block = begin->key.second;
 
-    if (end - begin > 1)
+    if (end - begin == 1)
+    {
+        write.buf.assign(std::begin(*begin->buf), std::end(*begin->buf));
+    }
+    else
     {
         auto const buflen = std::accumulate(
             begin,
             end,
             size_t{},
             [](size_t sum, auto const& block) { return sum + std::size(*block.buf); });
-        buf.resize(buflen);
-        auto* walk = std::data(buf);
+        write.buf.resize(buflen);
+        auto* walk = std::data(write.buf);
         for (auto iter = begin; iter != end; ++iter)
         {
             TR_ASSERT(begin->key.first == iter->key.first);
             TR_ASSERT(begin->key.second + std::distance(begin, iter) == iter->key.second);
             walk = std::copy_n(std::data(*iter->buf), std::size(*iter->buf), walk);
         }
-        TR_ASSERT(std::data(buf) + std::size(buf) == walk);
-        out = std::data(buf);
-        outlen = std::size(buf);
+        TR_ASSERT(std::data(write.buf) + std::size(write.buf) == walk);
     }
 
-    auto const& [torrent_id, block] = begin->key;
-    auto* const tor = torrents_.get(torrent_id);
+    return write;
+}
+
+std::vector<Cache::ContiguousWrite> Cache::make_span_writes(CIter const& begin, CIter const& end)
+{
+    auto writes = std::vector<ContiguousWrite>{};
+
+    for (auto span_begin = begin; span_begin < end;)
+    {
+        auto const span_end = find_span_end(span_begin, end);
+        writes.push_back(make_contiguous_write(span_begin, span_end));
+        span_begin = span_end;
+    }
+
+    return writes;
+}
+
+int Cache::execute_write(ContiguousWrite const& write)
+{
+    auto* const tor = torrents_.get(write.tor_id);
     if (tor == nullptr)
     {
         return EINVAL;
     }
 
-    auto const loc = tor->block_loc(block);
-    if (auto const err = tr_ioWrite(*tor, loc, outlen, out); err != 0)
-    {
-        return err;
-    }
-
-    ++disk_writes_;
-    disk_write_bytes_ += outlen;
-    return 0;
+    auto const loc = tor->block_loc(write.block);
+    return tr_ioWrite(*tor, loc, std::size(write.buf), std::data(write.buf));
 }
 
-int Cache::flush_spans_locked(CIter const& begin, CIter const& end)
+void Cache::erase_written_span_locked(ContiguousWrite const& write)
 {
-    for (auto span_begin = begin; span_begin < end;)
-    {
-        auto const span_end = find_span_end(span_begin, end);
+    auto const begin = std::lower_bound(std::begin(blocks_), std::end(blocks_), write.first_key, CompareCacheBlockByKey);
+    auto const end = std::lower_bound(
+        std::begin(blocks_),
+        std::end(blocks_),
+        std::make_pair(write.last_key.first, write.last_key.second + 1),
+        CompareCacheBlockByKey);
+    blocks_.erase(begin, end);
+}
 
-        if (auto const err = write_contiguous(span_begin, span_end); err != 0)
+int Cache::flush_writes(std::vector<ContiguousWrite> writes)
+{
+    for (auto const& write : writes)
+    {
+        if (auto const err = execute_write(write); err != 0)
         {
             return err;
         }
 
-        span_begin = span_end;
+        auto const lock = std::scoped_lock{ blocks_mutex_ };
+        erase_written_span_locked(write);
+        ++disk_writes_;
+        disk_write_bytes_ += std::size(write.buf);
     }
 
-    blocks_.erase(begin, end);
     return 0;
 }
 
-int Cache::flush_biggest_locked()
+int Cache::flush_one_biggest()
 {
-    auto const [begin, end] = find_biggest_span(std::begin(blocks_), std::end(blocks_));
+    auto writes = std::vector<ContiguousWrite>{};
 
-    if (begin == end)
     {
-        return 0;
+        auto const lock = std::scoped_lock{ blocks_mutex_ };
+        auto const [begin, end] = find_biggest_span(std::begin(blocks_), std::end(blocks_));
+
+        if (begin == end)
+        {
+            return 0;
+        }
+
+        writes.push_back(make_contiguous_write(begin, end));
     }
 
-    if (auto const err = write_contiguous(begin, end); err != 0)
-    {
-        return err;
-    }
-
-    blocks_.erase(begin, end);
-    return 0;
+    return flush_writes(std::move(writes));
 }
 
 int Cache::flush_file(tr_torrent const& tor, tr_file_index_t const file)
@@ -137,30 +164,40 @@ int Cache::flush_file(tr_torrent const& tor, tr_file_index_t const file)
     auto const tor_id = tor.id();
     auto const [block_begin, block_end] = tor.block_span_for_file(file);
 
-    auto const lock = std::scoped_lock{ blocks_mutex_ };
+    auto writes = std::vector<ContiguousWrite>{};
 
-    return flush_spans_locked(
-        std::lower_bound(
-            std::begin(blocks_),
-            std::end(blocks_),
-            std::make_pair(tor_id, block_begin),
-            CompareCacheBlockByKey),
-        std::lower_bound(
-            std::begin(blocks_),
-            std::end(blocks_),
-            std::make_pair(tor_id, block_end),
-            CompareCacheBlockByKey));
+    {
+        auto const lock = std::scoped_lock{ blocks_mutex_ };
+        writes = make_span_writes(
+            std::lower_bound(
+                std::begin(blocks_),
+                std::end(blocks_),
+                std::make_pair(tor_id, block_begin),
+                CompareCacheBlockByKey),
+            std::lower_bound(
+                std::begin(blocks_),
+                std::end(blocks_),
+                std::make_pair(tor_id, block_end),
+                CompareCacheBlockByKey));
+    }
+
+    return flush_writes(std::move(writes));
 }
 
 int Cache::flush_torrent(tr_torrent_id_t const tor_id)
 {
-    auto const lock = std::scoped_lock{ blocks_mutex_ };
+    auto writes = std::vector<ContiguousWrite>{};
 
-    return flush_spans_locked(
-        std::lower_bound(std::begin(blocks_), std::end(blocks_), std::make_pair(tor_id, 0), CompareCacheBlockByKey),
-        std::lower_bound(
-            std::begin(blocks_),
-            std::end(blocks_),
-            std::make_pair(tor_id + 1, 0),
-            CompareCacheBlockByKey));
+    {
+        auto const lock = std::scoped_lock{ blocks_mutex_ };
+        writes = make_span_writes(
+            std::lower_bound(std::begin(blocks_), std::end(blocks_), std::make_pair(tor_id, 0), CompareCacheBlockByKey),
+            std::lower_bound(
+                std::begin(blocks_),
+                std::end(blocks_),
+                std::make_pair(tor_id + 1, 0),
+                CompareCacheBlockByKey));
+    }
+
+    return flush_writes(std::move(writes));
 }

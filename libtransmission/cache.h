@@ -36,14 +36,16 @@ public:
 
     int set_limit(Memory max_size);
 
-    // @return any error code from cacheTrim()
+    // Insert or replace a cached block. Does not trim; callers must invoke trim()
+    // after piece bookkeeping (see tr_torrent::on_block_received).
     int write_block(tr_torrent_id_t tor, tr_block_index_t block, std::unique_ptr<BlockData> writeme);
 
     int read_block(tr_torrent const& tor, tr_block_info::Location const& loc, size_t len, uint8_t* setme);
     int flush_torrent(tr_torrent_id_t tor_id);
     int flush_file(tr_torrent const& tor, tr_file_index_t file);
 
-    // Flush excess cache blocks to disk. Call after block completion bookkeeping.
+    // Flush excess cache blocks to disk. Call after write_block when piece
+    // bookkeeping is done so trim does not run before check_piece reads cache.
     int trim();
 
 private:
@@ -58,22 +60,39 @@ private:
     using Blocks = std::vector<CacheBlock>;
     using CIter = Blocks::const_iterator;
 
+    struct ContiguousWrite
+    {
+        tr_torrent_id_t tor_id = {};
+        tr_block_index_t block = {};
+        Key first_key;
+        Key last_key;
+        std::vector<uint8_t> buf;
+    };
+
     [[nodiscard]] static Key make_key(tr_torrent const& tor, tr_block_info::Location loc) noexcept;
 
     [[nodiscard]] static std::pair<CIter, CIter> find_biggest_span(CIter const& begin, CIter const& end) noexcept;
 
     [[nodiscard]] static CIter find_span_end(CIter const& span_begin, CIter const& end) noexcept;
 
-    // @return any error code from tr_ioWrite()
-    [[nodiscard]] int write_contiguous(CIter const& begin, CIter const& end);
+    // Caller must hold blocks_mutex_. Copies span data and keys only.
+    [[nodiscard]] static ContiguousWrite make_contiguous_write(CIter const& begin, CIter const& end);
 
-    // Caller must hold blocks_mutex_. Writes contiguous spans and erases them from the cache.
-    [[nodiscard]] int flush_spans_locked(CIter const& begin, CIter const& end);
+    // Caller must hold blocks_mutex_.
+    [[nodiscard]] static std::vector<ContiguousWrite> make_span_writes(CIter const& begin, CIter const& end);
 
-    // @return any error code from write_contiguous()
-    [[nodiscard]] int flush_biggest_locked();
+    [[nodiscard]] int execute_write(ContiguousWrite const& write);
 
-    // @return any error code from flush_biggest_locked()
+    // Caller must hold blocks_mutex_.
+    void erase_written_span_locked(ContiguousWrite const& write);
+
+    // @return any error code from execute_write()
+    [[nodiscard]] int flush_one_biggest();
+
+    // @return any error code from execute_write()
+    [[nodiscard]] int flush_writes(std::vector<ContiguousWrite> writes);
+
+    // @return any error code from flush_one_biggest()
     [[nodiscard]] int cache_trim();
 
     [[nodiscard]] static constexpr size_t get_max_blocks(Memory const max_size) noexcept

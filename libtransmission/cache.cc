@@ -107,15 +107,20 @@ int Cache::trim()
 
 int Cache::cache_trim()
 {
-    auto const lock = std::scoped_lock{ blocks_mutex_ };
-
-    while (std::size(blocks_) > max_blocks_)
+    while (true)
     {
-        if (auto const err = flush_biggest_locked(); err != 0)
+        {
+            auto const lock = std::scoped_lock{ blocks_mutex_ };
+
+            if (std::size(blocks_) <= max_blocks_)
+            {
+                return 0;
+            }
+        }
+
+        if (auto const err = flush_one_biggest(); err != 0)
         {
             return err;
         }
     }
-
-    return 0;
 }

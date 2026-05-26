@@ -1170,6 +1170,7 @@ void tr_torrent::on_block_received(tr_block_index_t const block)
         }
     }
 
+    // Trim after piece hash check so check_piece can read from cache first.
     session->cache->trim();
 }
 
