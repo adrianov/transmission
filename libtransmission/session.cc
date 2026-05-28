@@ -1216,13 +1216,13 @@ tr_session::tr_session(std::string_view config_dir, tr_variant const& settings_d
     , timer_maker_{ std::make_unique<libtransmission::EvTimerMaker>(event_base()) }
     , settings_{ settings_dict }
     , session_id_{ tr_time }
+    , cache{ std::make_unique<Cache>(torrents_, Memory{ 2U, Memory::Units::MBytes }) }
     , peer_mgr_{ tr_peerMgrNew(this), &tr_peerMgrFree }
     , rpc_server_{ std::make_unique<tr_rpc_server>(this, tr_rpc_server::Settings{ settings_dict }) }
     , now_timer_{ timer_maker_->create([this]() { on_now_timer(); }) }
     , queue_timer_{ timer_maker_->create([this]() { on_queue_timer(); }) }
     , save_timer_{ timer_maker_->create([this]() { on_save_timer(); }) }
     , disk_space_timer_{ timer_maker_->create([this]() { on_disk_space_timer(); }) }
-    , cache{ std::make_unique<Cache>(torrents_, Memory{ 2U, Memory::Units::MBytes }) }
 {
     now_timer_->start_repeating(1s);
     queue_timer_->start_repeating(QueueInterval);
