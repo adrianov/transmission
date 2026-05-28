@@ -1,0 +1,18 @@
+---
+description: Use Ninja from repo root for incremental builds and targets
+alwaysApply: true
+---
+
+# Build with Ninja
+
+After `cmake -B build` has been run once, build from the **repository root** with Ninja:
+
+```bash
+ninja -C build                      # full default build
+ninja -C build transmission-gtk     # GTK client
+ninja -C build transmission-daemon
+ninja -C build transmission-qt
+ninja -C build transmission-mac     # macOS
+```
+
+Do not `cd build` for compile steps unless running binaries or `ctest`.

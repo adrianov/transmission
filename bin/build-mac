@@ -19,7 +19,7 @@ if [[ -f "${build_dir}/.ninja_deps" ]] && ! python3 "${bin_dir}/ninja-deps-ok" "
     rm -f "${build_dir}/.ninja_deps"
 fi
 
-"${bin_dir}/cmake-build" "${build_dir}" -t transmission-mac
+ninja -C "${build_dir}" transmission-mac
 
 if [[ -d "${app_path}" ]]; then
     open -R "${app_path}"
