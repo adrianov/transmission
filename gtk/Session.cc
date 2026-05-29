@@ -1476,20 +1476,37 @@ FaviconCache<Glib::RefPtr<Gdk::Pixbuf>>& Session::favicon_cache() const
 void Session::open_folder(tr_torrent_id_t torrent_id) const
 {
     auto const* tor = find_torrent(torrent_id);
-
-    if (tor != nullptr)
+    if (tor == nullptr)
     {
-        bool const single = tr_torrentFileCount(tor) == 1;
-        char const* currentDir = tr_torrentGetCurrentDir(tor);
+        return;
+    }
 
-        if (single)
+    char const* const current_dir = tr_torrentGetCurrentDir(tor);
+    if (current_dir == nullptr || current_dir[0] == '\0')
+    {
+        return;
+    }
+
+    std::string path;
+    if (tr_torrentView(tor).is_folder)
+    {
+        path = Glib::build_filename(current_dir, tr_torrentName(tor));
+    }
+    else
+    {
+        path = tr_torrentFindFile(tor, 0);
+        if (path.empty())
         {
-            gtr_open_file(currentDir);
+            if (auto const* const name = tr_torrentFile(tor, 0).name; name != nullptr)
+            {
+                path = Glib::build_filename(current_dir, name);
+            }
         }
-        else
-        {
-            gtr_open_file(Glib::build_filename(currentDir, tr_torrentName(tor)));
-        }
+    }
+
+    if (!path.empty())
+    {
+        gtr_reveal_in_file_manager(path);
     }
 }
 
