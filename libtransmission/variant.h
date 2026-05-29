@@ -166,7 +166,17 @@ public:
                 return { iter->second, false };
             }
 
-            return { vec_.emplace_back(key, tr_variant{ std::forward<Val>(val) }).second, true };
+            // GCC falsely warns that vector internals may be uninitialized when
+            // tr_variant's move ctor is inlined and the active alternative is not Map.
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
+#endif
+            auto& pair = vec_.emplace_back(key, tr_variant{ std::forward<Val>(val) });
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic pop
+#endif
+            return { pair.second, true };
         }
 
         template<typename Val>
