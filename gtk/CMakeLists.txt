@@ -10,6 +10,8 @@ target_sources(${TR_NAME}-gtk
         Actions.h
         Application.cc
         Application.h
+        ApplicationPrefs.cc
+        ApplicationPrefs.h
         DetailsDialog.cc
         DetailsDialog.h
         Dialogs.cc
@@ -39,6 +41,7 @@ target_sources(${TR_NAME}-gtk
         main.cc
         MainWindow.cc
         MainWindow.h
+        MainWindow-impl.hh
         MakeDialog.cc
         MakeDialog.h
         MessageLogWindow.cc

@@ -8,6 +8,7 @@
 #include "FilterBar.h"
 #include "GtkCompat.h"
 #include "ListModelAdapter.h"
+#include "MainWindow-impl.hh"
 #include "Prefs.h"
 #include "PrefsDialog.h"
 #include "Session.h"
@@ -77,107 +78,6 @@ auto constexpr StatsMenuActionGroupName = "stats-menu"sv;
 
 } // namespace
 
-class MainWindow::Impl
-{
-    struct OptionMenuInfo
-    {
-        Glib::RefPtr<Gio::SimpleAction> action;
-        Glib::RefPtr<Gio::MenuItem> on_item;
-        Glib::RefPtr<Gio::Menu> section;
-    };
-
-    using TorrentView = IF_GTKMM4(Gtk::ListView, Gtk::TreeView);
-    using TorrentViewSelection = IF_GTKMM4(Gtk::MultiSelection, Gtk::TreeSelection);
-
-public:
-    Impl(
-        MainWindow& window,
-        Glib::RefPtr<Gtk::Builder> const& builder,
-        Glib::RefPtr<Gio::ActionGroup> const& actions,
-        Glib::RefPtr<Session> const& core);
-    Impl(Impl&&) = delete;
-    Impl(Impl const&) = delete;
-    Impl& operator=(Impl&&) = delete;
-    Impl& operator=(Impl const&) = delete;
-    ~Impl();
-
-    [[nodiscard]] Glib::RefPtr<TorrentViewSelection> get_selection() const;
-
-    void refresh();
-
-    void prefsChanged(tr_quark key);
-
-    auto& signal_selection_changed()
-    {
-        return signal_selection_changed_;
-    }
-
-private:
-    void init_view(TorrentView* view, Glib::RefPtr<FilterBar::Model> const& model);
-
-    Glib::RefPtr<Gio::MenuModel> createOptionsMenu();
-    Glib::RefPtr<Gio::MenuModel> createSpeedMenu(Glib::RefPtr<Gio::SimpleActionGroup> const& actions, tr_direction dir);
-    Glib::RefPtr<Gio::MenuModel> createRatioMenu(Glib::RefPtr<Gio::SimpleActionGroup> const& actions);
-
-    Glib::RefPtr<Gio::MenuModel> createStatsMenu();
-
-    void on_popup_menu(double event_x, double event_y);
-
-    void onSpeedToggled(std::string const& action_name, tr_direction dir, bool enabled);
-    void onSpeedSet(tr_direction dir, int KBps);
-
-    void onRatioToggled(std::string const& action_name, bool enabled);
-    void onRatioSet(double ratio);
-
-    void updateStats();
-    void updateSpeeds();
-
-    void syncAltSpeedButton();
-
-    void status_menu_toggled_cb(std::string const& action_name, Glib::ustring const& val);
-    void onOptionsClicked();
-    void alt_speed_toggled_cb();
-    void onAltSpeedToggledIdle();
-
-private:
-    MainWindow& window_;
-    Glib::RefPtr<Session> const core_;
-
-    sigc::signal<void()> signal_selection_changed_;
-
-    Glib::RefPtr<Gio::ActionGroup> options_actions_;
-    Glib::RefPtr<Gio::ActionGroup> stats_actions_;
-
-    std::array<OptionMenuInfo, 2> speed_menu_info_;
-    OptionMenuInfo ratio_menu_info_;
-
-#if GTKMM_CHECK_VERSION(4, 0, 0)
-    Glib::RefPtr<Gtk::ListItemFactory> item_factory_compact_;
-    Glib::RefPtr<Gtk::ListItemFactory> item_factory_full_;
-    Glib::RefPtr<Gtk::MultiSelection> selection_;
-#else
-    TorrentCellRenderer* renderer_ = nullptr;
-    Gtk::TreeViewColumn* column_ = nullptr;
-#endif
-
-    Gtk::ScrolledWindow* scroll_ = nullptr;
-    TorrentView* view_ = nullptr;
-    Gtk::Widget* toolbar_ = nullptr;
-    FilterBar* filter_;
-    Gtk::Widget* status_ = nullptr;
-    Gtk::Label* ul_lb_ = nullptr;
-    Gtk::Label* dl_lb_ = nullptr;
-    Gtk::Label* stats_lb_ = nullptr;
-    Gtk::Image* alt_speed_image_ = nullptr;
-    Gtk::ToggleButton* alt_speed_button_ = nullptr;
-    sigc::connection pref_handler_id_;
-    IF_GTKMM4(Gtk::PopoverMenu*, Gtk::Menu*) popup_menu_ = nullptr;
-};
-
-/***
-****
-***/
-
 void MainWindow::Impl::on_popup_menu([[maybe_unused]] double event_x, [[maybe_unused]] double event_y)
 {
     if (popup_menu_ == nullptr)
@@ -208,120 +108,6 @@ void MainWindow::Impl::on_popup_menu([[maybe_unused]] double event_x, [[maybe_un
 #else
     popup_menu_->popup_at_pointer(nullptr);
 #endif
-}
-
-namespace
-{
-
-#if GTKMM_CHECK_VERSION(4, 0, 0)
-
-class GtrStrvBuilderDeleter
-{
-public:
-    void operator()(GStrvBuilder* builder) const
-    {
-        if (builder != nullptr)
-        {
-            g_strv_builder_unref(builder);
-        }
-    }
-};
-
-using GtrStrvBuilderPtr = std::unique_ptr<GStrvBuilder, GtrStrvBuilderDeleter>;
-
-GStrv gtr_strv_join(GObject* /*object*/, GStrv lhs, GStrv rhs)
-{
-    auto const builder = GtrStrvBuilderPtr(g_strv_builder_new());
-    if (builder == nullptr)
-    {
-        return nullptr;
-    }
-
-    g_strv_builder_addv(builder.get(), const_cast<char const**>(lhs)); // NOLINT(cppcoreguidelines-pro-type-const-cast)
-    g_strv_builder_addv(builder.get(), const_cast<char const**>(rhs)); // NOLINT(cppcoreguidelines-pro-type-const-cast)
-
-    return g_strv_builder_end(builder.get());
-}
-
-#else
-
-bool tree_view_search_equal_func(
-    Glib::RefPtr<Gtk::TreeModel> const& /*model*/,
-    int /*column*/,
-    Glib::ustring const& key,
-    Gtk::TreeModel::const_iterator const& iter)
-{
-    static auto const& self_col = Torrent::get_columns().self;
-
-    auto const name = iter->get_value(self_col)->get_name_collated();
-    return name.find(key.lowercase()) == Glib::ustring::npos;
-}
-
-#endif
-
-} // namespace
-
-void MainWindow::Impl::init_view(TorrentView* view, Glib::RefPtr<FilterBar::Model> const& model)
-{
-#if GTKMM_CHECK_VERSION(4, 0, 0)
-    auto const create_builder_list_item_factory = [](std::string const& filename)
-    {
-        auto builder_scope = Glib::wrap(G_OBJECT(gtk_builder_cscope_new()));
-        gtk_builder_cscope_add_callback(GTK_BUILDER_CSCOPE(builder_scope->gobj()), gtr_strv_join);
-
-        return Glib::wrap(gtk_builder_list_item_factory_new_from_resource(
-            GTK_BUILDER_SCOPE(builder_scope->gobj()),
-            gtr_get_full_resource_path(filename).c_str()));
-    };
-
-    // Make sure the custom `PiecesProgressBar` GType is registered with
-    // GObject before the builder tries to instantiate it from a .ui file.
-    PiecesProgressBar::ensure_registered();
-
-    item_factory_compact_ = create_builder_list_item_factory("TorrentListItemCompact.ui"s);
-    item_factory_full_ = create_builder_list_item_factory("TorrentListItemFull.ui"s);
-
-    view->signal_activate().connect([](guint /*position*/) { gtr_action_activate(GTR_KEY_show_torrent_properties); });
-
-    selection_ = Gtk::MultiSelection::create(model);
-    selection_->signal_selection_changed().connect([this](guint /*position*/, guint /*n_items*/)
-                                                   { signal_selection_changed_.emit(); });
-
-    view->set_factory(gtr_pref_flag_get(TR_KEY_compact_view) ? item_factory_compact_ : item_factory_full_);
-    view->set_model(selection_);
-#else
-    static auto const& torrent_cols = Torrent::get_columns();
-
-    view->set_search_column(torrent_cols.name_collated);
-    view->set_search_equal_func(&tree_view_search_equal_func);
-
-    column_ = view->get_column(0);
-
-    renderer_ = Gtk::make_managed<TorrentCellRenderer>();
-    column_->pack_start(*renderer_, false);
-    column_->add_attribute(renderer_->property_torrent(), torrent_cols.self);
-
-    view->signal_popup_menu().connect_notify([this]() { on_popup_menu(0, 0); });
-    view->signal_row_activated().connect([](auto const& /*path*/, auto* /*column*/)
-                                         { gtr_action_activate(GTR_KEY_show_torrent_properties); });
-
-    view->set_model(model);
-
-    view->get_selection()->signal_changed().connect([this]() { signal_selection_changed_.emit(); });
-#endif
-
-    setup_item_view_button_event_handling(
-        *view,
-        [this, view](guint /*button*/, TrGdkModifierType /*state*/, double view_x, double view_y, bool context_menu_requested)
-        {
-            return on_item_view_button_pressed(
-                *view,
-                view_x,
-                view_y,
-                context_menu_requested,
-                sigc::mem_fun(*this, &Impl::on_popup_menu));
-        },
-        [view](double view_x, double view_y) { return on_item_view_button_released(*view, view_x, view_y); });
 }
 
 void MainWindow::Impl::prefsChanged(tr_quark const key)
@@ -770,83 +556,9 @@ MainWindow::Impl::Impl(
 #endif
 }
 
-void MainWindow::Impl::updateStats()
-{
-    Glib::ustring buf;
-    auto const* const session = core_->get_session();
-
-    /* update the stats */
-    if (auto const pch = gtr_pref_string_get(TR_KEY_statusbar_stats); pch == "session-ratio")
-    {
-        auto const stats = tr_sessionGetStats(session);
-        buf = fmt::format(fmt::runtime(_("Ratio: {ratio}")), fmt::arg("ratio", tr_strlratio(stats.ratio)));
-    }
-    else if (pch == "session-transfer")
-    {
-        auto const stats = tr_sessionGetStats(session);
-        buf = fmt::format(
-            fmt::runtime(C_("current session totals", "Down: {downloaded_size}, Up: {uploaded_size}")),
-            fmt::arg("downloaded_size", tr_strlsize(stats.downloadedBytes)),
-            fmt::arg("uploaded_size", tr_strlsize(stats.uploadedBytes)));
-    }
-    else if (pch == "total-transfer")
-    {
-        auto const stats = tr_sessionGetCumulativeStats(session);
-        buf = fmt::format(
-            fmt::runtime(C_("all-time totals", "Down: {downloaded_size}, Up: {uploaded_size}")),
-            fmt::arg("downloaded_size", tr_strlsize(stats.downloadedBytes)),
-            fmt::arg("uploaded_size", tr_strlsize(stats.uploadedBytes)));
-    }
-    else /* default is total-ratio */
-    {
-        auto const stats = tr_sessionGetCumulativeStats(session);
-        buf = fmt::format(fmt::runtime(_("Ratio: {ratio}")), fmt::arg("ratio", tr_strlratio(stats.ratio)));
-    }
-
-    stats_lb_->set_text(buf);
-}
-
-void MainWindow::Impl::updateSpeeds()
-{
-    auto const* const session = core_->get_session();
-
-    if (session != nullptr)
-    {
-        auto dn_count = int{};
-        auto dn_speed = Speed{};
-        auto up_count = int{};
-        auto up_speed = Speed{};
-
-        auto const model = core_->get_model();
-        for (auto i = 0U, count = model->get_n_items(); i < count; ++i)
-        {
-            auto const torrent = gtr_ptr_dynamic_cast<Torrent>(model->get_object(i));
-            dn_count += torrent->get_active_peers_down();
-            dn_speed += torrent->get_speed_down();
-            up_count += torrent->get_active_peers_up();
-            up_speed += torrent->get_speed_up();
-        }
-
-        dl_lb_->set_text(fmt::format(fmt::runtime(_("{download_speed} ▼")), fmt::arg("download_speed", dn_speed.to_string())));
-        dl_lb_->set_visible(dn_count > 0);
-
-        ul_lb_->set_text(fmt::format(fmt::runtime(_("{upload_speed} ▲")), fmt::arg("upload_speed", up_speed.to_string())));
-        ul_lb_->set_visible(dn_count > 0 || up_count > 0);
-    }
-}
-
 void MainWindow::refresh()
 {
     impl_->refresh();
-}
-
-void MainWindow::Impl::refresh()
-{
-    if (core_ != nullptr && core_->get_session() != nullptr)
-    {
-        updateSpeeds();
-        updateStats();
-    }
 }
 
 Glib::RefPtr<MainWindow::Impl::TorrentViewSelection> MainWindow::Impl::get_selection() const
@@ -923,3 +635,6 @@ sigc::signal<void()>& MainWindow::signal_selection_changed()
 {
     return impl_->signal_selection_changed();
 }
+
+#include "MainWindowView.cc"
+#include "MainWindowStatus.cc"
