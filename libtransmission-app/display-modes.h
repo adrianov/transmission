@@ -35,6 +35,6 @@ enum class SortMode
     SortById,
 };
 inline auto constexpr SortModeCount = 10U;
-inline auto constexpr DefaultSortMode = SortMode::SortByName;
+inline auto constexpr DefaultSortMode = SortMode::SortByAge;
 
 } // namespace transmission::app
