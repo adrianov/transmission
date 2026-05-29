@@ -4,6 +4,8 @@ add_executable(${TR_NAME}-gtk WIN32)
 
 target_sources(${TR_NAME}-gtk
     PRIVATE
+        AboutDialog.cc
+        AboutDialog.h
         Actions.cc
         Actions.h
         Application.cc

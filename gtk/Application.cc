@@ -4,6 +4,7 @@
 
 #include "Application.h"
 
+#include "AboutDialog.h"
 #include "Actions.h"
 #include "DetailsDialog.h"
 #include "Dialogs.h"
@@ -32,7 +33,6 @@
 #include <libtransmission/rpcimpl.h>
 #include <libtransmission/utils.h>
 #include <libtransmission/variant.h>
-#include <libtransmission/version.h>
 
 #include <gdkmm/device.h>
 #include <gdkmm/display.h>
@@ -45,7 +45,6 @@
 #include <glibmm/miscutils.h>
 #include <glibmm/value.h>
 #include <glibmm/vectorutils.h>
-#include <gtkmm/aboutdialog.h>
 #include <gtkmm/builder.h>
 #include <gtkmm/button.h>
 #include <gtkmm/cssprovider.h>
@@ -97,27 +96,10 @@ using FileListHandler = Glib::SListHandler<Glib::RefPtr<Gio::File>>;
 using StringValue = Glib::Value<Glib::ustring>;
 #endif
 
-#define SHOW_LICENSE
-
 namespace
 {
 
 auto const AppIconName = "transmission"sv; // TODO(C++20): Use ""s
-
-char const* const LICENSE =
-    "Copyright 2005-2026. All code is copyrighted by the respective authors.\n"
-    "\n"
-    "Transmission can be redistributed and/or modified under the terms of the "
-    "GNU GPL, versions 2 or 3, or by any future license endorsed by Mnemosyne LLC."
-    "\n"
-    "In addition, linking to and/or using OpenSSL is allowed.\n"
-    "\n"
-    "This program is distributed in the hope that it will be useful, "
-    "but WITHOUT ANY WARRANTY; without even the implied warranty of "
-    "MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.\n"
-    "\n"
-    "Some of Transmission's source files have more permissive licenses. "
-    "Those files may, of course, be used on their own under their own terms.\n";
 
 } // namespace
 
@@ -148,7 +130,6 @@ private:
 
 private:
     void show_details_dialog_for_selected_torrents();
-    void show_about_dialog();
 
     bool refresh_actions();
     void refresh_actions_soon();
@@ -913,7 +894,7 @@ bool Application::Impl::winclose()
         }
         else
         {
-            wind_->iconify();
+            wind_->IF_GTKMM4(minimize, iconify)();
             scheduleProcessPriorityUpdate();
         }
     }
@@ -1534,41 +1515,6 @@ bool Application::Impl::update_model_loop()
     return !is_closing_;
 }
 
-void Application::Impl::show_about_dialog()
-{
-    auto const uri = Glib::ustring("https://transmissionbt.com/");
-    auto const authors = std::vector<Glib::ustring>({
-        "Charles Kerr (Backend; GTK+)",
-        "Mitchell Livingston (Backend; macOS)",
-        "Mike Gelfand",
-    });
-
-    auto d = std::make_shared<Gtk::AboutDialog>();
-    d->set_authors(authors);
-    d->set_comments(_("A fast and easy BitTorrent client"));
-    d->set_copyright(_("Copyright © The Transmission Project"));
-    d->set_logo_icon_name(std::string(AppIconName));
-    d->set_name(Glib::get_application_name());
-    /* Translators: translate "translator-credits" as your name
-       to have it appear in the credits in the "About"
-       dialog */
-    d->set_translator_credits(_("translator-credits"));
-    d->set_version(LONG_VERSION_STRING);
-    d->set_website(uri);
-    d->set_website_label(uri);
-#ifdef SHOW_LICENSE
-    d->set_license(LICENSE);
-    d->set_wrap_license(true);
-#endif
-    d->set_transient_for(*wind_);
-    d->set_modal(true);
-    gtr_window_on_close(*d, [d]() mutable { d.reset(); });
-#if !GTKMM_CHECK_VERSION(4, 0, 0)
-    d->signal_response().connect_notify([&dref = *d](int /*response*/) { dref.close(); });
-#endif
-    d->show();
-}
-
 bool Application::Impl::call_rpc_for_selected_torrents(tr_quark const method)
 {
     auto const ids = get_selected_torrent_ids();
@@ -1771,7 +1717,7 @@ void Application::Impl::actions_handler(Glib::ustring const& action_name)
     }
     else if (action_name == GTR_KEY_show_about_dialog)
     {
-        show_about_dialog();
+        gtr_show_about_dialog(*wind_);
     }
     else if (action_name == GTR_KEY_help)
     {
