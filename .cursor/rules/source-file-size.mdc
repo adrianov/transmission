@@ -8,17 +8,23 @@ alwaysApply: true
 ## Limits
 
 - **Target**: No project source file exceeds **300 lines**. Applies to C, C++, Objective-C++, headers, JS/TS in `web/`, repo-owned scripts. **Skip** `third-party/`, generated outputs, vendored trees.
-- If staying under 300 is impossible without harming the feature, say so briefly in the PR/summary and prefer the smallest reasonable split.
+- If staying under 300 is impossible without harming the feature, note it briefly and prefer the smallest reasonable split.
 
-## After each change
+## After each edit
 
 When you finish a coherent change (one task or one PR-worth of edits):
 
 1. Among **files you modified**, pick the **single longest** by line count.
-2. If that file is **over 300 lines**, refactor it — extract types/functions, shared helpers, or DRY duplicated blocks (no unrelated rewrites) until the file is **≤300 lines** **or** has shrunk by **≥100 lines**. Extracted code moves into existing or new modules.
+2. If that file exceeds **300 lines**, extract code from it until the file is **≤300 lines** or has shrunk by **≥100 lines**.
 3. Do **not** refactor other long files in the same pass unless asked.
 
-## Extraction
+**Pre-existing bloat is not an excuse.** If the file you touched was already over 300 lines before your change, you still refactor it under this rule. "It was already long" / "unrelated to my fix" does not exempt a file you modified — touching it makes it your responsibility to shrink it per step 2.
 
+## Extraction rules
+
+- Move only self-contained units: types, functions, helpers, or duplicated logic — **no unrelated rewrites**.
+- Respect **SOLID**: each extracted module has one clear responsibility.
+- Apply **DRY**: merge duplicated logic into the extracted module rather than copying it.
+- **Preserve all existing behaviour** exactly — extraction must be a pure structural change.
 - Prefer **one** new module or a focused helper file over scattering tiny files.
-- Match project naming, includes, and DI patterns already used in the same area.
+- Match project naming, include style, and dependency-injection patterns used nearby.
