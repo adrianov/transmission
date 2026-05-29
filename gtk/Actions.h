@@ -25,6 +25,7 @@ inline auto const GTR_KEY_help = Glib::ustring{ "help" };
 inline auto const GTR_KEY_main_window_popup = Glib::ustring{ "main_window_popup" };
 inline auto const GTR_KEY_new_torrent = Glib::ustring{ "new_torrent" };
 inline auto const GTR_KEY_open_torrent = Glib::ustring{ "open_torrent" };
+inline auto const GTR_KEY_open_torrent_file = Glib::ustring{ "open_torrent_file" };
 inline auto const GTR_KEY_open_torrent_folder = Glib::ustring{ "open_torrent_folder" };
 inline auto const GTR_KEY_open_torrent_from_url = Glib::ustring{ "open_torrent_from_url" };
 inline auto const GTR_KEY_pause_all_torrents = Glib::ustring{ "pause_all_torrents" };

@@ -102,6 +102,10 @@ void gtr_open_file(std::string const& path);
     Uses org.freedesktop.FileManager1.ShowItems when the session file manager supports it. */
 void gtr_reveal_in_file_manager(std::string const& path);
 
+/** Open a torrent's primary file in the default application when it is complete and not a .part file;
+    otherwise reveal its location in the file manager. */
+void gtr_open_torrent(tr_torrent const* tor);
+
 Glib::ustring gtr_get_help_uri();
 
 /***

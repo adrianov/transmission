@@ -68,7 +68,7 @@ std::array<tr_quark, 7> const pref_toggle_entries = {
     TR_KEY_show_toolbar, //
 };
 
-auto const entries = std::array<Glib::ustring, 29>{
+auto const entries = std::array<Glib::ustring, 30>{
     GTR_KEY_copy_magnet_link_to_clipboard,
     GTR_KEY_open_torrent_from_url,
     GTR_KEY_open_torrent,
@@ -89,6 +89,7 @@ auto const entries = std::array<Glib::ustring, 29>{
     GTR_KEY_deselect_all,
     GTR_KEY_edit_preferences,
     GTR_KEY_show_torrent_properties,
+    GTR_KEY_open_torrent_file,
     GTR_KEY_open_torrent_folder,
     GTR_KEY_show_about_dialog,
     GTR_KEY_help,
@@ -217,6 +218,7 @@ void gtr_application_bind_menu_accels(Gtk::Application& app)
     bind_action_accel(app, "win.select_all", { "<Control>a" });
     bind_action_accel(app, "win.deselect_all", { "<Shift><Control>a" });
     bind_action_accel(app, "win.show_torrent_properties", { "<Alt>Return" });
+    bind_action_accel(app, "win.open_torrent_file", { "Return" });
     bind_action_accel(app, "win.open_torrent_folder", { "<Control>e" });
     bind_action_accel(app, "win.torrent_start", { "<Control>s" });
     bind_action_accel(app, "win.torrent_start_now", { "<Shift><Control>s" });

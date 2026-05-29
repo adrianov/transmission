@@ -77,8 +77,13 @@
           <attribute name="tooltip" translatable="yes">Torrent properties</attribute>
         </item>
         <item>
-          <attribute name="action">win.open_torrent_folder</attribute>
+          <attribute name="action">win.open_torrent_file</attribute>
           <attribute name="icon">document-open</attribute>
+          <attribute name="label" translatable="yes">_Open</attribute>
+        </item>
+        <item>
+          <attribute name="action">win.open_torrent_folder</attribute>
+          <attribute name="icon">folder-open</attribute>
           <attribute name="label" translatable="yes">Open Fold_er</attribute>
         </item>
       </section>
@@ -282,8 +287,13 @@
         <attribute name="tooltip" translatable="yes">Torrent properties</attribute>
       </item>
       <item>
-        <attribute name="action">win.open_torrent_folder</attribute>
+        <attribute name="action">win.open_torrent_file</attribute>
         <attribute name="icon">document-open</attribute>
+        <attribute name="label" translatable="yes">_Open</attribute>
+      </item>
+      <item>
+        <attribute name="action">win.open_torrent_folder</attribute>
+        <attribute name="icon">folder-open</attribute>
         <attribute name="label" translatable="yes">Open Fold_er</attribute>
       </item>
     </section>

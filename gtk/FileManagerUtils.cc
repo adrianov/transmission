@@ -7,11 +7,16 @@
 
 #include "GtkCompat.h"
 
+#include <libtransmission/torrent-files.h>
+#include <libtransmission/transmission.h>
+#include <libtransmission/utils.h>
+
 #include <giomm/appinfo.h>
 #include <giomm/dbusconnection.h>
 #include <giomm/file.h>
 #include <glibmm/fileutils.h>
 #include <glibmm/i18n.h>
+#include <glibmm/miscutils.h>
 #include <glibmm/spawn.h>
 
 #include <string>
@@ -43,6 +48,36 @@ bool try_reveal_with_file_manager_dbus(std::string const& path)
     {
         return false;
     }
+}
+
+std::string torrent_explorer_path(tr_torrent const* tor)
+{
+    if (tor == nullptr)
+    {
+        return {};
+    }
+
+    char const* const current_dir = tr_torrentGetCurrentDir(tor);
+    if (current_dir == nullptr || current_dir[0] == '\0')
+    {
+        return {};
+    }
+
+    if (tr_torrentView(tor).is_folder)
+    {
+        return Glib::build_filename(current_dir, tr_torrentName(tor));
+    }
+
+    auto path = tr_torrentFindFile(tor, 0);
+    if (path.empty())
+    {
+        if (auto const* const name = tr_torrentFile(tor, 0).name; name != nullptr)
+        {
+            path = Glib::build_filename(current_dir, name);
+        }
+    }
+
+    return path;
 }
 
 } // namespace
@@ -112,5 +147,47 @@ void gtr_open_uri(Glib::ustring const& uri)
     if (!uri.empty() && !gtr_try_open_uri(uri))
     {
         gtr_message(fmt::format(fmt::runtime(_("Couldn't open '{url}'")), fmt::arg("url", uri)));
+    }
+}
+
+void gtr_open_torrent(tr_torrent const* tor)
+{
+    if (tor == nullptr)
+    {
+        return;
+    }
+
+    if (tr_torrentFileCount(tor) == 1)
+    {
+        auto path = tr_torrentFindFile(tor, 0);
+        if (path.empty())
+        {
+            path = torrent_explorer_path(tor);
+        }
+
+        if (path.empty())
+        {
+            return;
+        }
+
+        auto const& file = tr_torrentFile(tor, 0);
+        bool const complete = file.length > 0 && file.have >= file.length;
+        bool const partial = tr_strv_ends_with(path, tr_torrent_files::PartialFileSuffix);
+
+        if (complete && !partial && Glib::file_test(path, Glib::FileTest::FILE_TEST_IS_REGULAR))
+        {
+            if (!gtr_try_open_uri(Gio::File::create_for_path(path)->get_uri()))
+            {
+                gtr_reveal_in_file_manager(path);
+            }
+        }
+        else
+        {
+            gtr_reveal_in_file_manager(path);
+        }
+    }
+    else if (auto const path = torrent_explorer_path(tor); !path.empty())
+    {
+        gtr_reveal_in_file_manager(path);
     }
 }
