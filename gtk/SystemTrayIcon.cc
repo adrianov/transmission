@@ -25,6 +25,8 @@
 #include <glibmm/miscutils.h>
 #include <gtkmm/icontheme.h>
 #include <gtkmm/menu.h>
+#include <gtkmm/menuitem.h>
+#include <gtkmm/separatormenuitem.h>
 #if !defined(HAVE_APPINDICATOR)
 #include <gtkmm/statusicon.h>
 #endif
@@ -186,6 +188,11 @@ SystemTrayIcon::Impl::Impl([[maybe_unused]] Gtk::Window& main_window, Glib::RefP
     auto const icon_name = getIconName();
     menu_ = Gtk::make_managed<Gtk::Menu>(gtr_action_get_object<Gio::Menu>("icon-popup"));
     menu_->attach_to_widget(main_window);
+
+    menu_->append(*Gtk::make_managed<Gtk::SeparatorMenuItem>());
+    auto* const quit_item = Gtk::make_managed<Gtk::MenuItem>(_("_Quit"), true);
+    quit_item->signal_activate().connect([]() { gtr_action_activate(GTR_KEY_quit); });
+    menu_->append(*quit_item);
 #endif
 
 #if defined(TR_SYS_TRAY_IMPL_APPINDICATOR)

@@ -17,6 +17,7 @@
 #include "PathButton.h"
 #include "Prefs.h"
 #include "PrefsDialog.h"
+#include "ProcessPriority.h"
 #include "RelocateDialog.h"
 #include "Session.h"
 #include "StatsDialog.h"
@@ -33,7 +34,9 @@
 #include <libtransmission/variant.h>
 #include <libtransmission/version.h>
 
+#include <gdkmm/device.h>
 #include <gdkmm/display.h>
+#include <gdkmm/seat.h>
 #include <giomm/appinfo.h>
 #include <giomm/error.h>
 #include <giomm/menu.h>
@@ -85,12 +88,6 @@
 #include <glib-unix.h>
 #endif
 
-#ifdef __linux__
-#include <sched.h>
-#include <sys/syscall.h>
-#include <unistd.h>
-#endif
-
 using namespace std::literals;
 
 #if GTKMM_CHECK_VERSION(4, 0, 0)
@@ -106,18 +103,6 @@ namespace
 {
 
 auto const AppIconName = "transmission"sv; // TODO(C++20): Use ""s
-
-#ifdef __linux__
-// Linux I/O priority constants (from <linux/ioprio.h>, not always available in user space)
-auto constexpr IoPrioWhoProcess = 1;
-auto constexpr IoPrioClassBE = 2; // best-effort (default)
-auto constexpr IoPrioClassIdle = 3; // idle
-
-constexpr int make_ioprio(int ioclass, int data)
-{
-    return (ioclass << 13) | data;
-}
-#endif
 
 char const* const LICENSE =
     "Copyright 2005-2026. All code is copyrighted by the respective authors.\n"
@@ -173,8 +158,6 @@ private:
 
     void scheduleProcessPriorityUpdate();
     void updateProcessPriority();
-    void applyLowPriority();
-    void applyNormalPriority();
 
 #if GTKMM_CHECK_VERSION(4, 0, 0)
     bool on_drag_data_received(Glib::ValueBase const& value, double x, double y);
@@ -231,6 +214,9 @@ private:
         tr_torrent* tor,
         gpointer gdata);
 
+    [[nodiscard]] bool has_active_downloads() const;
+    [[nodiscard]] bool pointer_over_main_window() const;
+
 private:
     Application& app_;
 
@@ -239,8 +225,8 @@ private:
     bool const start_iconified_;
     bool is_iconified_ = false;
     bool is_closing_ = false;
-    bool is_using_background_priority_ = false;
     bool priority_update_pending_ = false;
+    ProcessPriority priority_;
 
     Glib::RefPtr<Gtk::Builder> ui_builder_;
 
@@ -667,6 +653,8 @@ void Application::Impl::on_startup()
 #endif
 
     app_.hold();
+    // Export app.quit on D-Bus so DEs that use it (e.g. KDE, Dash to Panel) can quit gracefully.
+    app_.add_action(GTR_KEY_quit, [this]() { on_app_exit(); });
     app_setup();
     tr_sessionSetRPCCallback(session, &Impl::on_rpc_changed, this);
 
@@ -856,46 +844,76 @@ void Application::Impl::toggleMainWindow()
     }
 }
 
-bool Application::Impl::winclose()
+bool Application::Impl::has_active_downloads() const
 {
-    // Mirror the macOS close-button behaviour: stay running (minimized) while any torrent
-    // is actively downloading, but actually quit once nothing is downloading (only seeds,
-    // paused or stopped torrents remain).
-    bool any_downloading = false;
-    if (auto const model = core_->get_model(); model)
+    auto const model = core_->get_model();
+    if (!model)
     {
-        for (auto i = 0U, count = model->get_n_items(); i < count; ++i)
-        {
-            auto const torrent = gtr_ptr_dynamic_cast<Torrent>(model->get_object(i));
-            if (torrent == nullptr)
-            {
-                continue;
-            }
+        return false;
+    }
 
-            auto const activity = torrent->get_activity();
-            if (activity == TR_STATUS_DOWNLOAD || activity == TR_STATUS_DOWNLOAD_WAIT)
+    for (auto i = 0U, n = model->get_n_items(); i < n; ++i)
+    {
+        if (auto const tor = gtr_ptr_dynamic_cast<Torrent>(model->get_object(i)); tor != nullptr)
+        {
+            auto const s = tor->get_activity();
+            if (s == TR_STATUS_DOWNLOAD || s == TR_STATUS_DOWNLOAD_WAIT)
             {
-                any_downloading = true;
-                break;
+                return true;
             }
         }
     }
 
-    if (any_downloading)
+    return false;
+}
+
+// The window X button and a dock/panel "Quit" both arrive as the same close
+// event, so we tell them apart by pointer location: clicking our own title-bar
+// close button leaves the pointer over the window frame, while a dock/panel
+// "Quit" leaves it over the dock (or its popup) elsewhere on the screen.
+bool Application::Impl::pointer_over_main_window() const
+{
+#if GTKMM_CHECK_VERSION(4, 0, 0)
+    return true; // Wayland/GTK4 forbids global pointer queries; treat as window close.
+#else
+    auto const win = wind_ ? wind_->get_window() : Glib::RefPtr<Gdk::Window>{};
+    auto const seat = wind_ ? wind_->get_display()->get_default_seat() : Glib::RefPtr<Gdk::Seat>{};
+    auto const pointer = seat ? seat->get_pointer() : Glib::RefPtr<Gdk::Device>{};
+    if (!win || !pointer)
+    {
+        return true;
+    }
+
+    int px = 0;
+    int py = 0;
+    Glib::RefPtr<Gdk::Screen> screen;
+    pointer->get_position(screen, px, py);
+
+    Gdk::Rectangle frame;
+    win->get_frame_extents(frame);
+    return px >= frame.get_x() && px < frame.get_x() + frame.get_width() && py >= frame.get_y() &&
+        py < frame.get_y() + frame.get_height();
+#endif
+}
+
+bool Application::Impl::winclose()
+{
+    if (is_closing_)
+    {
+        return false;
+    }
+
+    // A dock/panel "Quit" always quits; the title-bar close button only quits
+    // once nothing is actively downloading (otherwise it hides to the tray).
+    if (pointer_over_main_window() && has_active_downloads())
     {
         if (icon_ != nullptr)
         {
-            // Hide to the notification-area icon (existing close-to-tray behaviour).
             gtr_action_activate(GTR_KEY_toggle_main_window);
         }
         else
         {
-            // No tray icon: iconify to the taskbar so the user can still get the window back.
-#if GTKMM_CHECK_VERSION(4, 0, 0)
-            wind_->minimize();
-#else
             wind_->iconify();
-#endif
             scheduleProcessPriorityUpdate();
         }
     }
@@ -904,7 +922,7 @@ bool Application::Impl::winclose()
         on_app_exit();
     }
 
-    return true; /* don't propagate event further */
+    return true;
 }
 
 void Application::Impl::rowChangedCB(std::unordered_set<tr_torrent_id_t> const& torrent_ids, Torrent::ChangeFlags changes)
@@ -1043,7 +1061,7 @@ void Application::Impl::on_app_exit()
     is_closing_ = true;
 
     // Restore normal priority for a fast, responsive shutdown.
-    applyNormalPriority();
+    priority_.set_background(false);
 
     refresh_actions_tag_.disconnect();
     update_model_soon_tag_.disconnect();
@@ -1210,51 +1228,7 @@ void Application::Impl::updateProcessPriority()
 #endif
     }
 
-    bool const use_background = !is_focused || is_iconified_;
-
-    if (use_background)
-    {
-        applyLowPriority();
-    }
-    else
-    {
-        applyNormalPriority();
-    }
-}
-
-void Application::Impl::applyLowPriority()
-{
-    if (is_using_background_priority_)
-    {
-        return;
-    }
-
-#ifdef __linux__
-    // SCHED_BATCH signals to the kernel that this is a non-interactive batch workload;
-    // the scheduler deprioritises it without requiring elevated privileges, and it is
-    // fully reversible (unlike raising the nice value, which cannot be undone without
-    // CAP_SYS_NICE when RLIMIT_NICE is 0).
-    struct sched_param sp = {};
-    sched_setscheduler(0, SCHED_BATCH, &sp);
-    // Idle I/O class: disk I/O is only served when nothing else needs the disk.
-    syscall(SYS_ioprio_set, IoPrioWhoProcess, 0, make_ioprio(IoPrioClassIdle, 0));
-#endif
-    is_using_background_priority_ = true;
-}
-
-void Application::Impl::applyNormalPriority()
-{
-    if (!is_using_background_priority_)
-    {
-        return;
-    }
-
-#ifdef __linux__
-    struct sched_param sp = {};
-    sched_setscheduler(0, SCHED_OTHER, &sp);
-    syscall(SYS_ioprio_set, IoPrioWhoProcess, 0, make_ioprio(IoPrioClassBE, 0));
-#endif
-    is_using_background_priority_ = false;
+    priority_.set_background(!is_focused || is_iconified_);
 }
 
 void Application::Impl::on_main_window_focus_in()
