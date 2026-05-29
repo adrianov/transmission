@@ -14,6 +14,7 @@ target_sources(${TR_NAME}-gtk
         Dialogs.h
         DynamicPropertyStore.h
         FaviconCache.cc
+        FileManagerUtils.cc
         FileList.cc
         FileList.h
         FilterBar.cc
@@ -54,6 +55,8 @@ target_sources(${TR_NAME}-gtk
         Prefs.h
         PrefsDialog.cc
         PrefsDialog.h
+        ProcessPriority.cc
+        ProcessPriority.h
         RelocateDialog.cc
         RelocateDialog.h
         Session.cc
