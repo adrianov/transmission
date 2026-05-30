@@ -102,8 +102,12 @@ static void initMediaExtensionSets(void)
         if ([lastComponent isEqualToString:@"index.bdmv"])
         {
             NSString* bdmvFolder = fileName.stringByDeletingLastPathComponent;
-            NSString* discFolder = bdmvFolder.stringByDeletingLastPathComponent;
-            [blurayDiscFolders addObject:discFolder.length > 0 ? discFolder : bdmvFolder];
+            // BDMV/BACKUP mirrors index files; not a separate disc.
+            if ([bdmvFolder.lastPathComponent caseInsensitiveCompare:@"BACKUP"] != NSOrderedSame)
+            {
+                NSString* discFolder = bdmvFolder.stringByDeletingLastPathComponent;
+                [blurayDiscFolders addObject:discFolder.length > 0 ? discFolder : bdmvFolder];
+            }
             continue;
         }
 

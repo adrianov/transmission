@@ -216,7 +216,7 @@ Torrents containing DVD or Blu-ray disc structures receive special handling:
 
 **Detection:**
 - **DVD:** Detected by presence of `VIDEO_TS.IFO` file (not just `VIDEO_TS` folder name)
-- **Blu-ray:** Detected by presence of `index.bdmv` file within a `BDMV` folder
+- **Blu-ray:** Detected by presence of `index.bdmv` file within a `BDMV` folder (`BDMV/BACKUP/index.bdmv` is ignored; it mirrors the primary index)
 
 **Multi-disc torrents:**
 - Torrents may contain multiple discs in separate folders (e.g., `Disk.1/VIDEO_TS/`, `Disk.2/VIDEO_TS/`)
