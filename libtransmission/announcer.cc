@@ -792,6 +792,14 @@ time_t tr_announcerNextManualAnnounce(tr_torrent const* tor)
     return ret;
 }
 
+// UDP tracker responded with ACTION_ERROR containing "connection failed" —
+// the tracker explicitly rejects this IP protocol type. No point retrying.
+[[nodiscard]] bool isConnectionFailed(char const* errmsg)
+{
+    auto const lower = tr_strlower(errmsg != nullptr ? errmsg : "");
+    return tr_strv_contains(lower, "connection failed"sv);
+}
+
 namespace
 {
 namespace announce_helpers
@@ -912,7 +920,7 @@ void on_announce_error(tr_tier* tier, char const* err, tr_announce_event e, time
     /* switch to the next tracker */
     current_tracker = tier->useNextTracker();
 
-    if (isUnregistered(err))
+    if (isUnregistered(err) || isConnectionFailed(err))
     {
         tr_logAddErrorTier(
             tier,
@@ -1065,20 +1073,10 @@ void tr_announcer_impl::onAnnounceDone(
 
     if (!response.did_connect)
     {
-        // Mark host as permanently failed - no point retrying connection failures
-        if (auto const* tracker = tier->currentTracker(); tracker != nullptr)
-        {
-            mark_host_failed(tracker->announce_parsed.host);
-        }
         on_announce_error(tier, _("Could not connect to tracker"), event);
     }
     else if (response.did_timeout)
     {
-        // Mark host as permanently failed - timeouts usually indicate unreachable host
-        if (auto const* tracker = tier->currentTracker(); tracker != nullptr)
-        {
-            mark_host_failed(tracker->announce_parsed.host);
-        }
         on_announce_error(tier, _("Tracker did not respond"), event);
     }
     else if (!std::empty(response.errmsg))
@@ -1312,10 +1310,10 @@ void on_scrape_error(tr_session const* /*session*/, tr_tier* tier, char const* e
     tier->last_scrape_str = errmsg != nullptr ? errmsg : "";
     tier->lastScrapeSucceeded = false;
 
-    // switch to the next tracker
-    if (auto* const current_tracker = tier->useNextTracker(); current_tracker != nullptr)
+    // switch to the next tracker; skip reschedule if connection is permanently rejected
+    if (auto* const current_tracker = tier->useNextTracker();
+        current_tracker != nullptr && !isConnectionFailed(errmsg))
     {
-        // schedule a rescrape
         tier->scheduleNextScrape(current_tracker->getRetryInterval());
     }
 }
@@ -1408,20 +1406,10 @@ void tr_announcer_impl::onScrapeDone(tr_scrape_response const& response)
 
         if (!response.did_connect)
         {
-            // Mark host as permanently failed
-            if (auto const* tracker = tier->currentTracker(); tracker != nullptr)
-            {
-                mark_host_failed(tracker->announce_parsed.host);
-            }
             on_scrape_error(session, tier, _("Could not connect to tracker"));
         }
         else if (response.did_timeout)
         {
-            // Mark host as permanently failed
-            if (auto const* tracker = tier->currentTracker(); tracker != nullptr)
-            {
-                mark_host_failed(tracker->announce_parsed.host);
-            }
             on_scrape_error(session, tier, _("Tracker did not respond"));
         }
         else if (!std::empty(response.errmsg))
@@ -1822,8 +1810,9 @@ namespace tracker_view_helpers
         {
             view.announceState = TR_TRACKER_ACTIVE;
         }
-        else if (!tor.is_running() || tier.announceAt == 0)
+        else if (!tor.is_running() || tier.announceAt == 0 || std::empty(tier.announce_events))
         {
+            // Empty event queue means no announce is actually pending, even if announceAt is stale.
             view.announceState = TR_TRACKER_INACTIVE;
         }
         else if (tier.announceAt > now)
@@ -1917,6 +1906,7 @@ void tr_announcer_impl::resetTorrent(tr_torrent* tor)
 
                     new_tier.announce_events = old_tier->announce_events;
                     new_tier.announce_event_priority = old_tier->announce_event_priority;
+                    new_tier.announceAt = old_tier->announceAt;
 
                     auto const* const old_current = old_tier->currentTracker();
                     new_tier.current_tracker_index_ = old_current == nullptr ? std::nullopt :
@@ -1926,7 +1916,8 @@ void tr_announcer_impl::resetTorrent(tr_torrent* tor)
         }
     }
 
-    // kickstart any tiers that didn't get started
+    // kickstart tiers that have no tracker selected yet, or whose in-flight
+    // announce was lost when the old tier was replaced (empty event queue)
     if (tor->is_running())
     {
         auto const now = tr_time();
@@ -1935,6 +1926,9 @@ void tr_announcer_impl::resetTorrent(tr_torrent* tor)
             if (!tier.current_tracker_index_)
             {
                 tier.useNextTracker();
+            }
+            if (std::empty(tier.announce_events))
+            {
                 tier_announce_event_push(&tier, TR_ANNOUNCE_EVENT_STARTED, now);
             }
         }
