@@ -9,6 +9,9 @@
 
 @property(nonatomic, class, readonly) ShareTorrentFileHelper* sharedHelper;
 
+/// Loads ShareKit once on the main thread so menu/toolbar share UI does not dlopen during modal dialogs.
++ (void)preloadSharingFrameworkIfNeeded;
+
 @property(nonatomic, readonly) NSArray<NSURL*>* shareTorrentURLs;
 @property(nonatomic, readonly) NSArray<NSMenuItem*>* menuItems;
 

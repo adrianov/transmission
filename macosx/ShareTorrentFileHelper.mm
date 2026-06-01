@@ -21,6 +21,29 @@
     return helper;
 }
 
++ (void)preloadSharingFrameworkIfNeeded
+{
+    static BOOL didPreload = NO;
+    if (didPreload)
+    {
+        return;
+    }
+    didPreload = YES;
+
+    if (@available(macOS 13.0, *))
+    {
+        NSSharingServicePicker* picker = [[NSSharingServicePicker alloc] initWithItems:@[]];
+        [picker standardShareMenuItem];
+    }
+    else
+    {
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+        [NSSharingService sharingServicesForItems:@[]];
+#pragma clang diagnostic pop
+    }
+}
+
 - (NSArray<NSURL*>*)shareTorrentURLs
 {
     NSArray* torrents = ((Controller*)NSApp.delegate).selectedTorrents;
@@ -38,6 +61,11 @@
 
 - (NSArray<NSMenuItem*>*)menuItems
 {
+    if (NSApp.modalWindow != nil)
+    {
+        return @[];
+    }
+
     if (@available(macOS 13.0, *))
     {
         NSSharingServicePicker* picker = [[NSSharingServicePicker alloc] initWithItems:self.shareTorrentURLs];

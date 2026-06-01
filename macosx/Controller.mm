@@ -66,8 +66,6 @@ static NSTimeInterval const kUpdateUISeconds = 1.0;
 
 static NSString* const kTransferPlist = @"Transfers.plist";
 
-static NSTimeInterval const kDonateNagTime = 60 * 60 * 24 * 7;
-
 static void initUnits()
 {
     using Config = libtransmission::Values::Config;
@@ -716,63 +714,13 @@ void onTorrentCompletenessChanged(tr_torrent* tor, tr_completeness status, bool 
         [BonjourController.defaultController startWithPort:static_cast<int>([self.fDefaults integerForKey:@"RPCPort"])];
     }
 
-    //shamelessly ask for donations
-    if ([self.fDefaults boolForKey:@"WarningDonate"])
-    {
-        BOOL const firstLaunch = tr_sessionGetCumulativeStats(self.fLib).sessionCount <= 1;
-
-        NSDate* lastDonateDate = [self.fDefaults objectForKey:@"DonateAskDate"];
-        BOOL const timePassed = !lastDonateDate || (-1 * lastDonateDate.timeIntervalSinceNow) >= kDonateNagTime;
-
-        if (!firstLaunch && timePassed)
-        {
-            [self.fDefaults setObject:[NSDate date] forKey:@"DonateAskDate"];
-
-            NSAlert* alert = [[NSAlert alloc] init];
-            alert.messageText = NSLocalizedString(@"Support open-source indie software", "Donation beg -> title");
-
-            NSString* donateMessage = [NSString
-                stringWithFormat:@"%@\n\n%@",
-                                 NSLocalizedString(
-                                     @"Transmission is a full-featured torrent application."
-                                      " A lot of time and effort have gone into development, coding, and refinement."
-                                      " If you enjoy using it, please consider showing your love with a donation.",
-                                     "Donation beg -> message"),
-                                 NSLocalizedString(@"Donate or not, there will be no difference to your torrenting experience.", "Donation beg -> message")];
-
-            alert.informativeText = donateMessage;
-            alert.alertStyle = NSAlertStyleInformational;
-
-            [alert addButtonWithTitle:[NSLocalizedString(@"Donate", "Donation beg -> button") stringByAppendingEllipsis]];
-            NSButton* noDonateButton = [alert addButtonWithTitle:NSLocalizedString(@"Nope", "Donation beg -> button")];
-            noDonateButton.keyEquivalent = @"\e"; //escape key
-
-            // hide the "don't show again" check the first time - give them time to try the app
-            BOOL const allowNeverAgain = lastDonateDate != nil;
-            alert.showsSuppressionButton = allowNeverAgain;
-            if (allowNeverAgain)
-            {
-                alert.suppressionButton.title = NSLocalizedString(@"Don't bug me about this ever again.", "Donation beg -> button");
-            }
-
-            NSInteger const donateResult = [alert runModal];
-            if (donateResult == NSAlertFirstButtonReturn)
-            {
-                [self linkDonate:self];
-            }
-
-            if (allowNeverAgain)
-            {
-                [self.fDefaults setBool:(alert.suppressionButton.state != NSControlStateValueOn) forKey:@"WarningDonate"];
-            }
-        }
-    }
-
-    // Preload AppKit Text Input UI (initTUINSCursorUIController) so first click in search field
-    // does not block main thread on dlopen (macOS hang report 2026-02: NSTextField becomeFirstResponder).
+    // Preload ShareKit and AppKit text input UI, then show donate alert. Deferred so launch stays
+    // responsive and modal dialogs are not blocked by menu-driven ShareKit dlopen (hang report 2026-06).
     __weak typeof(self) weakSelf = self;
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        [ShareTorrentFileHelper preloadSharingFrameworkIfNeeded];
         [weakSelf preloadSearchFieldTextInput];
+        [weakSelf showDonateAlertIfNeeded];
     });
 }
 

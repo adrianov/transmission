@@ -104,6 +104,7 @@
 - (void)selectAndScrollToTorrent:(Torrent*)torrent;
 - (void)updateSearchPlaceholder;
 - (void)preloadSearchFieldTextInput;
+- (void)showDonateAlertIfNeeded;
 - (void)updateSearchFieldClearButtonVisibility:(NSSearchField*)field;
 
 + (void)runStartupChecks;
