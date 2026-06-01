@@ -8,13 +8,15 @@ target_sources(macosx-test
         PlayButtonStateBuilder-test.mm
         NSStringAdditions-test.mm
         TorrentPlayable-regression-test.mm
+        TorrentCategoryTitle-test.mm
         ${CMAKE_SOURCE_DIR}/macosx/IINAWatchHelper.h
         ${CMAKE_SOURCE_DIR}/macosx/IINAWatchHelper.mm
         ${CMAKE_SOURCE_DIR}/macosx/NSDataAdditions.h
         ${CMAKE_SOURCE_DIR}/macosx/NSDataAdditions.mm
         ${CMAKE_SOURCE_DIR}/macosx/NSStringAdditions.h
         ${CMAKE_SOURCE_DIR}/macosx/NSStringAdditions.mm
-)
+        ${CMAKE_SOURCE_DIR}/macosx/TorrentCategoryTitle.h
+        ${CMAKE_SOURCE_DIR}/macosx/TorrentCategoryTitle.mm)
 
 set_property(
     TARGET macosx-test
