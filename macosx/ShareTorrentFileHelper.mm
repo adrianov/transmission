@@ -21,27 +21,26 @@
     return helper;
 }
 
+static BOOL sSharingFrameworkPreloaded = NO;
+
 + (void)preloadSharingFrameworkIfNeeded
 {
-    static BOOL didPreload = NO;
-    if (didPreload)
-    {
-        return;
-    }
-    didPreload = YES;
-
-    if (@available(macOS 13.0, *))
-    {
-        NSSharingServicePicker* picker = [[NSSharingServicePicker alloc] initWithItems:@[]];
-        [picker standardShareMenuItem];
-    }
-    else
-    {
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        if (@available(macOS 13.0, *))
+        {
+            NSSharingServicePicker* picker = [[NSSharingServicePicker alloc] initWithItems:@[]];
+            [picker standardShareMenuItem];
+        }
+        else
+        {
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
-        [NSSharingService sharingServicesForItems:@[]];
+            [NSSharingService sharingServicesForItems:@[]];
 #pragma clang diagnostic pop
-    }
+        }
+        sSharingFrameworkPreloaded = YES;
+    });
 }
 
 - (NSArray<NSURL*>*)shareTorrentURLs
@@ -61,10 +60,13 @@
 
 - (NSArray<NSMenuItem*>*)menuItems
 {
-    if (NSApp.modalWindow != nil)
+    // ShareKit dlopen during a modal dialog can hang AppKit; skip only until launch preload finishes.
+    if (NSApp.modalWindow != nil && !sSharingFrameworkPreloaded)
     {
         return @[];
     }
+
+    [ShareTorrentFileHelper preloadSharingFrameworkIfNeeded];
 
     if (@available(macOS 13.0, *))
     {
