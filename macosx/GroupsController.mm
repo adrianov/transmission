@@ -332,7 +332,7 @@ GroupsController* fGroupsInstance = nil;
             @"adult" : @[ @"adult" ],
             @"audio" : @[ @"audio", @"music", @"song", @"album" ],
             @"books" : @[ @"book", @"ebook", @"read", @"pdf", @"epub" ],
-            @"software" : @[ @"software", @"app", @"install" ],
+            @"software" : @[ @"software", @"app", @"install", @"game", @"games" ],
             @"video" : @[ @"video", @"movie", @"film", @"tv", @"serie" ]
         };
     });

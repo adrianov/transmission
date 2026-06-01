@@ -206,6 +206,8 @@ target_sources(${TR_NAME}-mac
         Torrent.mm
         Torrent+Books.mm
         Torrent+Category.mm
+        TorrentCategoryTitle.h
+        TorrentCategoryTitle.mm
         Torrent+DiskSpace.mm
         Torrent+FileList.mm
         Torrent+Icon.mm

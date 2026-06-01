@@ -6,6 +6,7 @@
 
 #import "NSStringAdditions.h"
 #import "Torrent.h"
+#import "TorrentCategoryTitle.h"
 #import "TorrentPrivate.h"
 
 static NSString* const kAdultTrackerHost = @"pornolab.net";
@@ -98,7 +99,7 @@ static BOOL hasAdultSource(NSArray<NSString*>* trackerURLs, NSString* comment)
 - (NSString*)baseMediaCategory
 {
     if (self.magnet)
-        return nil;
+        return TorrentMediaCategoryFromTitle(self.name);
     if (self.folder)
     {
         [self detectMediaType];
