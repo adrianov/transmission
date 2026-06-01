@@ -3,6 +3,8 @@
 // License text can be found in the licenses/ folder.
 
 #import "TorrentCategoryTitle.h"
+#import "Torrent.h"
+#import "TorrentPrivate.h"
 
 static BOOL titleContains(NSString* lower, NSString* keyword)
 {
@@ -29,29 +31,15 @@ static NSString* categoryForExtension(NSString* ext)
     if (ext.length == 0)
         return nil;
 
-    static NSSet<NSString*>* videoExtensions;
-    static NSSet<NSString*>* audioExtensions;
-    static NSSet<NSString*>* bookExtensions;
-    static NSSet<NSString*>* softwareExtensions;
-    static dispatch_once_t onceToken;
-    dispatch_once(&onceToken, ^{
-        videoExtensions = [NSSet setWithArray:@[
-            @"mkv", @"avi", @"mp4", @"mov", @"wmv", @"flv", @"webm", @"m4v", @"mpg", @"mpeg", @"ts", @"m2ts", @"vob", @"3gp", @"ogv"
-        ]];
-        audioExtensions = [NSSet
-            setWithArray:@[ @"mp3", @"flac", @"wav", @"aac", @"ogg", @"wma", @"m4a", @"ape", @"alac", @"aiff", @"opus", @"wv" ]];
-        bookExtensions = [NSSet setWithArray:@[ @"pdf", @"epub", @"djv", @"djvu", @"fb2", @"mobi" ]];
-        softwareExtensions = [NSSet setWithArray:@[ @"exe", @"msi", @"dmg", @"iso", @"pkg", @"deb", @"rpm", @"appimage", @"apk", @"run" ]];
-    });
-
+    [Torrent ensureMediaExtensionSets];
     ext = ext.lowercaseString;
-    if ([videoExtensions containsObject:ext])
+    if ([sVideoExtensions containsObject:ext])
         return @"video";
-    if ([audioExtensions containsObject:ext])
+    if ([sAudioExtensions containsObject:ext])
         return @"audio";
-    if ([bookExtensions containsObject:ext])
+    if ([sBookExtensions containsObject:ext])
         return @"books";
-    if ([softwareExtensions containsObject:ext])
+    if ([sSoftwareExtensions containsObject:ext])
         return @"software";
     return nil;
 }
