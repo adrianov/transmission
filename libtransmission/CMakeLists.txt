@@ -84,6 +84,8 @@ target_sources(${TR_NAME}
         observable.h
         open-files.cc
         open-files.h
+        path-compare.cc
+        path-compare.h
         peer-common.h
         peer-io.cc
         peer-io.h
