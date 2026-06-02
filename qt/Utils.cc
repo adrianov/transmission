@@ -28,6 +28,13 @@
 #if !defined(Q_OS_WIN) && !defined(Q_OS_MAC)
 #include <QDBusConnection>
 #include <QDBusMessage>
+#include <QGuiApplication>
+
+#if QT_VERSION >= QT_VERSION_CHECK(6, 2, 0)
+#include <QtGui/qnativeinterface.h>
+#elif defined(QT_X11_LIB)
+#include <QX11Info>
+#endif
 #endif
 
 #include <libtransmission/transmission.h>
@@ -43,6 +50,29 @@ bool isSlashChar(QChar const& c)
 {
     return c == QLatin1Char('/') || c == QLatin1Char('\\');
 }
+
+#if !defined(Q_OS_WIN) && !defined(Q_OS_MAC)
+QString fileManagerStartupId()
+{
+    quint32 user_time = 0;
+
+#if QT_VERSION >= QT_VERSION_CHECK(6, 2, 0)
+    if (auto const* const x11 = qGuiApp->nativeInterface<QNativeInterface::QX11Application>())
+    {
+        user_time = x11->userTime();
+    }
+#elif defined(QT_X11_LIB)
+    user_time = QX11Info::getUserTime();
+#endif
+
+    if (user_time == 0U)
+    {
+        return {};
+    }
+
+    return QStringLiteral("_TIME%1").arg(user_time);
+}
+#endif
 
 } // namespace
 
@@ -167,8 +197,8 @@ void Utils::revealPathInFileManager(QString const& path)
         QStringLiteral("/org/freedesktop/FileManager1"),
         QStringLiteral("org.freedesktop.FileManager1"),
         QStringLiteral("ShowItems"));
-    msg.setArguments(
-        { QVariant::fromValue(QStringList{ QUrl::fromLocalFile(abs).toString() }), QString{} });
+    msg.setArguments({ QVariant::fromValue(QStringList{ QUrl::fromLocalFile(abs).toString() }),
+                       fileManagerStartupId() });
     QDBusMessage const reply = QDBusConnection::sessionBus().call(msg);
     if (reply.type() == QDBusMessage::ReplyMessage)
     {
