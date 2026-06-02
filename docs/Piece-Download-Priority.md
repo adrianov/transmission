@@ -19,14 +19,15 @@ Each piece inherits priority from the files it belongs to:
 
 Additionally, "edge pieces" (pieces at file boundaries) automatically receive high priority to enable earlier access to incomplete files.
 
-### 2. File Order (Alphabetical)
+### 2. File Order (Natural / Alphanumeric)
 
-Within the same priority level, pieces are ordered by their associated file's alphabetical position. This is particularly useful for:
-- TV series episodes (e.g., "Episode 01.mkv" downloads before "Episode 02.mkv")
+Within the same priority level, pieces are ordered by their associated file's natural alphanumeric path order. This is particularly useful for:
+- TV series episodes (e.g., "S01E00" before "S01E01", "S01E2" before "S01E10")
 - Multi-part archives
-- Any content where alphabetical order matches logical viewing/usage order
+- Any content where path order matches logical viewing/usage order
 
-The alphabetical comparison is case-insensitive and handles special cases:
+The comparison is case-insensitive and handles special cases:
+- Digit sequences are compared numerically (natural sort), not character-by-character
 - Files with the same extension where one name is a prefix of another are ordered by length (shorter first)
 - Directory structure is considered (files in earlier directories come first)
 
@@ -69,6 +70,7 @@ Without sequential mode:
 
 The piece selection logic is implemented in:
 - `libtransmission/peer-mgr-wishlist.cc` - Wishlist candidate sorting
+- `libtransmission/path-compare.cc` - Natural path compare for file ordering
 - `libtransmission/torrent-piece-priority.cc` - File ordering, priority/tail/cover detection (`recalculate_file_order`, `is_piece_in_priority_file`, `is_piece_in_file_tail`, `is_video_file`, `update_piece_priority_state`)
 
 ### Key Functions
