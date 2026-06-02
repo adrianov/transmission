@@ -11,6 +11,7 @@
 #include <giomm/file.h>
 #include <glibmm/fileutils.h>
 #include <glibmm/spawn.h>
+#include <glibmm/ustring.h>
 
 #include <gdk/gdk.h>
 #include <gtk/gtk.h>
@@ -57,6 +58,18 @@ Glib::ustring file_manager_startup_id()
     return Glib::ustring::format("_TIME", user_time);
 }
 
+/** Title of the file-manager window ShowItems opens: the basename of the item's parent directory. */
+Glib::ustring file_manager_window_title_for_path(std::string const& path)
+{
+    auto const file = Gio::File::create_for_path(path);
+    if (auto const parent = file->get_parent())
+    {
+        return parent->get_basename();
+    }
+
+    return file->get_basename();
+}
+
 std::optional<Glib::ustring> dbus_get_name_owner(Gio::DBus::Connection& connection, Glib::ustring const& name)
 {
     try
@@ -77,8 +90,19 @@ std::optional<Glib::ustring> dbus_get_name_owner(Gio::DBus::Connection& connecti
 }
 
 #if defined(GDK_WINDOWING_X11)
-void try_raise_file_manager_window(Gio::DBus::Connection& connection)
+Glib::ustring trim_leading_whitespace(std::string const& text)
 {
+    auto pos = text.find_first_not_of(" \t");
+    return pos == std::string::npos ? Glib::ustring{} : Glib::ustring(text.substr(pos));
+}
+
+void try_raise_file_manager_window(Gio::DBus::Connection& connection, Glib::ustring const& expected_title)
+{
+    if (expected_title.empty())
+    {
+        return;
+    }
+
     auto const fm_owner = dbus_get_name_owner(connection, "org.freedesktop.FileManager1");
     if (!fm_owner)
     {
@@ -137,11 +161,24 @@ void try_raise_file_manager_window(Gio::DBus::Connection& connection)
         Glib::ustring candidate_id;
         unsigned long desktop = 0;
         unsigned long line_pid = 0;
-        line_stream >> candidate_id >> desktop >> line_pid;
-        if (line_pid == pid)
+        Glib::ustring hostname;
+        line_stream >> candidate_id >> desktop >> line_pid >> hostname;
+        if (line_pid != pid)
         {
-            window_id = candidate_id;
+            continue;
         }
+
+        Glib::ustring title;
+        std::string title_buf;
+        std::getline(line_stream, title_buf);
+        title = trim_leading_whitespace(title_buf);
+        if (title != expected_title)
+        {
+            continue;
+        }
+
+        window_id = candidate_id;
+        break;
     }
 
     if (window_id.empty())
@@ -180,7 +217,7 @@ bool gtr_try_reveal_with_file_manager_dbus(std::string const& path)
             "org.freedesktop.FileManager1",
             1000);
 #if defined(GDK_WINDOWING_X11)
-        try_raise_file_manager_window(*connection);
+        try_raise_file_manager_window(*connection, file_manager_window_title_for_path(path));
 #endif
         return true;
     }
