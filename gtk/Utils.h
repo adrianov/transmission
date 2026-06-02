@@ -98,7 +98,7 @@ void gtr_open_uri(Glib::ustring const& uri);
 
 void gtr_open_file(std::string const& path);
 
-/** Open a file manager window with this path selected (best effort; may open a parent folder only).
+/** Open a file manager window with this path selected in its parent folder (best effort).
     Uses org.freedesktop.FileManager1.ShowItems when the session file manager supports it. */
 void gtr_reveal_in_file_manager(std::string const& path);
 

@@ -5,6 +5,7 @@
 
 #include "Utils.h"
 
+#include "FileManagerActivate.h"
 #include "GtkCompat.h"
 
 #include <libtransmission/torrent-files.h>
@@ -12,7 +13,6 @@
 #include <libtransmission/utils.h>
 
 #include <giomm/appinfo.h>
-#include <giomm/dbusconnection.h>
 #include <giomm/file.h>
 #include <glibmm/fileutils.h>
 #include <glibmm/i18n.h>
@@ -20,35 +20,9 @@
 #include <glibmm/spawn.h>
 
 #include <string>
-#include <vector>
 
 namespace
 {
-
-bool try_reveal_with_file_manager_dbus(std::string const& path)
-{
-    try
-    {
-        auto const connection = Gio::DBus::Connection::get_sync(TR_GIO_DBUS_BUS_TYPE(SESSION));
-        auto const file = Gio::File::create_for_path(path);
-        std::vector<Glib::ustring> const uris = { file->get_uri() };
-        connection->call_sync(
-            "/org/freedesktop/FileManager1",
-            "org.freedesktop.FileManager1",
-            "ShowItems",
-            Glib::VariantContainerBase::create_tuple({
-                Glib::Variant<std::vector<Glib::ustring>>::create(uris),
-                Glib::Variant<Glib::ustring>::create(""),
-            }),
-            "org.freedesktop.FileManager1",
-            1000);
-        return true;
-    }
-    catch (Glib::Error const&)
-    {
-        return false;
-    }
-}
 
 std::string torrent_explorer_path(tr_torrent const* tor)
 {
@@ -94,7 +68,7 @@ void gtr_reveal_in_file_manager(std::string const& path)
         return;
     }
 
-    if (try_reveal_with_file_manager_dbus(path))
+    if (gtr_try_reveal_with_file_manager_dbus(path))
     {
         return;
     }

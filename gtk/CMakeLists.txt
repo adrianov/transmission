@@ -18,6 +18,8 @@ target_sources(${TR_NAME}-gtk
         Dialogs.h
         DynamicPropertyStore.h
         FaviconCache.cc
+        FileManagerActivate.cc
+        FileManagerActivate.h
         FileManagerUtils.cc
         FileList.cc
         FileList.h
