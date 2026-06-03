@@ -111,9 +111,13 @@
 
 - (void)sortFileList:(NSMutableArray<FileListNode*>*)fileNodes
 {
-    NSSortDescriptor* descriptor = [NSSortDescriptor sortDescriptorWithKey:@"name" ascending:YES
-                                                                  selector:@selector(localizedStandardCompare:)];
-    [fileNodes sortUsingDescriptors:@[ descriptor ]];
+    [fileNodes sortUsingComparator:^NSComparisonResult(FileListNode* a, FileListNode* b) {
+        if (a.isFolder != b.isFolder)
+        {
+            return a.isFolder ? NSOrderedAscending : NSOrderedDescending;
+        }
+        return [a.name localizedStandardCompare:b.name];
+    }];
 
     [fileNodes enumerateObjectsWithOptions:NSEnumerationConcurrent usingBlock:^(FileListNode* node, NSUInteger /*idx*/, BOOL* /*stop*/) {
         if (node.isFolder)
