@@ -82,6 +82,10 @@ static NSTimeInterval const kDonateNagTime = 60 * 60 * 24 * 7;
     [NSWorkspace.sharedWorkspace openURL:[NSURL URLWithString:kDonateURL]];
 }
 
+@end
+
+@implementation Controller (DockLinksPrivate)
+
 - (void)showDonateAlertIfNeeded
 {
     if (![self.fDefaults boolForKey:@"WarningDonate"])

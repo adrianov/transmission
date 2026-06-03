@@ -104,7 +104,6 @@
 - (void)selectAndScrollToTorrent:(Torrent*)torrent;
 - (void)updateSearchPlaceholder;
 - (void)preloadSearchFieldTextInput;
-- (void)showDonateAlertIfNeeded;
 - (void)updateSearchFieldClearButtonVisibility:(NSSearchField*)field;
 
 + (void)runStartupChecks;
@@ -113,6 +112,10 @@
 
 @interface Controller (AutoImportPrivate)
 - (void)checkAutoImportDirectoryWithReason:(NSString*)reason;
+@end
+
+@interface Controller (DockLinksPrivate)
+- (void)showDonateAlertIfNeeded;
 @end
 
 @interface Controller (MissingDataLaunch)
