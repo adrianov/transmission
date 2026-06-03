@@ -32,6 +32,8 @@ cmake --build build -t transmission-mac
 open ./build/macosx/Transmission.app
 ```
 
+On macOS, CMake ignores Homebrew library paths and uses bundled third-party deps so the app does not depend on Homebrew dylibs.
+
 ### Building the GTK app with CMake ###
 Install GTK and build the app:
 ```bash

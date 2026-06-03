@@ -2,7 +2,7 @@ include(CheckAtomic)
 include(CheckLibraryExists)
 include(CheckSymbolExists)
 
-if(ENABLE_NLS)
+if(ENABLE_NLS AND NOT APPLE)
     find_package(Intl)
 endif()
 
