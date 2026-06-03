@@ -1,0 +1,59 @@
+#!/usr/bin/env python3
+# Run ninja and stop after MAX compiler errors (default 10).
+# Usage: ninja-errors-cap [--max N] -- ninja-args...
+
+import os
+import re
+import subprocess
+import sys
+
+DEFAULT_MAX = 10
+ERROR_RE = re.compile(r": error:")
+
+
+def parse_args(argv: list[str]) -> tuple[int, list[str]]:
+    max_errors = int(os.environ.get("TR_MAX_COMPILE_ERRORS", DEFAULT_MAX))
+    if len(argv) >= 2 and argv[0] == "--max":
+        max_errors = int(argv[1])
+        argv = argv[2:]
+    if argv and argv[0] == "--":
+        argv = argv[1:]
+    if not argv:
+        print("usage: ninja-errors-cap [--max N] -- ninja-args...", file=sys.stderr)
+        sys.exit(2)
+    return max_errors, argv
+
+
+def main() -> int:
+    max_errors, ninja_args = parse_args(sys.argv[1:])
+    proc = subprocess.Popen(
+        ["ninja", *ninja_args],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        bufsize=1,
+    )
+    error_count = 0
+    assert proc.stdout is not None
+    try:
+        for line in proc.stdout:
+            sys.stdout.write(line)
+            sys.stdout.flush()
+            if ERROR_RE.search(line):
+                error_count += 1
+                if error_count >= max_errors:
+                    sys.stderr.write(
+                        f"\nAborting after {max_errors} compilation errors.\n"
+                    )
+                    proc.kill()
+                    proc.wait()
+                    return 1
+        return proc.wait()
+    except KeyboardInterrupt:
+        proc.kill()
+        proc.wait()
+        raise
+
+
+if __name__ == "__main__":
+    sys.exit(main())
