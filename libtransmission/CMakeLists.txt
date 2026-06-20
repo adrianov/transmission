@@ -63,6 +63,8 @@ target_sources(${TR_NAME}
         file-win32.cc
         file.cc
         file.h
+        host-tracker-registry.cc
+        host-tracker-registry.h
         handshake.cc
         handshake.h
         history.h

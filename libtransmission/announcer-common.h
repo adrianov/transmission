@@ -110,6 +110,9 @@ struct tr_announce_response
     /* whether or not the scrape timed out */
     bool did_timeout = false;
 
+    /* HTTP status code when the announce used HTTP(S); 0 otherwise. */
+    long http_status = 0;
+
     /* preferred interval between announces.
      * transmission treats this as the interval for periodic announces */
     time_t interval = 0;
