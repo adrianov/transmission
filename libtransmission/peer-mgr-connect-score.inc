@@ -50,33 +50,43 @@ namespace
     return true;
 }
 
+[[nodiscard]] uint64_t compose_candidate_score(CandidateKey const& key) noexcept
+{
+    auto score = uint64_t{};
+    score = add_val_to_key(score, 1U, key.swarm_has_peers);
+    score = add_val_to_key(score, 1U, key.had_fruitless);
+    score = add_val_to_key(score, 32U, key.last_attempt_time);
+    score = add_val_to_key(score, 2U, key.torrent_priority);
+    score = add_val_to_key(score, 1U, key.not_started_recently);
+    score = add_val_to_key(score, 1U, key.is_done);
+    score = add_val_to_key(score, 1U, key.not_connectable);
+    score = add_val_to_key(score, 1U, key.is_upload_only);
+    score = add_val_to_key(score, 4U, key.from_best);
+    score = add_val_to_key(score, 8U, key.salt);
+    return score;
+}
+
 [[nodiscard]] uint64_t peer_candidate_score(tr_torrent const& tor, tr_peer_info const& peer_info, uint8_t const salt)
 {
-    auto i = uint64_t{};
-    auto score = uint64_t{};
+    auto key = CandidateKey{};
 
     // Prefer swarms with no connected peers yet (bootstrap).
-    i = tor.swarm->peers.empty() ? 0U : 1U;
-    score = add_val_to_key(score, 1U, i);
-
-    i = peer_info.fruitless_connection_count() != 0U ? 1U : 0U;
-    score = add_val_to_key(score, 1U, i);
-
-    i = peer_info.connection_attempt_time();
-    score = add_val_to_key(score, 32U, i);
+    key.swarm_has_peers = tor.swarm->peers.empty() ? 0U : 1U;
+    key.had_fruitless = peer_info.fruitless_connection_count() != 0U ? 1U : 0U;
+    key.last_attempt_time = static_cast<uint64_t>(peer_info.connection_attempt_time());
 
     switch (tor.get_priority())
     {
     case TR_PRI_HIGH:
-        i = 0;
+        key.torrent_priority = 0U;
         break;
 
     case TR_PRI_NORMAL:
-        i = 1;
+        key.torrent_priority = 1U;
         break;
 
     case TR_PRI_LOW:
-        i = 2;
+        key.torrent_priority = 2U;
         break;
 
     default:
@@ -84,23 +94,12 @@ namespace
         break;
     }
 
-    score = add_val_to_key(score, 2U, i);
+    key.not_started_recently = tor.started_recently(tr_time()) ? 0U : 1U;
+    key.is_done = tor.is_done() ? 1U : 0U;
+    key.not_connectable = peer_info.is_connectable().value_or(false) ? 0U : 1U;
+    key.is_upload_only = peer_info.is_upload_only() ? 1U : 0U;
+    key.from_best = peer_info.from_best();
+    key.salt = salt;
 
-    i = tor.started_recently(tr_time()) ? 0 : 1;
-    score = add_val_to_key(score, 1U, i);
-
-    i = tor.is_done() ? 1 : 0;
-    score = add_val_to_key(score, 1U, i);
-
-    i = peer_info.is_connectable().value_or(false) ? 0 : 1;
-    score = add_val_to_key(score, 1U, i);
-
-    i = peer_info.is_upload_only() ? 1 : 0;
-    score = add_val_to_key(score, 1U, i);
-
-    score = add_val_to_key(score, 4U, peer_info.from_best());
-
-    score = add_val_to_key(score, 8U, salt);
-
-    return score;
+    return compose_candidate_score(key);
 }
