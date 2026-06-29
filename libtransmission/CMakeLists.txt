@@ -91,6 +91,7 @@ target_sources(${TR_NAME}
         peer-common.h
         peer-io.cc
         peer-io.h
+        peer-mgr-connect.h
         peer-mgr-wishlist.cc
         peer-mgr-wishlist.h
         peer-mgr.cc
