@@ -34,6 +34,7 @@ target_sources(libtransmission-test
         net-test.cc
         open-files-test.cc
         path-compare-test.cc
+        peer-mgr-connect-test.cc
         peer-mgr-wishlist-test.cc
         peer-msgs-test.cc
         platform-test.cc
