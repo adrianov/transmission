@@ -1084,7 +1084,7 @@ std::string_view tr_torrent::primary_mime_type() const
 
 void tr_torrent::on_file_completed(tr_file_index_t const file)
 {
-    /* close the file so that we can reopen in read-only mode as needed */
+    // Flush and close so later opens are read-only (no lingering write handle).
     session->close_torrent_file(*this, file);
 
     /* now that the file is complete and closed, we can start watching its

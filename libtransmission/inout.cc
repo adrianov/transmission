@@ -14,17 +14,18 @@
 
 #include "libtransmission/transmission.h"
 
-#include "libtransmission/block-info.h" // tr_block_info
+#include "libtransmission/block-info.h"
 #include "libtransmission/crypto-utils.h"
 #include "libtransmission/error.h"
 #include "libtransmission/file.h"
 #include "libtransmission/inout.h"
+#include "libtransmission/open-files.h"
 #include "libtransmission/session.h"
 #include "libtransmission/torrent.h"
 #include "libtransmission/torrent-files.h"
 #include "libtransmission/tr-assert.h"
-#include "libtransmission/tr-macros.h" // tr_sha1_digest_t
-#include "libtransmission/tr-strbuf.h" // tr_pathbuf
+#include "libtransmission/tr-macros.h"
+#include "libtransmission/tr-strbuf.h"
 #include "libtransmission/utils.h"
 
 using namespace std::literals;
@@ -37,7 +38,6 @@ bool read_entire_buf(tr_sys_file_t const fd, uint64_t file_offset, uint8_t* buf,
     while (buflen > 0U)
     {
         auto n_read = uint64_t{};
-
         if (!tr_sys_file_read_at(fd, buf, buflen, file_offset, &n_read, &error))
         {
             return false;
@@ -56,7 +56,6 @@ bool write_entire_buf(tr_sys_file_t const fd, uint64_t file_offset, uint8_t cons
     while (buflen > 0U)
     {
         auto n_written = uint64_t{};
-
         if (!tr_sys_file_write_at(fd, buf, buflen, file_offset, &n_written, &error))
         {
             return false;
@@ -80,13 +79,18 @@ bool write_entire_buf(tr_sys_file_t const fd, uint64_t file_offset, uint8_t cons
 {
     auto const tor_id = tor.id();
 
-    // is the file already open in the fd pool?
+    // Finished files must not keep a write handle. Close one before a read so we
+    // reopen read-only (avoids write-access conflicts with other apps).
+    if (!writable && tor.has_file(file_index) && open_files.get(tor_id, file_index, true))
+    {
+        open_files.close_file(tor_id, file_index);
+    }
+
     if (auto const fd = open_files.get(tor_id, file_index, writable); fd)
     {
         return fd;
     }
 
-    // does the file exist?
     auto const file_size = tor.file_size(file_index);
     auto const prealloc = writable && tor.file_is_wanted(file_index) ? session.preallocationMode() :
                                                                        tr_open_files::Preallocation::None;
@@ -95,16 +99,13 @@ bool write_entire_buf(tr_sys_file_t const fd, uint64_t file_offset, uint8_t cons
         return open_files.get(tor_id, file_index, writable, found->filename(), prealloc, file_size);
     }
 
-    // do we want to create it?
     auto err = ENOENT;
     if (writable)
     {
-        auto const base = tor.current_dir();
         auto const suffix = session.isIncompleteFileNamingEnabled() ? tr_torrent_files::PartialFileSuffix : ""sv;
-        auto const filename = tr_pathbuf{ base, '/', tor.file_subpath(file_index), suffix };
+        auto const filename = tr_pathbuf{ tor.current_dir(), '/', tor.file_subpath(file_index), suffix };
         if (auto const fd = open_files.get(tor_id, file_index, writable, filename, prealloc, file_size); fd)
         {
-            // make a note that we just created a file
             session.add_file_created();
             return fd;
         }
@@ -169,6 +170,13 @@ void read_or_write_bytes(
                 fmt::arg("path", tor.file_subpath(file_index)),
                 fmt::arg("error", error.message()),
                 fmt::arg("error_code", error.code())));
+        return;
+    }
+
+    // After the last flush of a finished file, release the write handle immediately.
+    if (writable && tor.has_file(file_index))
+    {
+        open_files.close_file(tor.id(), file_index);
     }
 }
 
