@@ -13,6 +13,9 @@
 /// Title color for current state. Green (unwatched) = light on green; gray (watched) = theme-consistent (light text in dark, dark in light).
 + (NSColor*)titleColorUnwatched:(BOOL)unwatched;
 
+/// Shared 11pt system font used for play button titles.
++ (NSFont*)titleFont;
+
 @property(nonatomic) BOOL isHovered;
 @property(nonatomic) BOOL iinaUnwatched;
 @property(nonatomic, copy) void (^onHover)(PlayButton* button);

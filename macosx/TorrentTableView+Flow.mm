@@ -12,16 +12,14 @@
 #import "TorrentCell.h"
 #import "TorrentTableView.h"
 #import "TorrentTableViewPrivate.h"
-#include <cmath>
 #import <objc/runtime.h>
 
 static char const kFlowViewTorrentHashKey = '\0';
 extern char const kPlayButtonTypeKey;
 extern char const kPlayButtonFolderKey;
 extern char const kPlayButtonRepresentedKey;
-static char const kPlayButtonPathUiTokenKey = '\0';
+extern char const kPlayButtonPathUiTokenKey = '\0';
 static CGFloat const kFlowPlayButtonRightMargin = 55.0;
-static CGFloat const kFlowPlayButtonRowHeight = 18.0;
 static CGFloat const kFlowPlayButtonVerticalPadding = 4.0;
 static NSTimeInterval const kHeightFlushDelay = 0.1;
 
@@ -53,8 +51,6 @@ static NSString* flowViewTorrentHash(FlowLayoutView* flowView)
         return YES;
     return NO;
 }
-
-
 
 - (CGFloat)playButtonsAvailableWidthForCell:(TorrentCell*)cell
 {
@@ -189,7 +185,9 @@ static NSString* flowViewTorrentHash(FlowLayoutView* flowView)
         playButton.identifier = path;
     NSString* openLabel = [torrent openCountLabelForPlayableItem:entry];
     NSString* tooltipPath = [torrent tooltipPathForItemPath:path type:type folder:folder];
-    NSString* tooltip = tooltipPath.length > 0 ? tooltipPath : (playButton.title.length > 0 ? playButton.title : NSLocalizedString(@"Play", "Play button tooltip fallback"));
+    NSString* tooltip = tooltipPath.length > 0 ?
+        tooltipPath :
+        (playButton.title.length > 0 ? playButton.title : NSLocalizedString(@"Play", "Play button tooltip fallback"));
     playButton.toolTip = openLabel.length > 0 ? [NSString stringWithFormat:@"%@\n%@", tooltip, openLabel] : tooltip;
     objc_setAssociatedObject(playButton, &kPlayButtonTypeKey, type, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     objc_setAssociatedObject(playButton, &kPlayButtonFolderKey, folder.length > 0 ? folder : nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
@@ -342,208 +340,6 @@ static NSString* flowViewTorrentHash(FlowLayoutView* flowView)
     }
     else if (torrent.playableFiles.count > 0)
         [self configurePlayButtonsForCell:cell torrent:torrent];
-}
-
-- (void)updatePlayButtonProgressForCell:(TorrentCell*)cell torrent:(Torrent*)torrent
-{
-    [self updatePlayButtonProgressForCell:cell torrent:torrent forceLayout:NO];
-}
-
-- (void)updatePlayButtonProgressForCell:(TorrentCell*)cell torrent:(Torrent*)torrent forceLayout:(BOOL)forceLayout
-{
-    FlowLayoutView* flowView = (FlowLayoutView*)cell.fPlayButtonsView;
-    if (!flowView || ![flowView isKindOfClass:[FlowLayoutView class]])
-        return;
-    NSArray<NSDictionary*>* state = [PlayButtonStateBuilder stateForTorrent:torrent];
-    if (!state || state.count == 0)
-    {
-        flowView.hidden = YES;
-        if (cell.fPlayButtonsHeightConstraint)
-            cell.fPlayButtonsHeightConstraint.constant = 0;
-        [flowView invalidateIntrinsicContentSize];
-        if (torrent.cachedPlayButtonsHeight > 0.5)
-        {
-            torrent.cachedPlayButtonsHeight = 0;
-            [self queueHeightUpdateForRow:[self rowForItem:torrent]];
-        }
-        return;
-    }
-
-    BOOL anyVisible = NO;
-    for (NSDictionary* e in state)
-    {
-        if ([e[@"visible"] boolValue])
-        {
-            anyVisible = YES;
-            break;
-        }
-    }
-    NSUInteger playButtonCount = 0;
-    for (NSView* v in [flowView contentSubviews])
-    {
-        if ([v isKindOfClass:[PlayButton class]])
-            playButtonCount++;
-    }
-    if (anyVisible && playButtonCount == 0)
-    {
-        [self configurePlayButtonsForCell:cell torrent:torrent];
-        return;
-    }
-
-    [CATransaction begin];
-    [CATransaction setDisableActions:YES];
-
-    NSInteger row = [self rowForItem:torrent];
-    NSMutableDictionary* stateMap = [NSMutableDictionary dictionaryWithCapacity:state.count];
-    for (NSDictionary* entry in state)
-    {
-        NSNumber* index = entry[@"index"];
-        if (index)
-            stateMap[index] = entry;
-        else
-        {
-            NSString* folder = entry[@"folder"];
-            if (folder)
-                stateMap[folder] = entry;
-        }
-    }
-    BOOL layoutNeeded = forceLayout;
-    NSView* currentLineBreak = nil;
-    NSTextField* currentHeader = nil;
-    BOOL anyButtonVisibleInSection = NO;
-    Class const playButtonClass = [PlayButton class];
-    Class const textFieldClass = [NSTextField class];
-
-    for (NSView* view in [flowView contentSubviews])
-    {
-        if ([view isKindOfClass:textFieldClass])
-        {
-            if (currentHeader)
-            {
-                BOOL const headerHidden = !anyButtonVisibleInSection;
-                if (currentHeader.hidden != headerHidden)
-                {
-                    currentHeader.hidden = headerHidden;
-                    if (currentLineBreak)
-                        currentLineBreak.hidden = headerHidden;
-                    layoutNeeded = YES;
-                }
-            }
-            currentHeader = (NSTextField*)view;
-            anyButtonVisibleInSection = NO;
-            continue;
-        }
-        if ([view isKindOfClass:playButtonClass])
-        {
-            PlayButton* button = (PlayButton*)view;
-            NSDictionary* represented = objc_getAssociatedObject(button, &kPlayButtonRepresentedKey);
-            NSDictionary* item = [represented isKindOfClass:[NSDictionary class]] ? represented[@"item"] : nil;
-            NSDictionary* entry = nil;
-            if (item)
-            {
-                NSNumber* idx = item[@"index"];
-                NSString* folder = item[@"folder"];
-                entry = idx ? stateMap[idx] : (folder.length > 0 ? stateMap[folder] : nil);
-            }
-            if (!entry)
-                entry = (button.tag != NSNotFound) ? stateMap[@(button.tag)] :
-                                                     (stateMap[[self folderForPlayButton:button torrent:torrent]] ?: nil);
-            if (entry)
-            {
-                NSNumber* visibleNum = entry[@"visible"];
-                NSString* title = entry[@"title"];
-                if (visibleNum && title)
-                {
-                    BOOL const shouldBeHidden = !visibleNum.boolValue;
-                    BOOL const becameVisible = button.hidden && !shouldBeHidden;
-                    if (button.hidden != shouldBeHidden)
-                    {
-                        button.hidden = shouldBeHidden;
-                        layoutNeeded = YES;
-                    }
-                    if (!shouldBeHidden)
-                        anyButtonVisibleInSection = YES;
-                    BOOL titleChanged = ![button.title isEqualToString:title];
-                    if (titleChanged)
-                    {
-                        button.title = title;
-                        [button invalidateIntrinsicContentSize];
-                        [flowView invalidateSizeForView:button];
-                        layoutNeeded = YES;
-                    }
-                    NSNumber* iinaUnwatchedNum = entry[@"iinaUnwatched"];
-                    BOOL iinaUnwatched = iinaUnwatchedNum ? iinaUnwatchedNum.boolValue : NO;
-                    BOOL watchedChanged = (button.iinaUnwatched != iinaUnwatched);
-                    if (watchedChanged)
-                    {
-                        button.iinaUnwatched = iinaUnwatched;
-                        layoutNeeded = YES;
-                    }
-                    if (titleChanged || watchedChanged)
-                    {
-                        NSColor* titleColor = [PlayButton titleColorUnwatched:button.iinaUnwatched];
-                        NSString* currentTitle = button.title ?: @"";
-                        NSMutableAttributedString* attr = [[NSMutableAttributedString alloc] initWithString:currentTitle];
-                        [attr addAttribute:NSForegroundColorAttributeName value:titleColor range:NSMakeRange(0, currentTitle.length)];
-                        [attr addAttribute:NSFontAttributeName value:[NSFont systemFontOfSize:11]
-                                     range:NSMakeRange(0, currentTitle.length)];
-                        button.attributedTitle = attr;
-                        [button setNeedsDisplay:YES];
-                    }
-
-                    // Path-derived UI is expensive (filesystem/path checks); refresh only when needed.
-                    NSString* token = [self pathUiTokenForEntry:entry];
-                    NSString* cachedToken = objc_getAssociatedObject(button, &kPlayButtonPathUiTokenKey);
-                    BOOL needsPathUi = forceLayout || becameVisible || ![cachedToken isEqualToString:token];
-                    if (needsPathUi)
-                    {
-                        [self applyPathDerivedUIToPlayButton:button forEntry:entry torrent:torrent];
-                        objc_setAssociatedObject(button, &kPlayButtonPathUiTokenKey, token, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-                    }
-                }
-            }
-            continue;
-        }
-        currentLineBreak = view;
-    }
-    if (currentHeader)
-    {
-        BOOL const headerHidden = !anyButtonVisibleInSection;
-        if (currentHeader.hidden != headerHidden)
-        {
-            currentHeader.hidden = headerHidden;
-            if (currentLineBreak)
-                currentLineBreak.hidden = headerHidden;
-            layoutNeeded = YES;
-        }
-    }
-    if (layoutNeeded)
-    {
-        CGFloat const availableWidth = [self playButtonsAvailableWidthForCell:cell];
-        BOOL useSavedHeight = [flowView hasValidLayoutForWidth:availableWidth] && flowView.lastLayoutHeight > 0;
-        CGFloat buttonHeight = useSavedHeight ? flowView.lastLayoutHeight : [flowView heightForWidth:availableWidth];
-        if (buttonHeight > 0 && buttonHeight < kFlowPlayButtonRowHeight)
-            buttonHeight = kFlowPlayButtonRowHeight;
-        if (cell.fPlayButtonsHeightConstraint)
-            cell.fPlayButtonsHeightConstraint.constant = buttonHeight;
-        CGFloat totalHeight = self.rowHeight + (buttonHeight > 0 ? (buttonHeight + kFlowPlayButtonVerticalPadding) : 0);
-        CGFloat oldHeight = torrent.cachedPlayButtonsHeight;
-        torrent.cachedPlayButtonsHeight = totalHeight;
-        torrent.cachedPlayButtonsWidth = availableWidth;
-        if (std::fabs(totalHeight - oldHeight) > 1.0)
-        {
-            [self queueHeightUpdateForRow:row];
-            if (buttonHeight > 0)
-                [self noteHeightUpdateForRow:row];
-        }
-    }
-
-    [CATransaction commit];
-}
-
-- (void)noteHeightUpdateForRow:(NSInteger)row
-{
-    [self noteHeightOfRowsWithIndexesChanged:[NSIndexSet indexSetWithIndex:(NSUInteger)row]];
 }
 
 @end

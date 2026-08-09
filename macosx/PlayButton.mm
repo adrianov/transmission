@@ -36,28 +36,37 @@
         color = button ? [PlayButton titleColorUnwatched:button.iinaUnwatched] : NSColor.controlTextColor;
     // Use the button's attributedTitle directly when color matches, avoiding per-draw allocation.
     NSAttributedString* attrTitle = button ? button.attributedTitle : title;
-    NSString* str = attrTitle.string ?: @"";
-    if (str.length > 0)
+    NSString* str = attrTitle.string;
+    NSUInteger const len = str.length;
+    if (len == 0)
+        return frame;
+
+    NSColor* existingColor = [attrTitle attribute:NSForegroundColorAttributeName atIndex:0 effectiveRange:nil];
+    if (existingColor == color || [existingColor isEqual:color])
     {
-        NSDictionary* attrs = (str.length > 0) ? [attrTitle attributesAtIndex:0 effectiveRange:nil] : nil;
-        NSColor* existingColor = attrs[NSForegroundColorAttributeName];
-        if (existingColor && [existingColor isEqual:color])
-        {
-            [attrTitle drawInRect:frame];
-        }
-        else
-        {
-            NSMutableAttributedString* attr = [attrTitle mutableCopy];
-            [attr addAttribute:NSForegroundColorAttributeName value:color range:NSMakeRange(0, str.length)];
-            [attr drawInRect:frame];
-        }
+        [attrTitle drawInRect:frame];
+        return frame;
     }
+
+    NSMutableAttributedString* attr = [attrTitle mutableCopy];
+    [attr addAttribute:NSForegroundColorAttributeName value:color range:NSMakeRange(0, len)];
+    [attr drawInRect:frame];
     return frame;
 }
 
 @end
 
 @implementation PlayButton
+
++ (NSFont*)titleFont
+{
+    static NSFont* font;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        font = [NSFont systemFontOfSize:11];
+    });
+    return font;
+}
 
 + (NSColor*)fillColorUnwatched:(BOOL)unwatched hovered:(BOOL)hovered
 {
@@ -120,7 +129,7 @@
         self.bordered = YES;
         self.bezelStyle = NSBezelStyleRounded;
         self.showsBorderOnlyWhileMouseInside = NO;
-        self.font = [NSFont systemFontOfSize:11];
+        self.font = [PlayButton titleFont];
         self.controlSize = NSControlSizeSmall;
         self.imagePosition = NSImageLeft;
         self.imageScaling = NSImageScaleProportionallyDown;
