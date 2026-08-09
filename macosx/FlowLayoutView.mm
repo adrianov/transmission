@@ -10,7 +10,10 @@
 @end
 
 @implementation FlowLineBreak
-- (BOOL)isOpaque { return NO; }
+- (BOOL)isOpaque
+{
+    return NO;
+}
 @end
 
 @interface FlowLayoutView ()
@@ -54,9 +57,15 @@
     return self;
 }
 
-- (BOOL)isOpaque { return NO; }
+- (BOOL)isOpaque
+{
+    return NO;
+}
 
-- (BOOL)isFlipped { return YES; }
+- (BOOL)isFlipped
+{
+    return YES;
+}
 
 - (void)addArrangedSubview:(NSView*)view
 {
@@ -94,7 +103,8 @@
 
 - (NSArray<NSView*>*)contentSubviews
 {
-    return [_contentViews copy];
+    // Live array; callers must not mutate while iterating.
+    return _contentViews;
 }
 
 - (void)removeAllArrangedSubviews
@@ -126,8 +136,10 @@
     }
     else
         size = view.fittingSize;
-    if (size.width <= 0) size.width = 60;
-    if (size.height <= 0) size.height = 18;
+    if (size.width <= 0)
+        size.width = 60;
+    if (size.height <= 0)
+        size.height = 18;
     [_cachedSizes setObject:[NSValue valueWithSize:size] forKey:view];
     return size;
 }
@@ -137,15 +149,16 @@
     NSMutableArray<NSArray<NSView*>*>* rows = [NSMutableArray array];
     NSMutableArray<NSView*>* currentRow = [NSMutableArray array];
     CGFloat x = 0;
+    Class const lineBreakClass = [FlowLineBreak class];
 
     for (NSView* v in _contentViews)
     {
-        if ([v isKindOfClass:[FlowLineBreak class]])
+        if ([v isKindOfClass:lineBreakClass])
         {
             if (currentRow.count > 0)
             {
-                [rows addObject:[currentRow copy]];
-                [currentRow removeAllObjects];
+                [rows addObject:currentRow];
+                currentRow = [NSMutableArray array];
             }
             x = 0;
             continue;
@@ -155,10 +168,10 @@
         CGFloat w = [self sizeForView:v].width;
         BOOL overflow = (x + w > width + 0.001) && currentRow.count > 0;
         BOOL atCap = _maximumColumnCount > 0 && currentRow.count >= _maximumColumnCount;
-        if ((overflow || atCap) && currentRow.count > 0)
+        if (overflow || atCap)
         {
-            [rows addObject:[currentRow copy]];
-            [currentRow removeAllObjects];
+            [rows addObject:currentRow];
+            currentRow = [NSMutableArray array];
             x = 0;
         }
         [currentRow addObject:v];
@@ -171,18 +184,24 @@
 
 - (void)applyLayoutForWidth:(CGFloat)width
 {
-    if (width <= 0) return;
-    if (!_layoutDirty && std::fabs(width - _lastLayoutWidth) < 0.001) return;
+    if (width <= 0)
+        return;
+    if (!_layoutDirty && std::fabs(width - _lastLayoutWidth) < 0.001)
+        return;
 
     NSArray<NSArray<NSView*>*>* rows = [self rowsForWidth:width];
     CGFloat y = 0;
+    Class const lineBreakClass = [FlowLineBreak class];
 
     for (NSView* v in _contentViews)
-        if ([v isKindOfClass:[FlowLineBreak class]])
+    {
+        if ([v isKindOfClass:lineBreakClass] && (!v.hidden || !NSEqualRects(v.frame, NSZeroRect)))
         {
             v.hidden = YES;
             v.frame = NSZeroRect;
         }
+    }
+
     for (NSArray* row in rows)
     {
         CGFloat rowH = 0;
@@ -192,7 +211,8 @@
         for (NSView* v in row)
         {
             NSSize sz = [self sizeForView:v];
-            v.hidden = NO;
+            if (v.hidden)
+                v.hidden = NO;
             CGFloat vY = y + (rowH - sz.height) / 2.0;
             NSRect newFrame = NSMakeRect(x, vY, sz.width, sz.height);
             // Only mark dirty if frame actually changed; avoids redundant redraws during scroll.
@@ -219,7 +239,8 @@
 
 - (CGFloat)heightForWidth:(CGFloat)width
 {
-    if (width <= 0) return 0;
+    if (width <= 0)
+        return 0;
     if (!_layoutDirty && std::fabs(width - _lastLayoutWidth) < 0.001)
         return _lastLayoutHeight;
     [self applyLayoutForWidth:width];
@@ -234,8 +255,9 @@
 - (NSSize)intrinsicContentSize
 {
     BOOL hasVisible = NO;
+    Class const lineBreakClass = [FlowLineBreak class];
     for (NSView* v in _contentViews)
-        if (![v isKindOfClass:[FlowLineBreak class]] && !v.hidden)
+        if (![v isKindOfClass:lineBreakClass] && !v.hidden)
         {
             hasVisible = YES;
             break;
@@ -245,7 +267,8 @@
     CGFloat w = NSWidth(self.bounds);
     if (w < 100)
         w = self.superview ? NSWidth(self.superview.bounds) : 600;
-    if (w < 100) w = 600;
+    if (w < 100)
+        w = 600;
     return NSMakeSize(NSViewNoIntrinsicMetric, MAX([self heightForWidth:w], 0));
 }
 
