@@ -167,6 +167,8 @@ target_sources(${TR_NAME}-mac
         NSMutableArrayAdditions.mm
         NSStringAdditions.h
         NSStringAdditions.mm
+        NSString+HumanTitle.h
+        NSString+HumanTitle.mm
         PeerProgressIndicatorCell.h
         PeerProgressIndicatorCell.mm
         PeerTableView.h

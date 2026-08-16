@@ -15,6 +15,8 @@ target_sources(macosx-test
         ${CMAKE_SOURCE_DIR}/macosx/NSDataAdditions.mm
         ${CMAKE_SOURCE_DIR}/macosx/NSStringAdditions.h
         ${CMAKE_SOURCE_DIR}/macosx/NSStringAdditions.mm
+        ${CMAKE_SOURCE_DIR}/macosx/NSString+HumanTitle.h
+        ${CMAKE_SOURCE_DIR}/macosx/NSString+HumanTitle.mm
         ${CMAKE_SOURCE_DIR}/macosx/TorrentCategoryTitle.h
         ${CMAKE_SOURCE_DIR}/macosx/TorrentCategoryTitle.mm)
 
