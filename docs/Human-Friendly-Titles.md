@@ -125,6 +125,7 @@ The following technical tags are filtered out:
 - `Paris. .Bonus` → `Paris. Bonus` (dot-space-dot cleaned)
 - `Paris .Bonus` → `Paris Bonus` (orphan dot removed)
 - Underscores (`_`) are replaced with spaces
+- Plus signs (`+`) in magnet `dn=` names are decoded to spaces
 - Existing ` - ` separators are preserved
 - Hyphens (`-`) between letters (hyphenated words like `Butt-Head`, `Full-Moon`) are preserved; do not add spaces around them
 - Other hyphens (with space on at least one side) are normalized to ` - `
@@ -165,6 +166,7 @@ Parts are assembled with specific formatting:
 | `The.White.Lotus.S03E05.Full-Moon.Party.1080p.AMZN.WEB-DL.H.264-EniaHD.mkv` | Episode button: `▶ S3 E5 - Full-Moon Party` |
 | `Beavis.and.Butt-Head.Do` | `Beavis and Butt-Head Do` |
 | `NaughtyAmerica(NaughtyBookworms)` | `NaughtyAmerica (NaughtyBookworms)` |
+| `Somm+Into+the+Bottle+(2015)+(1080p+WEB-DL+x265+HEVC+10bit+AC3+5.1+MONOLITH)+[QxR]` | `Somm Into the Bottle (5.1 MONOLITH) QxR (2015) #1080p` |
 
 ## Play Buttons (macOS)
 
@@ -275,9 +277,9 @@ Filenames are converted to readable episode names:
 
 The transformation is implemented in:
 
-- **macOS:** `NSStringAdditions.mm` - `humanReadableTitle`, `humanReadableFileName`, and `humanReadableEpisodeName` properties on `NSString`
+- **macOS:** `NSStringAdditions.mm` / `NSString+HumanTitle.mm` — `humanReadableTitle`, `humanReadableFileName`, and `humanReadableEpisodeName` on `NSString`
 - **macOS:** `Torrent+Playable.mm` - `playableFiles`, folder-based and file-based playable names (folder title = folder name only via `humanizedTitleForFolderPlayableWithFolder:…`). Common prefix/suffix stripping at display time via `[Torrent displayTitlesByStrippingCommonPrefixSuffix:seasons:]`: uses only title strings; tokenize by whitespace with balanced `(...)` as one token; drop common **leading** tokens when the common prefix contains a season token (S1/S01) or when the remainder after the common prefix is a disc marker (CD1, Disc 1, etc.); for season-only stripping when 2+ titles share that season; drop common trailing tokens; rejoin; then trim trailing space and strip extra trailing `)`. `PlayButtonStateBuilder` sets stripped titles for 2+ items; `TorrentTableView+Flow` and `TorrentTableView+PlayMenu` use the same state (DRY).
 - **macOS:** `TorrentTableView.mm` - Play button UI and dynamic row height
-- **Web UI:** `formatter.js` - `Formatter.humanTitle()` (torrent list) and `Formatter.humanFileName()` (file list)
+- **Web UI:** `human-title/human-title.js` — `HumanTitle` for list titles and file names; `Formatter.humanTitle()` / `Formatter.humanFileName()` stay the public wrappers
 
 The original technical name remains available via the `name` property and is shown in the Inspector (detail view) where the exact filename may be needed.
