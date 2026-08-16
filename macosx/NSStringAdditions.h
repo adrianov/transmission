@@ -92,11 +92,20 @@ NS_ASSUME_NONNULL_BEGIN
  */
 @property(nonatomic, readonly, copy, nullable) NSArray<NSNumber*>* episodeNumbers;
 
+/// First http(s) URL in a torrent comment (the chain-link reference URL).
+@property(nonatomic, readonly, nullable) NSURL* torrentCommentURL;
+
 /// File URL from path safe for opening/revealing (percent-encodes ';' etc. so system/open apps do not misinterpret).
 - (NSURL*)fileURLForOpening;
 
 /// At most `max` composed character sequences; if `max` is 0, returns self. Optionally appends the standard ellipsis string.
 - (NSString*)tr_stringLimitedToGraphemeClusters:(NSUInteger)max appendEllipsis:(BOOL)appendEllipsis;
+
+@end
+
+@interface NSURL (TorrentCommentURL)
+
+- (BOOL)isEqualToTorrentCommentURL:(NSURL* _Nullable)other;
 
 @end
 

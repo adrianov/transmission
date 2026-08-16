@@ -315,6 +315,32 @@
     return [NSURL URLWithString:[@"file://" stringByAppendingString:encoded]];
 }
 
+- (NSURL*)torrentCommentURL
+{
+    if (self.length == 0)
+    {
+        return nil;
+    }
+
+    static NSDataDetector* detector;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        detector = [NSDataDetector dataDetectorWithTypes:NSTextCheckingTypeLink error:nil];
+    });
+
+    NSArray<NSTextCheckingResult*>* matches = [detector matchesInString:self options:0 range:NSMakeRange(0, self.length)];
+    for (NSTextCheckingResult* result in matches)
+    {
+        NSURL* url = result.URL;
+        NSString* scheme = url.scheme.lowercaseString;
+        if ([scheme isEqualToString:@"http"] || [scheme isEqualToString:@"https"])
+        {
+            return url;
+        }
+    }
+    return nil;
+}
+
 @end
 
 @implementation NSString (Private)
@@ -385,6 +411,19 @@
     }
     // 100 GB/s and above
     return [NSString localizedStringWithFormat:@"%.0f %@", speed, gb];
+}
+
+@end
+
+@implementation NSURL (TorrentCommentURL)
+
+- (BOOL)isEqualToTorrentCommentURL:(NSURL*)other
+{
+    if (other == nil)
+    {
+        return NO;
+    }
+    return [self.absoluteString caseInsensitiveCompare:other.absoluteString] == NSOrderedSame;
 }
 
 @end

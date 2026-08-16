@@ -15,6 +15,7 @@
 #import "AddMagnetWindowController.h"
 #import "AddWindowController.h"
 #import "GroupsController.h"
+#import "NSStringAdditions.h"
 #import "Torrent.h"
 #import "URLSheetWindowController.h"
 
@@ -24,133 +25,13 @@
 
 - (void)openFiles:(NSArray<NSString*>*)filenames addType:(AddType)type forcePath:(NSString*)path
 {
-    BOOL deleteTorrentFile, canToggleDelete = NO;
-    switch (type)
-    {
-    case AddTypeCreated:
-        deleteTorrentFile = NO;
-        break;
-    case AddTypeURL:
-        deleteTorrentFile = YES;
-        break;
-    default:
-        deleteTorrentFile = [self.fDefaults boolForKey:@"DeleteOriginalTorrent"];
-        canToggleDelete = YES;
-    }
-
+    BOOL canToggleDelete = NO;
+    BOOL const deleteTorrentFile = [self deleteOriginalTorrentForAddType:type canToggleDelete:&canToggleDelete];
     for (NSString* torrentPath in filenames)
     {
-        auto metainfo = tr_torrent_metainfo{};
-        if (!metainfo.parse_torrent_file(torrentPath.UTF8String))
-        {
-            if (type != AddTypeAuto)
-            {
-                [self invalidOpenAlert:torrentPath.lastPathComponent];
-            }
-            continue;
-        }
-
-        auto foundTorrent = tr_torrentFindFromMetainfo(self.fLib, &metainfo);
-        if (foundTorrent != nullptr)
-        {
-            if (tr_torrentHasMetadata(foundTorrent))
-            {
-                [self duplicateOpenAlert:@(metainfo.name().c_str())];
-            }
-            else if (!tr_torrentSetMetainfoFromFile(foundTorrent, &metainfo, torrentPath.UTF8String))
-            {
-                [self duplicateOpenAlert:@(metainfo.name().c_str())];
-            }
-            continue;
-        }
-
-        NSString* location;
-        BOOL lockDestination = NO;
-        if (path)
-        {
-            location = path.stringByExpandingTildeInPath;
-            lockDestination = YES;
-        }
-        else if ([self.fDefaults boolForKey:@"DownloadLocationConstant"])
-        {
-            location = [self.fDefaults stringForKey:@"DownloadFolder"].stringByExpandingTildeInPath;
-        }
-        else if (type != AddTypeURL)
-        {
-            location = torrentPath.stringByDeletingLastPathComponent;
-        }
-        else
-        {
-            location = nil;
-        }
-
-        auto const is_multifile = metainfo.file_count() > 1;
-        BOOL const showWindow = type == AddTypeShowOptions ||
-            ([self.fDefaults boolForKey:@"DownloadAsk"] && (is_multifile || ![self.fDefaults boolForKey:@"DownloadAskMulti"]) &&
-             (type != AddTypeAuto || ![self.fDefaults boolForKey:@"DownloadAskManual"]));
-
-        Torrent* torrent;
-        if (!(torrent = [[Torrent alloc] initWithPath:torrentPath location:location
-                                    deleteTorrentFile:showWindow ? NO : deleteTorrentFile
-                                                  lib:self.fLib]))
-        {
-            continue;
-        }
-
-        if (!lockDestination && [GroupsController.groups usesCustomDownloadLocationForIndex:torrent.groupValue])
-        {
-            location = [GroupsController.groups customDownloadLocationForIndex:torrent.groupValue];
-            [torrent changeDownloadFolderBeforeUsing:location determinationType:TorrentDeterminationAutomatic];
-        }
-
-        if (type == AddTypeCreated)
-        {
-            [torrent resetCache];
-        }
-
-        if (showWindow || !location)
-        {
-            AddWindowController* addController = [[AddWindowController alloc] initWithTorrent:torrent destination:location
-                                                                              lockDestination:lockDestination
-                                                                                   controller:self
-                                                                                  torrentFile:torrentPath
-                                                            deleteTorrentCheckEnableInitially:deleteTorrentFile
-                                                                              canToggleDelete:canToggleDelete];
-            [addController showWindow:self];
-
-            if (!self.fAddWindows)
-            {
-                self.fAddWindows = [[NSMutableSet alloc] init];
-            }
-            [self.fAddWindows addObject:addController];
-        }
-        else
-        {
-            if (type != AddTypeCreated && torrent.haveVerified > 0 && !torrent.allDownloaded)
-            {
-                [torrent resetCache];
-            }
-
-            [torrent update];
-            [self insertTorrentAtTop:torrent];
-
-            if (!self.fAddingTransfers)
-            {
-                self.fAddingTransfers = [[NSMutableSet alloc] init];
-            }
-            [self.fAddingTransfers addObject:torrent];
-
-            if ([self.fDefaults boolForKey:@"AutoStartDownload"])
-            {
-                [torrent startTransfer];
-            }
-
-            dispatch_async(dispatch_get_main_queue(), ^{
-                [self handleTorrentPausedForDiskSpace:torrent];
-            });
-        }
+        [self openTorrentAtPath:torrentPath addType:type forcePath:path deleteTorrentFile:deleteTorrentFile
+                canToggleDelete:canToggleDelete];
     }
-
     [self fullUpdateUI];
 }
 
@@ -160,15 +41,7 @@
 
     if (add)
     {
-        [torrent update];
-        [self insertTorrentAtTop:torrent];
-
-        if (!self.fAddingTransfers)
-        {
-            self.fAddingTransfers = [[NSMutableSet alloc] init];
-        }
-        [self.fAddingTransfers addObject:torrent];
-
+        [self insertAndTrackAddingTorrent:torrent];
         [self fullUpdateUI];
     }
     else
@@ -231,14 +104,7 @@
             [torrent startTransfer];
         }
 
-        [torrent update];
-        [self insertTorrentAtTop:torrent];
-
-        if (!self.fAddingTransfers)
-        {
-            self.fAddingTransfers = [[NSMutableSet alloc] init];
-        }
-        [self.fAddingTransfers addObject:torrent];
+        [self insertAndTrackAddingTorrent:torrent];
     }
 
     [self fullUpdateUI];
@@ -250,15 +116,7 @@
 
     if (add)
     {
-        [torrent update];
-        [self insertTorrentAtTop:torrent];
-
-        if (!self.fAddingTransfers)
-        {
-            self.fAddingTransfers = [[NSMutableSet alloc] init];
-        }
-        [self.fAddingTransfers addObject:torrent];
-
+        [self insertAndTrackAddingTorrent:torrent];
         [self fullUpdateUI];
 
         dispatch_async(dispatch_get_main_queue(), ^{
@@ -538,3 +396,259 @@
 
 @end
 #pragma clang diagnostic pop
+
+@implementation Controller (OpenAddPrivate)
+
+- (BOOL)deleteOriginalTorrentForAddType:(AddType)type canToggleDelete:(BOOL*)canToggleDelete
+{
+    *canToggleDelete = NO;
+    switch (type)
+    {
+    case AddTypeCreated:
+        return NO;
+    case AddTypeURL:
+        return YES;
+    default:
+        *canToggleDelete = YES;
+        return [self.fDefaults boolForKey:@"DeleteOriginalTorrent"];
+    }
+}
+
+- (BOOL)absorbDuplicateOfMetainfo:(tr_torrent_metainfo&)metainfo torrentPath:(NSString*)torrentPath
+{
+    auto foundTorrent = tr_torrentFindFromMetainfo(self.fLib, &metainfo);
+    if (foundTorrent == nullptr)
+    {
+        return NO;
+    }
+    if (tr_torrentHasMetadata(foundTorrent) || !tr_torrentSetMetainfoFromFile(foundTorrent, &metainfo, torrentPath.UTF8String))
+    {
+        [self duplicateOpenAlert:@(metainfo.name().c_str())];
+    }
+    return YES;
+}
+
+- (NSString*)replaceLocationForMetainfo:(tr_torrent_metainfo const&)metainfo addType:(AddType)type
+{
+    if (type == AddTypeCreated)
+    {
+        return nil;
+    }
+    NSString* comment = @(metainfo.comment().c_str());
+    return [self torrentsMatchingCommentURL:comment.torrentCommentURL excludingTorrent:nil].firstObject.currentDirectory;
+}
+
+- (NSString*)destinationForTorrentPath:(NSString*)torrentPath
+                               addType:(AddType)type
+                             forcePath:(NSString*)forcePath
+                       replaceLocation:(NSString*)replaceLocation
+                       lockDestination:(BOOL*)lockDestination
+{
+    *lockDestination = NO;
+    if (replaceLocation.length > 0)
+    {
+        *lockDestination = YES;
+        return replaceLocation;
+    }
+    if (forcePath)
+    {
+        *lockDestination = YES;
+        return forcePath.stringByExpandingTildeInPath;
+    }
+    if ([self.fDefaults boolForKey:@"DownloadLocationConstant"])
+    {
+        return [self.fDefaults stringForKey:@"DownloadFolder"].stringByExpandingTildeInPath;
+    }
+    if (type != AddTypeURL)
+    {
+        return torrentPath.stringByDeletingLastPathComponent;
+    }
+    return nil;
+}
+
+- (BOOL)shouldShowAddWindowForType:(AddType)type multifile:(BOOL)multifile replacing:(BOOL)replacing
+{
+    if (replacing)
+    {
+        return NO;
+    }
+    if (type == AddTypeShowOptions)
+    {
+        return YES;
+    }
+    if (![self.fDefaults boolForKey:@"DownloadAsk"])
+    {
+        return NO;
+    }
+    if (!multifile && [self.fDefaults boolForKey:@"DownloadAskMulti"])
+    {
+        return NO;
+    }
+    if (type == AddTypeAuto && [self.fDefaults boolForKey:@"DownloadAskManual"])
+    {
+        return NO;
+    }
+    return YES;
+}
+
+- (void)applyGroupLocationIfUnlocked:(Torrent*)torrent lockDestination:(BOOL)lockDestination
+{
+    if (lockDestination || ![GroupsController.groups usesCustomDownloadLocationForIndex:torrent.groupValue])
+    {
+        return;
+    }
+    NSString* location = [GroupsController.groups customDownloadLocationForIndex:torrent.groupValue];
+    [torrent changeDownloadFolderBeforeUsing:location determinationType:TorrentDeterminationAutomatic];
+}
+
+- (void)presentAddWindowForTorrent:(Torrent*)torrent
+                       destination:(NSString*)location
+                   lockDestination:(BOOL)lockDestination
+                       torrentFile:(NSString*)torrentPath
+                 deleteTorrentFile:(BOOL)deleteTorrentFile
+                   canToggleDelete:(BOOL)canToggleDelete
+{
+    AddWindowController* addController = [[AddWindowController alloc] initWithTorrent:torrent destination:location
+                                                                      lockDestination:lockDestination
+                                                                           controller:self
+                                                                          torrentFile:torrentPath
+                                                    deleteTorrentCheckEnableInitially:deleteTorrentFile
+                                                                      canToggleDelete:canToggleDelete];
+    [addController showWindow:self];
+    if (!self.fAddWindows)
+    {
+        self.fAddWindows = [[NSMutableSet alloc] init];
+    }
+    [self.fAddWindows addObject:addController];
+}
+
+- (void)insertAndTrackAddingTorrent:(Torrent*)torrent
+{
+    [torrent update];
+    [self insertTorrentAtTop:torrent];
+    if (!self.fAddingTransfers)
+    {
+        self.fAddingTransfers = [[NSMutableSet alloc] init];
+    }
+    [self.fAddingTransfers addObject:torrent];
+}
+
+- (void)commitAddedTorrent:(Torrent*)torrent addType:(AddType)type replacing:(BOOL)replacing
+{
+    if (type != AddTypeCreated && torrent.haveVerified > 0 && !torrent.allDownloaded)
+    {
+        [torrent resetCache];
+    }
+    [self insertAndTrackAddingTorrent:torrent];
+    if (replacing)
+    {
+        [self replaceOutdatedTorrentsWithSameCommentURLAs:torrent];
+    }
+    if ([self.fDefaults boolForKey:@"AutoStartDownload"])
+    {
+        [torrent startTransfer];
+    }
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [self handleTorrentPausedForDiskSpace:torrent];
+    });
+}
+
+- (void)openTorrentAtPath:(NSString*)torrentPath
+                  addType:(AddType)type
+                forcePath:(NSString*)forcePath
+        deleteTorrentFile:(BOOL)deleteTorrentFile
+          canToggleDelete:(BOOL)canToggleDelete
+{
+    auto metainfo = tr_torrent_metainfo{};
+    if (!metainfo.parse_torrent_file(torrentPath.UTF8String))
+    {
+        if (type != AddTypeAuto)
+        {
+            [self invalidOpenAlert:torrentPath.lastPathComponent];
+        }
+        return;
+    }
+    if ([self absorbDuplicateOfMetainfo:metainfo torrentPath:torrentPath])
+    {
+        return;
+    }
+
+    NSString* replaceLocation = [self replaceLocationForMetainfo:metainfo addType:type];
+    BOOL lockDestination = NO;
+    NSString* location = [self destinationForTorrentPath:torrentPath addType:type forcePath:forcePath
+                                         replaceLocation:replaceLocation lockDestination:&lockDestination];
+    BOOL const replacing = replaceLocation.length > 0;
+    BOOL const showWindow = [self shouldShowAddWindowForType:type multifile:metainfo.file_count() > 1 replacing:replacing];
+
+    Torrent* torrent = [[Torrent alloc] initWithPath:torrentPath location:location
+                                   deleteTorrentFile:showWindow ? NO : deleteTorrentFile
+                                                 lib:self.fLib];
+    if (!torrent)
+    {
+        return;
+    }
+
+    [self applyGroupLocationIfUnlocked:torrent lockDestination:lockDestination];
+    if (type == AddTypeCreated)
+    {
+        [torrent resetCache];
+    }
+    if (!replacing && (showWindow || !location))
+    {
+        [self presentAddWindowForTorrent:torrent destination:location lockDestination:lockDestination torrentFile:torrentPath
+                       deleteTorrentFile:deleteTorrentFile canToggleDelete:canToggleDelete];
+        return;
+    }
+    [self commitAddedTorrent:torrent addType:type replacing:replacing];
+}
+
+- (NSArray<Torrent*>*)torrentsMatchingCommentURL:(NSURL*)url excludingTorrent:(Torrent*)exclude
+{
+    if (url == nil)
+    {
+        return @[];
+    }
+
+    NSMutableArray<Torrent*>* matches = [NSMutableArray array];
+    for (Torrent* torrent in self.fTorrents)
+    {
+        if (torrent == exclude)
+        {
+            continue;
+        }
+        if ([torrent.commentURL isEqualToTorrentCommentURL:url])
+        {
+            [matches addObject:torrent];
+        }
+    }
+    return matches;
+}
+
+- (BOOL)replaceOutdatedTorrentsWithSameCommentURLAs:(Torrent*)torrent
+{
+    // Drop the previous version of this download (same reference URL, different torrent) without asking.
+    NSArray<Torrent*>* outdated = [self torrentsMatchingCommentURL:torrent.commentURL excludingTorrent:torrent];
+    if (outdated.count == 0)
+    {
+        return NO;
+    }
+
+    Torrent* previous = outdated[0];
+    NSString* directory = previous.currentDirectory;
+    NSInteger group = previous.groupValue;
+
+    for (Torrent* oldTorrent in outdated)
+    {
+        [oldTorrent stopTransfer];
+    }
+
+    if (directory.length > 0)
+    {
+        [torrent changeDownloadFolderBeforeUsing:directory determinationType:TorrentDeterminationUserSpecified];
+    }
+    [torrent setGroupValue:group determinationType:TorrentDeterminationUserSpecified];
+    [self confirmRemoveTorrents:outdated deleteData:NO];
+    return YES;
+}
+
+@end

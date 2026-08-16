@@ -118,6 +118,18 @@
 - (void)showDonateAlertIfNeeded;
 @end
 
+@interface Controller (OpenAddPrivate)
+- (NSArray<Torrent*>*)torrentsMatchingCommentURL:(NSURL*)url excludingTorrent:(Torrent*)exclude;
+- (BOOL)replaceOutdatedTorrentsWithSameCommentURLAs:(Torrent*)torrent;
+- (BOOL)deleteOriginalTorrentForAddType:(AddType)type canToggleDelete:(BOOL*)canToggleDelete;
+- (void)openTorrentAtPath:(NSString*)torrentPath
+                  addType:(AddType)type
+                forcePath:(NSString*)forcePath
+        deleteTorrentFile:(BOOL)deleteTorrentFile
+          canToggleDelete:(BOOL)canToggleDelete;
+- (void)insertAndTrackAddingTorrent:(Torrent*)torrent;
+@end
+
 @interface Controller (MissingDataLaunch)
 - (void)removeMissingDataTorrentsOnLaunch;
 - (NSSet<NSString*>*)missingDataCandidateDownloadDirsFromTorrents:(NSArray<Torrent*>*)torrents;
