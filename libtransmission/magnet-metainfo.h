@@ -69,6 +69,10 @@ public:
 
     void add_webseed(std::string_view webseed);
 
+private:
+    bool applyMagnetQuery(std::string_view key, std::string_view value);
+    bool addMagnetXt(std::string_view value);
+
 protected:
     tr_announce_list announce_list_;
     std::vector<std::string> webseed_urls_;
