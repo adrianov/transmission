@@ -60,7 +60,7 @@ static dispatch_queue_t iinaStateQueue()
 
         dispatch_async(dispatch_get_main_queue(), ^{
             Torrent* strongTorrent = weakTorrent;
-            if (!strongTorrent || strongTorrent.cachedPlayButtonState != state)
+            if (!strongTorrent || strongTorrent.content.cachedPlayButtonState != state)
                 return;
 
             BOOL changed = NO;
@@ -91,8 +91,8 @@ static void setStateLookups(Torrent* torrent, NSArray<NSMutableDictionary*>* sta
 {
     if (!state || state.count == 0)
     {
-        torrent.cachedPlayButtonStateByIndex = nil;
-        torrent.cachedPlayButtonStateByFolder = nil;
+        torrent.content.cachedPlayButtonStateByIndex = nil;
+        torrent.content.cachedPlayButtonStateByFolder = nil;
         return;
     }
     NSMutableDictionary<NSNumber*, NSMutableDictionary*>* byIndex =
@@ -108,8 +108,8 @@ static void setStateLookups(Torrent* torrent, NSArray<NSMutableDictionary*>* sta
         if (folder.length > 0)
             byFolder[folder] = entry;
     }
-    torrent.cachedPlayButtonStateByIndex = byIndex;
-    torrent.cachedPlayButtonStateByFolder = byFolder;
+    torrent.content.cachedPlayButtonStateByIndex = byIndex;
+    torrent.content.cachedPlayButtonStateByFolder = byFolder;
 }
 
 + (NSMutableArray<NSMutableDictionary*>*)stateForTorrent:(Torrent*)torrent
@@ -117,24 +117,24 @@ static void setStateLookups(Torrent* torrent, NSArray<NSMutableDictionary*>* sta
     NSArray<NSDictionary*>* playableFiles = torrent.playableFiles;
     if (playableFiles.count == 0)
     {
-        torrent.cachedPlayButtonSource = nil;
-        torrent.cachedPlayButtonState = nil;
-        torrent.cachedPlayButtonLayout = nil;
+        torrent.content.cachedPlayButtonSource = nil;
+        torrent.content.cachedPlayButtonState = nil;
+        torrent.content.cachedPlayButtonLayout = nil;
         setStateLookups(torrent, nil);
         return nil;
     }
 
-    BOOL isSameSource = [torrent.cachedPlayButtonSource isEqualToArray:playableFiles];
+    BOOL isSameSource = [torrent.content.cachedPlayButtonSource isEqualToArray:playableFiles];
     if (!isSameSource)
     {
-        torrent.cachedPlayButtonSource = playableFiles;
-        torrent.cachedPlayButtonState = nil;
-        torrent.cachedPlayButtonLayout = nil;
+        torrent.content.cachedPlayButtonSource = playableFiles;
+        torrent.content.cachedPlayButtonState = nil;
+        torrent.content.cachedPlayButtonLayout = nil;
         setStateLookups(torrent, nil);
-        torrent.cachedPlayButtonProgressGeneration = 0;
+        torrent.content.cachedPlayButtonProgressGeneration = 0;
     }
 
-    NSMutableArray<NSMutableDictionary*>* state = (NSMutableArray<NSMutableDictionary*>*)torrent.cachedPlayButtonState;
+    NSMutableArray<NSMutableDictionary*>* state = (NSMutableArray<NSMutableDictionary*>*)torrent.content.cachedPlayButtonState;
     if (!state)
     {
         state = [NSMutableArray arrayWithCapacity:playableFiles.count];
@@ -199,14 +199,14 @@ static void setStateLookups(Torrent* torrent, NSArray<NSMutableDictionary*>* sta
             NSString* stripped = e[@"strippedTitle"] ?: @"";
             e[@"title"] = [NSString stringWithFormat:@"%@ (%d%%)", stripped, [e[@"progressPercent"] intValue]];
         }
-        torrent.cachedPlayButtonState = state;
-        state = (NSMutableArray<NSMutableDictionary*>*)torrent.cachedPlayButtonState;
+        torrent.content.cachedPlayButtonState = state;
+        state = (NSMutableArray<NSMutableDictionary*>*)torrent.content.cachedPlayButtonState;
         setStateLookups(torrent, state);
     }
 
     NSUInteger statsGeneration = torrent.statsGeneration;
     // When UI refresh runs without updateTorrents (e.g. fUpdatingUI skip), progress cache is stale; invalidate so we show current progress.
-    if (torrent.cachedPlayButtonProgressGeneration == statsGeneration)
+    if (torrent.content.cachedPlayButtonProgressGeneration == statsGeneration)
         [torrent invalidateFileProgressCache];
 
     BOOL visibilityChanged = NO;
@@ -271,17 +271,17 @@ static void setStateLookups(Torrent* torrent, NSArray<NSMutableDictionary*>* sta
     }
 
     if (visibilityChanged)
-        torrent.cachedPlayButtonLayout = nil;
+        torrent.content.cachedPlayButtonLayout = nil;
 
     [self enrichStateWithIinaUnwatched:state forTorrent:torrent];
-    torrent.cachedPlayButtonProgressGeneration = statsGeneration;
+    torrent.content.cachedPlayButtonProgressGeneration = statsGeneration;
     return state;
 }
 
 + (NSArray<NSDictionary*>*)layoutForTorrent:(Torrent*)torrent state:(NSArray<NSDictionary*>*)state
 {
-    if (torrent.cachedPlayButtonLayout != nil)
-        return torrent.cachedPlayButtonLayout;
+    if (torrent.content.cachedPlayButtonLayout != nil)
+        return torrent.content.cachedPlayButtonLayout;
 
     if (state.count == 0)
         return nil;
@@ -290,7 +290,7 @@ static void setStateLookups(Torrent* torrent, NSArray<NSMutableDictionary*>* sta
     if (state.count == 1)
     {
         [layout addObject:@{ @"kind" : @"item", @"item" : state[0] }];
-        torrent.cachedPlayButtonLayout = layout;
+        torrent.content.cachedPlayButtonLayout = layout;
         return layout;
     }
 
@@ -343,7 +343,7 @@ static void setStateLookups(Torrent* torrent, NSArray<NSMutableDictionary*>* sta
         }
     }
 
-    torrent.cachedPlayButtonLayout = layout;
+    torrent.content.cachedPlayButtonLayout = layout;
     return layout;
 }
 

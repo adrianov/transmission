@@ -130,8 +130,8 @@
         return nil;
 
     NSMenu* cachedMenu = [self.fPlayMenuCache objectForKey:torrent];
-    if (cachedMenu && torrent.cachedPlayMenuLayout != nil &&
-        torrent.cachedPlayButtonLayout == torrent.cachedPlayMenuLayout)
+    if (cachedMenu && torrent.content.cachedPlayMenuLayout != nil &&
+        torrent.content.cachedPlayButtonLayout == torrent.content.cachedPlayMenuLayout)
         return cachedMenu;
 
     NSArray<NSDictionary*>* state = [PlayButtonStateBuilder stateForTorrent:torrent];
@@ -139,7 +139,7 @@
     if (layout.count == 0)
         return nil;
 
-    if (cachedMenu && torrent.cachedPlayMenuLayout == layout)
+    if (cachedMenu && torrent.content.cachedPlayMenuLayout == layout)
         return cachedMenu;
 
     BOOL const isBooks = [torrent.detectedMediaCategory isEqualToString:@"books"];
@@ -229,7 +229,7 @@
     if (menu.numberOfItems == 0)
         return nil;
     [self.fPlayMenuCache setObject:menu forKey:torrent];
-    torrent.cachedPlayMenuLayout = layout;
+    torrent.content.cachedPlayMenuLayout = layout;
     return menu;
 }
 

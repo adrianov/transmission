@@ -88,7 +88,7 @@
 
     if (!torrent.pausedForDiskSpace || torrent.diskSpaceDialogShown)
         return;
-    torrent.fDiskSpaceDialogShown = YES;
+    torrent.diskSpaceDialogShown = YES;
 
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
         uint64_t const currentFreeSpace = torrent.diskSpaceAvailable;
@@ -211,7 +211,7 @@
             [alert beginSheetModalForWindow:self.fWindow completionHandler:^(NSModalResponse response) {
                 if (response == NSAlertFirstButtonReturn)
                 {
-                    torrent.fDiskSpaceDialogShown = NO;
+                    torrent.diskSpaceDialogShown = NO;
                     [self confirmRemoveTorrents:toDelete deleteData:YES completionHandler:^{
                         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
                             if ([torrent alertForRemainingDiskSpaceBypassThrottle:YES])

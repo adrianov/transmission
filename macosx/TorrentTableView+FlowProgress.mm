@@ -149,9 +149,9 @@ static NSUInteger playButtonCountInViews(NSArray<NSView*>* views)
     if (cell.fPlayButtonsHeightConstraint)
         cell.fPlayButtonsHeightConstraint.constant = buttonHeight;
     CGFloat totalHeight = self.rowHeight + (buttonHeight > 0 ? (buttonHeight + kFlowPlayButtonVerticalPadding) : 0);
-    CGFloat oldHeight = torrent.cachedPlayButtonsHeight;
-    torrent.cachedPlayButtonsHeight = totalHeight;
-    torrent.cachedPlayButtonsWidth = availableWidth;
+    CGFloat oldHeight = torrent.content.cachedPlayButtonsHeight;
+    torrent.content.cachedPlayButtonsHeight = totalHeight;
+    torrent.content.cachedPlayButtonsWidth = availableWidth;
     if (std::fabs(totalHeight - oldHeight) > 1.0)
     {
         NSInteger row = [self rowForItem:torrent];
@@ -167,9 +167,9 @@ static NSUInteger playButtonCountInViews(NSArray<NSView*>* views)
     if (cell.fPlayButtonsHeightConstraint)
         cell.fPlayButtonsHeightConstraint.constant = 0;
     [flowView invalidateIntrinsicContentSize];
-    if (torrent.cachedPlayButtonsHeight > 0.5)
+    if (torrent.content.cachedPlayButtonsHeight > 0.5)
     {
-        torrent.cachedPlayButtonsHeight = 0;
+        torrent.content.cachedPlayButtonsHeight = 0;
         [self queueHeightUpdateForRow:[self rowForItem:torrent]];
     }
 }
@@ -180,8 +180,8 @@ static NSUInteger playButtonCountInViews(NSArray<NSView*>* views)
                     torrent:(Torrent*)torrent
                 forceLayout:(BOOL)forceLayout
 {
-    NSDictionary* byIndex = torrent.cachedPlayButtonStateByIndex;
-    NSDictionary* byFolder = torrent.cachedPlayButtonStateByFolder;
+    NSDictionary* byIndex = torrent.content.cachedPlayButtonStateByIndex;
+    NSDictionary* byFolder = torrent.content.cachedPlayButtonStateByFolder;
     BOOL layoutNeeded = forceLayout;
     NSView* currentLineBreak = nil;
     NSTextField* currentHeader = nil;

@@ -326,7 +326,7 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
         if (torrent.fStat->activity != TR_STATUS_STOPPED)
         {
             torrent.fPausedForDiskSpace = NO;
-            torrent.fDiskSpaceDialogShown = NO;
+            torrent.diskSpaceDialogShown = NO;
         }
 
         //make sure the "active" filter is updated when transmitting changes
@@ -657,8 +657,7 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
         else
         {
             // Always regenerate to ensure latest formatting rules are applied
-            self.fCachedHumanReadableTitle = self.name.humanReadableTitle;
-            self.fDisplayName = self.fCachedHumanReadableTitle;
+            self.fDisplayName = self.name.humanReadableTitle;
         }
     }
     return self.fDisplayName;
@@ -768,14 +767,7 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
 
 - (NSURL*)commentURL
 {
-    NSString* comment = self.comment;
-    if (comment.length == 0)
-    {
-        return nil;
-    }
-    NSDataDetector* detector = [NSDataDetector dataDetectorWithTypes:NSTextCheckingTypeLink error:nil];
-    NSTextCheckingResult* result = [detector firstMatchInString:comment options:0 range:NSMakeRange(0, comment.length)];
-    return result.URL;
+    return self.comment.torrentCommentURL;
 }
 
 - (NSString*)creator
@@ -1334,13 +1326,7 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
         self.fPlayableFiles = nil;
         self.fFolderTracksCache = nil;
         self.fAudioCueCountCached = NO;
-        // Also invalidate cached button state
-        self.cachedPlayButtonState = nil;
-        self.cachedPlayButtonStateByIndex = nil;
-        self.cachedPlayButtonStateByFolder = nil;
-        self.cachedPlayButtonSource = nil;
-        self.cachedPlayButtonLayout = nil;
-        self.cachedPlayMenuLayout = nil;
+        [self.content clearPlayButtonCache];
 
         // Trigger UI refresh
         [NSNotificationCenter.defaultCenter postNotificationName:@"UpdateUI" object:nil];
@@ -1446,13 +1432,7 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
     self.fPlayableFiles = nil;
     self.fFolderTracksCache = nil;
     self.fAudioCueCountCached = NO;
-    self.cachedPlayButtonState = nil;
-    self.cachedPlayButtonStateByIndex = nil;
-    self.cachedPlayButtonStateByFolder = nil;
-    self.cachedPlayButtonSource = nil;
-    self.cachedPlayButtonLayout = nil;
-    self.cachedPlayMenuLayout = nil;
-    self.cachedPlayButtonProgressGeneration = 0;
+    [self.content clearPlayButtonCache];
 
     [self update];
     [NSNotificationCenter.defaultCenter postNotificationName:@"TorrentFileCheckChange" object:self];
@@ -1663,6 +1643,7 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
     }
 
     _fDefaults = NSUserDefaults.standardUserDefaults;
+    _content = [[TorrentContent alloc] init];
 
     if (torrentStruct)
     {
@@ -1711,7 +1692,7 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
     }
 
     _fResumeOnWake = NO;
-    _fDiskSpaceDialogShown = NO;
+    self.diskSpaceDialogShown = NO;
 
     //don't do after this point - it messes with auto-group functionality
     if (!self.magnet)

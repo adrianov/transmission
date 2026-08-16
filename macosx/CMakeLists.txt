@@ -206,28 +206,30 @@ target_sources(${TR_NAME}-mac
         Toolbar.mm
         Torrent.h
         Torrent.mm
-        Torrent+Books.mm
         Torrent+Category.mm
         TorrentCategoryTitle.h
         TorrentCategoryTitle.mm
-        Torrent+DiskSpace.mm
-        Torrent+FileList.mm
-        Torrent+Icon.mm
-        Torrent+MediaType.mm
-        Torrent+OpenCount.mm
-        Torrent+PathResolution.mm
-        Torrent+Playable.mm
-        Torrent+Progress.mm
-        Torrent+Search.mm
         Torrent+StatusStrings.mm
+        TorrentContent/TorrentContent.h
+        TorrentContent/TorrentContent.mm
+        TorrentContent/Torrent+Books.mm
+        TorrentContent/Torrent+DiskSpace.mm
+        TorrentContent/Torrent+FileList.mm
+        TorrentContent/Torrent+Icon.mm
+        TorrentContent/Torrent+MediaType.mm
+        TorrentContent/Torrent+OpenCount.mm
+        TorrentContent/Torrent+PathResolution.mm
+        TorrentContent/Torrent+Playable.mm
+        TorrentContent/Torrent+Progress.mm
+        TorrentContent/Torrent+Search.mm
+        TorrentContent/PlayButtonStateBuilder.h
+        TorrentContent/PlayButtonStateBuilder.mm
+        TorrentContent/PlayButtonTitleHelper.h
+        TorrentContent/PlayButtonTitleHelper.mm
         TorrentCell.h
         TorrentCell.mm
         PlayButton.h
         PlayButton.mm
-        PlayButtonStateBuilder.h
-        PlayButtonStateBuilder.mm
-        PlayButtonTitleHelper.h
-        PlayButtonTitleHelper.mm
         VideoDurationHelper.h
         VideoDurationHelper.mm
         FlowLayoutView.h
@@ -477,7 +479,9 @@ find_library(SPARKLE_FRAMEWORK Sparkle
 
 target_include_directories(${TR_NAME}-mac
     PRIVATE
-        ${TR_THIRD_PARTY_SOURCE_DIR}/djvulibre/libdjvu)
+        ${TR_THIRD_PARTY_SOURCE_DIR}/djvulibre/libdjvu
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_CURRENT_SOURCE_DIR}/TorrentContent)
 
 target_link_libraries(${TR_NAME}-mac
     PRIVATE

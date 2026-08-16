@@ -116,9 +116,9 @@ static NSString* flowViewTorrentHash(FlowLayoutView* flowView)
         [self recycleSubviewsFromFlowView:flowView];
         [flowView invalidateIntrinsicContentSize];
     }
-    if (torrent.cachedPlayButtonsHeight > 0.5)
+    if (torrent.content.cachedPlayButtonsHeight > 0.5)
     {
-        torrent.cachedPlayButtonsHeight = 0;
+        torrent.content.cachedPlayButtonsHeight = 0;
         [self queueHeightUpdateForRow:[self rowForItem:torrent]];
     }
 }
@@ -326,12 +326,12 @@ static NSString* flowViewTorrentHash(FlowLayoutView* flowView)
         CGFloat const availableWidth = [self playButtonsAvailableWidthForCell:cell];
 
         if ([flowHash isEqualToString:torrent.hashString] && [flowView hasValidLayoutForWidth:availableWidth] &&
-            torrent.cachedPlayButtonProgressGeneration == torrent.statsGeneration)
+            torrent.content.cachedPlayButtonProgressGeneration == torrent.statsGeneration)
         {
             return;
         }
         // Visibility changes invalidate the layout; rebuild buttons to add/remove visible items
-        if (torrent.cachedPlayButtonLayout == nil)
+        if (torrent.content.cachedPlayButtonLayout == nil)
         {
             [self configurePlayButtonsForCell:cell torrent:torrent];
             return;

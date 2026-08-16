@@ -12,7 +12,7 @@
 /// Asynchronously fills iinaUnwatched for video (by extension) entries using IINA cache checks off main thread.
 + (void)enrichStateWithIinaUnwatched:(NSMutableArray<NSMutableDictionary*>*)state forTorrent:(Torrent*)torrent;
 
-/// Returns cached or newly built state; updates torrent's cachedPlayButton*.
+/// Returns cached or newly built state; updates torrent.content play-button cache.
 + (NSMutableArray<NSMutableDictionary*>*)stateForTorrent:(Torrent*)torrent;
 
 /// Returns cached or newly built layout for the given state.
