@@ -92,6 +92,28 @@ TEST_F(MagnetMetainfoTest, magnetParse)
     }
 }
 
+TEST_F(MagnetMetainfoTest, parseMagnetDisplayNamePlusAsSpace)
+{
+    auto constexpr Uri =
+        "magnet:?xt=urn:btih:d2354010a3ca4ade5b7427bb093a62a3899ff381"
+        "&dn=Somm+Into+the+Bottle+(2015)"sv;
+
+    auto mm = tr_magnet_metainfo{};
+    EXPECT_TRUE(mm.parseMagnet(Uri));
+    EXPECT_EQ("Somm Into the Bottle (2015)"sv, mm.name());
+}
+
+TEST_F(MagnetMetainfoTest, parseMagnetDisplayNameLiteralPlusPreserved)
+{
+    auto constexpr Uri =
+        "magnet:?xt=urn:btih:d2354010a3ca4ade5b7427bb093a62a3899ff381"
+        "&dn=Hello%20World%2BPlus"sv;
+
+    auto mm = tr_magnet_metainfo{};
+    EXPECT_TRUE(mm.parseMagnet(Uri));
+    EXPECT_EQ("Hello World+Plus"sv, mm.name());
+}
+
 TEST_F(MagnetMetainfoTest, parseMagnetGlibStyleUri)
 {
     // GTK/GIO uses this URI form from GFile (g_file_get_uri) for pasted magnet:? links.
