@@ -405,6 +405,16 @@ TEST_F(NSStringAdditionsTest, HumanReadableEpisodeTitle_ComplexEpisodeName)
     EXPECT_TRUE([result hasPrefix:@"S1 E10"]) << "Should start with season and episode, got: " << [result UTF8String];
 }
 
+TEST_F(NSStringAdditionsTest, HumanReadableTitle_MagnetPlusAsSpace)
+{
+    NSString* input = @"Somm+Into+the+Bottle+(2015)+(1080p+WEB-DL+x265+HEVC+10bit+AC3+5.1+MONOLITH)+[QxR]";
+    NSString* result = input.humanReadableTitle;
+    EXPECT_FALSE([result containsString:@"+"]) << "Should decode + as space, got: " << [result UTF8String];
+    EXPECT_TRUE([result containsString:@"Somm Into the Bottle"]) << "Should contain decoded title, got: " << [result UTF8String];
+    EXPECT_TRUE([result containsString:@"#1080p"]) << "Should contain #1080p, got: " << [result UTF8String];
+    EXPECT_TRUE([result containsString:@"(2015)"]) << "Should contain (2015), got: " << [result UTF8String];
+}
+
 TEST_F(NSStringAdditionsTest, HumanReadableEpisodeTitle_StandaloneE05_FullFilename)
 {
     // Standalone E##: show full humanized filename so button title is meaningful (not just E5).
