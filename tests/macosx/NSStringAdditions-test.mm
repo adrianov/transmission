@@ -432,3 +432,50 @@ TEST_F(NSStringAdditionsTest, HumanReadableEpisodeTitle_BDRemuxStripped)
     EXPECT_TRUE([result hasPrefix:@"S1 E1"]) << "Should start with S1 E1, got: " << [result UTF8String];
     EXPECT_FALSE([result containsString:@"BDRemux"]) << "BDRemux should be stripped, got: " << [result UTF8String];
 }
+
+TEST_F(NSStringAdditionsTest, TorrentCommentURL_Empty)
+{
+    EXPECT_EQ(nil, @"".torrentCommentURL);
+}
+
+TEST_F(NSStringAdditionsTest, TorrentCommentURL_ExtractsHttpUrl)
+{
+    NSString* comment = @"https://rutracker.org/forum/viewtopic.php?t=6543210";
+    NSURL* url = comment.torrentCommentURL;
+    ASSERT_NE(url, nil);
+    EXPECT_STREQ("https://rutracker.org/forum/viewtopic.php?t=6543210", url.absoluteString.UTF8String);
+}
+
+TEST_F(NSStringAdditionsTest, TorrentCommentURL_ExtractsFromSurroundingText)
+{
+    NSString* comment = @"Updated season pack\nhttps://rutracker.org/forum/viewtopic.php?t=111\nEnjoy";
+    NSURL* url = comment.torrentCommentURL;
+    ASSERT_NE(url, nil);
+    EXPECT_STREQ("https://rutracker.org/forum/viewtopic.php?t=111", url.absoluteString.UTF8String);
+}
+
+TEST_F(NSStringAdditionsTest, TorrentCommentURL_SkipsMailto)
+{
+    NSString* comment = @"mailto:foo@example.com https://kinozal.tv/details.php?id=42";
+    NSURL* url = comment.torrentCommentURL;
+    ASSERT_NE(url, nil);
+    EXPECT_STREQ("https://kinozal.tv/details.php?id=42", url.absoluteString.UTF8String);
+}
+
+TEST_F(NSStringAdditionsTest, TorrentCommentURL_NoUrl)
+{
+    EXPECT_EQ(nil, @"Season 3 1080p".torrentCommentURL);
+}
+
+TEST_F(NSStringAdditionsTest, TorrentCommentURL_Equality)
+{
+    NSURL* a = @"https://rutracker.org/forum/viewtopic.php?t=9".torrentCommentURL;
+    NSURL* b = @"HTTPS://RUTRACKER.ORG/forum/viewtopic.php?t=9".torrentCommentURL;
+    NSURL* c = @"https://rutracker.org/forum/viewtopic.php?t=10".torrentCommentURL;
+    ASSERT_NE(a, nil);
+    ASSERT_NE(b, nil);
+    ASSERT_NE(c, nil);
+    EXPECT_TRUE([a isEqualToTorrentCommentURL:b]);
+    EXPECT_FALSE([a isEqualToTorrentCommentURL:c]);
+    EXPECT_FALSE([a isEqualToTorrentCommentURL:nil]);
+}
