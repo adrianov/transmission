@@ -5,6 +5,7 @@ set(WEB_SOURCES
     src/context-menu.js
     src/file-row.js
     src/formatter.js
+    src/human-title/human-title.js
     src/inspector.js
     src/labels-dialog.js
     src/main.js
