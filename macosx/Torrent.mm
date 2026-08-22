@@ -1397,11 +1397,12 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
     return canChange;
 }
 
-/// Single-index fast path for checkForFiles:; avoids per-call NSIndexSet allocation in hot UI loops.
+/// Single-index fast path for checkForFiles:; avoids the per-call NSIndexSet allocation and the
+/// duplicate tr_torrentFile fetch that going through canChangeDownloadCheckForFile: would cost.
 - (BOOL)fileIsWantedAtIndex:(NSUInteger)index
 {
     auto const file = tr_torrentFile(self.fHandle, (tr_file_index_t)index);
-    return file.wanted || ![self canChangeDownloadCheckForFile:index];
+    return file.wanted || self.fileCount == 1 || self.complete || file.have >= file.length;
 }
 
 - (NSControlStateValue)checkForFiles:(NSIndexSet*)indexSet
