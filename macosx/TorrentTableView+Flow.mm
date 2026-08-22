@@ -18,7 +18,6 @@ static char const kFlowViewTorrentHashKey = '\0';
 extern char const kPlayButtonTypeKey;
 extern char const kPlayButtonFolderKey;
 extern char const kPlayButtonRepresentedKey;
-extern char const kPlayButtonPathUiTokenKey = '\0';
 static CGFloat const kFlowPlayButtonRightMargin = 55.0;
 static CGFloat const kFlowPlayButtonVerticalPadding = 4.0;
 static NSTimeInterval const kHeightFlushDelay = 0.1;
@@ -198,15 +197,6 @@ static NSString* flowViewTorrentHash(FlowLayoutView* flowView)
     playButton.imagePosition = icon ? NSImageLeft : NSNoImage;
 }
 
-- (NSString*)pathUiTokenForEntry:(NSDictionary*)entry
-{
-    NSString* type = entry[@"type"] ?: @"";
-    NSString* path = entry[@"path"] ?: @"";
-    NSString* folder = entry[@"folder"] ?: @"";
-    NSString* category = entry[@"category"] ?: @"";
-    return [NSString stringWithFormat:@"%@|%@|%@|%@", type, path, folder, category];
-}
-
 - (PlayButton*)setupPlayButtonWithItem:(NSDictionary*)item torrent:(Torrent*)torrent
 {
     PlayButton* playButton = [self dequeuePlayButton];
@@ -215,7 +205,6 @@ static NSString* flowViewTorrentHash(FlowLayoutView* flowView)
     playButton.title = [self menuTitleForPlayableItem:item torrent:torrent includeProgress:YES];
     playButton.tag = [item[@"index"] integerValue];
     [self applyPathDerivedUIToPlayButton:playButton forEntry:item torrent:torrent];
-    objc_setAssociatedObject(playButton, &kPlayButtonPathUiTokenKey, [self pathUiTokenForEntry:item], OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 
     NSNumber* visible = item[@"visible"];
     if (visible != nil)
@@ -247,19 +236,52 @@ static NSString* flowViewTorrentHash(FlowLayoutView* flowView)
     [self.fPendingHeightRows removeAllIndexes];
 }
 
-/// Configures play buttons for a cell. Synchronous and simple.
-- (void)configurePlayButtonsForCell:(TorrentCell*)cell torrent:(Torrent*)torrent
+/// Fingerprint of the flow content's observable state (headers + play buttons). Used to detect
+/// rebuilds that would render identically: compares only values readable off the views and their
+/// represented entries, so visibility/title rules are never duplicated here.
+- (NSArray<NSString*>*)observableFingerprintOfFlowSubviews:(NSArray<NSView*>*)views
 {
+    NSMutableArray<NSString*>* fingerprint = [NSMutableArray arrayWithCapacity:views.count];
+    Class const playButtonClass = [PlayButton class];
+    Class const textFieldClass = [NSTextField class];
+    for (NSView* view in views)
+    {
+        if ([view isKindOfClass:textFieldClass])
+        {
+            [fingerprint addObject:[@"H\x1F" stringByAppendingString:[(NSTextField*)view stringValue]]];
+            continue;
+        }
+        if (![view isKindOfClass:playButtonClass])
+            continue; // line-break markers carry no content
+        PlayButton* button = (PlayButton*)view;
+        NSDictionary* represented = objc_getAssociatedObject(button, &kPlayButtonRepresentedKey);
+        NSDictionary* item = [represented isKindOfClass:[NSDictionary class]] ? represented[@"item"] : nil;
+        [fingerprint addObject:[NSString stringWithFormat:@"B\x1F%@\x1F%@\x1F%@\x1F%@\x1F%@\x1F%@",
+                                                          item[@"type"] ?: @"",
+                                                          item[@"index"] ?: @"",
+                                                          item[@"folder"] ?: @"",
+                                                          button.title ?: @"",
+                                                          @(button.hidden),
+                                                          @(button.iinaUnwatched)]];
+    }
+    return fingerprint;
+}
+
+/// Configures play buttons for a cell. Synchronous and simple. Returns whether anything view-visible changed.
+- (BOOL)configurePlayButtonsForCell:(TorrentCell*)cell torrent:(Torrent*)torrent
+{
+    BOOL const hadVisibleButtons = cell.fPlayButtonsView != nil && [cell.fPlayButtonsView isKindOfClass:[FlowLayoutView class]] &&
+        (!((FlowLayoutView*)cell.fPlayButtonsView).hidden || torrent.content.cachedPlayButtonsHeight > 0.5);
     if (self.fSmallView || ![self showContentButtonsPref])
     {
         [self clearFlowViewFromCell:cell];
-        return;
+        return NO;
     }
     NSArray<NSDictionary*>* playableFiles = torrent.playableFiles;
     if (playableFiles.count == 0)
     {
         [self hideFlowViewAndResetRowHeightForCell:cell torrent:torrent];
-        return;
+        return hadVisibleButtons;
     }
     NSString* currentHash = torrent.hashString;
     if (cell.fPlayButtonsView && cell.fTorrentHash.length > 0 && ![cell.fTorrentHash isEqualToString:currentHash])
@@ -269,32 +291,33 @@ static NSString* flowViewTorrentHash(FlowLayoutView* flowView)
     if (!flowView)
         flowView = [self newFlowViewAddedToCell:cell];
 
-    [flowView removeAllArrangedSubviews];
-    setFlowViewTorrentHash(flowView, currentHash);
-    cell.fPlayButtonsSourceFiles = playableFiles;
-
     NSArray<NSDictionary*>* state = [PlayButtonStateBuilder stateForTorrent:torrent];
     if (!state || state.count == 0)
     {
         [self hideFlowViewAndResetRowHeightForCell:cell torrent:torrent];
-        return;
+        return hadVisibleButtons;
     }
     NSArray<NSDictionary*>* layout = [PlayButtonStateBuilder layoutForTorrent:torrent state:state];
     if (!layout || layout.count == 0)
     {
         [self hideFlowViewAndResetRowHeightForCell:cell torrent:torrent];
-        return;
+        return hadVisibleButtons;
     }
 
+    NSArray<NSString*>* beforeFingerprint = [self observableFingerprintOfFlowSubviews:[flowView contentSubviews]];
     [CATransaction begin];
     [CATransaction setDisableActions:YES];
+    [flowView removeAllArrangedSubviews];
+    setFlowViewTorrentHash(flowView, currentHash);
+    cell.fPlayButtonsSourceFiles = playableFiles;
     for (NSDictionary* entry in layout)
         [self addPlayButtonLayoutEntry:entry toFlowView:flowView torrent:torrent];
     [flowView finishBatchUpdates];
-    [self updatePlayButtonProgressForCell:cell torrent:torrent forceLayout:YES];
+    [self finishPlayButtonsConfigurationForCell:cell torrent:torrent flowView:flowView];
     flowView.hidden = NO;
     [cell setBackgroundStyle:cell.backgroundStyle];
     [CATransaction commit];
+    return ![beforeFingerprint isEqual:[self observableFingerprintOfFlowSubviews:[flowView contentSubviews]]];
 }
 
 - (void)addPlayButtonLayoutEntry:(NSDictionary*)entry toFlowView:(FlowLayoutView*)flowView torrent:(Torrent*)torrent
@@ -315,10 +338,10 @@ static NSString* flowViewTorrentHash(FlowLayoutView* flowView)
     }
 }
 
-- (void)refreshPlayButtonStateForCell:(TorrentCell*)cell torrent:(Torrent*)torrent
+- (BOOL)refreshPlayButtonStateForCell:(TorrentCell*)cell torrent:(Torrent*)torrent
 {
     if (self.fSmallView || ![self showContentButtonsPref])
-        return;
+        return NO;
     if (cell.fPlayButtonsView)
     {
         FlowLayoutView* flowView = (FlowLayoutView*)cell.fPlayButtonsView;
@@ -328,18 +351,18 @@ static NSString* flowViewTorrentHash(FlowLayoutView* flowView)
         if ([flowHash isEqualToString:torrent.hashString] && [flowView hasValidLayoutForWidth:availableWidth] &&
             torrent.content.cachedPlayButtonProgressGeneration == torrent.statsGeneration)
         {
-            return;
+            return NO;
         }
         // Visibility changes invalidate the layout; rebuild buttons to add/remove visible items
         if (torrent.content.cachedPlayButtonLayout == nil)
-        {
-            [self configurePlayButtonsForCell:cell torrent:torrent];
-            return;
-        }
-        [self updatePlayButtonProgressForCell:cell torrent:torrent];
+            return [self configurePlayButtonsForCell:cell torrent:torrent];
+        return [self updatePlayButtonProgressForCell:cell torrent:torrent knownState:nil changed:NO];
     }
     else if (torrent.playableFiles.count > 0)
-        [self configurePlayButtonsForCell:cell torrent:torrent];
+    {
+        return [self configurePlayButtonsForCell:cell torrent:torrent];
+    }
+    return NO;
 }
 
 @end

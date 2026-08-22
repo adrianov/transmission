@@ -574,22 +574,56 @@ extern char const kPlayButtonRepresentedKey = '\0';
 }
 
 /// Updates status, progress, and hover state for a torrent cell. Does not touch flow view (play buttons).
-- (void)applyDynamicContentToTorrentCell:(TorrentCell*)torrentCell torrent:(Torrent*)torrent row:(NSInteger)row sameTorrent:(BOOL)sameTorrent
+/// Returns YES when any drawn content changed, so callers can skip redundant row redraws.
+- (BOOL)applyDynamicContentToTorrentCell:(TorrentCell*)torrentCell
+                                 torrent:(Torrent*)torrent
+                                     row:(NSInteger)row
+                             sameTorrent:(BOOL)sameTorrent
 {
+    BOOL changed = NO;
     BOOL const minimal = [torrentCell isKindOfClass:[SmallTorrentCell class]];
 
     if (minimal)
     {
-        torrentCell.fTorrentStatusField.stringValue = self.fDisplaySmallStatusRegular ? torrent.shortStatusString : torrent.remainingTimeString;
+        NSString* statusString = self.fDisplaySmallStatusRegular ? torrent.shortStatusString : torrent.remainingTimeString;
+        if (![torrentCell.fTorrentStatusField.stringValue isEqualToString:statusString])
+        {
+            torrentCell.fTorrentStatusField.stringValue = statusString;
+            changed = YES;
+        }
         BOOL rowHover = self.fHoverEventDict && [self.fHoverEventDict[@"row"] integerValue] == row;
-        BOOL iconHover = rowHover && [torrentCell isKindOfClass:[SmallTorrentCell class]] &&
-                         [(SmallTorrentCell*)torrentCell fIconHover];
-        torrentCell.fTorrentStatusField.hidden = rowHover;
-        torrentCell.fControlButton.hidden = !rowHover;
-        torrentCell.fRevealButton.hidden = !rowHover;
-        torrentCell.fURLButton.hidden = !rowHover || (torrent.commentURL == nil);
-        torrentCell.fActionButton.hidden = !rowHover;
-        torrentCell.fIconView.hidden = iconHover;
+        BOOL iconHover = rowHover && [torrentCell isKindOfClass:[SmallTorrentCell class]] && [(SmallTorrentCell*)torrentCell fIconHover];
+        BOOL const urlHidden = !rowHover || (torrent.commentURL == nil);
+        if (torrentCell.fTorrentStatusField.hidden != rowHover)
+        {
+            torrentCell.fTorrentStatusField.hidden = rowHover;
+            changed = YES;
+        }
+        if (torrentCell.fControlButton.hidden == rowHover)
+        {
+            torrentCell.fControlButton.hidden = !rowHover;
+            changed = YES;
+        }
+        if (torrentCell.fRevealButton.hidden == rowHover)
+        {
+            torrentCell.fRevealButton.hidden = !rowHover;
+            changed = YES;
+        }
+        if (torrentCell.fURLButton.hidden != urlHidden)
+        {
+            torrentCell.fURLButton.hidden = urlHidden;
+            changed = YES;
+        }
+        if (torrentCell.fActionButton.hidden == rowHover)
+        {
+            torrentCell.fActionButton.hidden = !rowHover;
+            changed = YES;
+        }
+        if (torrentCell.fIconView.hidden != iconHover)
+        {
+            torrentCell.fIconView.hidden = iconHover;
+            changed = YES;
+        }
     }
     else
     {
@@ -597,11 +631,15 @@ extern char const kPlayButtonRepresentedKey = '\0';
         {
             torrentCell.fControlButton.hidden = NO;
             torrentCell.fRevealButton.hidden = NO;
+            changed = YES;
         }
 
         NSString* progressString = torrent.progressString;
         if (![torrentCell.fTorrentProgressField.stringValue isEqualToString:progressString])
+        {
             torrentCell.fTorrentProgressField.stringValue = progressString;
+            changed = YES;
+        }
 
         NSString* statusString = nil;
         if (self.fHoverEventDict && [self.fHoverEventDict[@"row"] integerValue] == row)
@@ -609,7 +647,10 @@ extern char const kPlayButtonRepresentedKey = '\0';
         if (!statusString)
             statusString = torrent.statusString;
         if (![torrentCell.fTorrentStatusField.stringValue isEqualToString:statusString])
+        {
             torrentCell.fTorrentStatusField.stringValue = statusString;
+            changed = YES;
+        }
 
         if (torrent.anyErrorOrWarning)
         {
@@ -622,15 +663,19 @@ extern char const kPlayButtonRepresentedKey = '\0';
         }
 
         BOOL iconHover = self.fHoverEventDict && [self.fHoverEventDict[@"row"] integerValue] == row &&
-                         [self.fHoverEventDict[@"iconHover"] boolValue];
+            [self.fHoverEventDict[@"iconHover"] boolValue];
         if (torrentCell.fActionButton.hidden != !iconHover)
+        {
             torrentCell.fActionButton.hidden = !iconHover;
+            changed = YES;
+        }
     }
+    return changed;
 }
 
-- (void)applyDynamicContentToTorrentCell:(TorrentCell*)torrentCell torrent:(Torrent*)torrent row:(NSInteger)row
+- (BOOL)applyDynamicContentToTorrentCell:(TorrentCell*)torrentCell torrent:(Torrent*)torrent row:(NSInteger)row
 {
-    [self applyDynamicContentToTorrentCell:torrentCell torrent:torrent row:row sameTorrent:NO];
+    return [self applyDynamicContentToTorrentCell:torrentCell torrent:torrent row:row sameTorrent:NO];
 }
 
 /// Resets content button images when cell is configured. Ensures correct state after scroll/reuse.
@@ -657,10 +702,12 @@ extern char const kPlayButtonRepresentedKey = '\0';
     if (![cellView isKindOfClass:[TorrentCell class]])
         return;
     TorrentCell* cell = (TorrentCell*)cellView;
-    [self applyDynamicContentToTorrentCell:cell torrent:torrent row:row];
+    BOOL changed = [self applyDynamicContentToTorrentCell:cell torrent:torrent row:row];
     [self resetContentButtonsForTorrentCell:cell];
-    [self refreshPlayButtonStateForCell:cell torrent:torrent];
-    [cell setNeedsDisplay:YES];
+    changed = [self refreshPlayButtonStateForCell:cell torrent:torrent] || changed;
+    // Redraw only rows whose visible content actually moved; idle rows skip the draw pass entirely.
+    if (changed)
+        [cell setNeedsDisplay:YES];
 }
 
 /// Lightweight status-only refresh for button hover tooltips. Avoids play button refresh and full redraw.
@@ -694,7 +741,7 @@ extern char const kPlayButtonRepresentedKey = '\0';
     }
 
     BOOL iconHover = self.fHoverEventDict && [self.fHoverEventDict[@"row"] integerValue] == row &&
-                     [self.fHoverEventDict[@"iconHover"] boolValue];
+        [self.fHoverEventDict[@"iconHover"] boolValue];
     if (cell.fActionButton.hidden != !iconHover)
         cell.fActionButton.hidden = !iconHover;
 }

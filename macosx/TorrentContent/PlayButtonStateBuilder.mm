@@ -79,9 +79,10 @@ static dispatch_queue_t iinaStateQueue()
 
             if (changed)
             {
-                [NSNotificationCenter.defaultCenter postNotificationName:kIINAWatchCacheDidUpdateNotification
-                                                                  object:strongTorrent
-                                                                userInfo:@{ @"refreshOnly" : @YES }];
+                [NSNotificationCenter.defaultCenter postNotificationName:kIINAWatchCacheDidUpdateNotification object:strongTorrent
+                                                                userInfo:@{
+                                                                    @"refreshOnly" : @YES
+                                                                }];
             }
         });
     });
@@ -95,10 +96,8 @@ static void setStateLookups(Torrent* torrent, NSArray<NSMutableDictionary*>* sta
         torrent.content.cachedPlayButtonStateByFolder = nil;
         return;
     }
-    NSMutableDictionary<NSNumber*, NSMutableDictionary*>* byIndex =
-        [NSMutableDictionary dictionaryWithCapacity:state.count];
-    NSMutableDictionary<NSString*, NSMutableDictionary*>* byFolder =
-        [NSMutableDictionary dictionaryWithCapacity:state.count];
+    NSMutableDictionary<NSNumber*, NSMutableDictionary*>* byIndex = [NSMutableDictionary dictionaryWithCapacity:state.count];
+    NSMutableDictionary<NSString*, NSMutableDictionary*>* byFolder = [NSMutableDictionary dictionaryWithCapacity:state.count];
     for (NSMutableDictionary* entry in state)
     {
         NSNumber* idx = entry[@"index"];
@@ -114,6 +113,11 @@ static void setStateLookups(Torrent* torrent, NSArray<NSMutableDictionary*>* sta
 
 + (NSMutableArray<NSMutableDictionary*>*)stateForTorrent:(Torrent*)torrent
 {
+    return [self stateForTorrent:torrent changedOut:NULL];
+}
+
++ (NSMutableArray<NSMutableDictionary*>*)stateForTorrent:(Torrent*)torrent changedOut:(BOOL*)changedOut
+{
     NSArray<NSDictionary*>* playableFiles = torrent.playableFiles;
     if (playableFiles.count == 0)
     {
@@ -121,6 +125,8 @@ static void setStateLookups(Torrent* torrent, NSArray<NSMutableDictionary*>* sta
         torrent.content.cachedPlayButtonState = nil;
         torrent.content.cachedPlayButtonLayout = nil;
         setStateLookups(torrent, nil);
+        if (changedOut)
+            *changedOut = NO;
         return nil;
     }
 
@@ -134,9 +140,11 @@ static void setStateLookups(Torrent* torrent, NSArray<NSMutableDictionary*>* sta
         torrent.content.cachedPlayButtonProgressGeneration = 0;
     }
 
+    BOOL stateWasBuilt = NO;
     NSMutableArray<NSMutableDictionary*>* state = (NSMutableArray<NSMutableDictionary*>*)torrent.content.cachedPlayButtonState;
     if (!state)
     {
+        stateWasBuilt = YES;
         state = [NSMutableArray arrayWithCapacity:playableFiles.count];
         BOOL singleItem = playableFiles.count == 1;
 
@@ -179,9 +187,7 @@ static void setStateLookups(Torrent* torrent, NSArray<NSMutableDictionary*>* sta
             int progressPct = (int)floor(progress * 100);
             entry[@"progressPercent"] = @(progressPct);
             NSNumber* indexNum = entry[@"index"];
-            BOOL wanted = indexNum ?
-                ([torrent checkForFiles:[NSIndexSet indexSetWithIndex:indexNum.unsignedIntegerValue]] == NSControlStateValueOn) :
-                YES;
+            BOOL wanted = indexNum ? [torrent fileIsWantedAtIndex:indexNum.unsignedIntegerValue] : YES;
             BOOL visible = playButtonIsItemVisible(type, progress, wanted);
             entry[@"visible"] = @(visible);
             [state addObject:entry];
@@ -208,8 +214,8 @@ static void setStateLookups(Torrent* torrent, NSArray<NSMutableDictionary*>* sta
     // When UI refresh runs without updateTorrents (e.g. fUpdatingUI skip), progress cache is stale; invalidate so we show current progress.
     if (torrent.content.cachedPlayButtonProgressGeneration == statsGeneration)
         [torrent invalidateFileProgressCache];
-
     BOOL visibilityChanged = NO;
+    BOOL changed = stateWasBuilt;
     for (NSMutableDictionary* entry in state)
     {
         NSString* type = entry[@"type"] ?: @"file";
@@ -225,12 +231,11 @@ static void setStateLookups(Torrent* torrent, NSArray<NSMutableDictionary*>* sta
             newProgress = folder.length > 0 ? [torrent folderConsecutiveProgress:folder] : 0.0;
         }
         NSNumber* indexNum = entry[@"index"];
-        BOOL wanted = indexNum ?
-            ([torrent checkForFiles:[NSIndexSet indexSetWithIndex:indexNum.unsignedIntegerValue]] == NSControlStateValueOn) :
-            YES;
+        BOOL wanted = indexNum ? [torrent fileIsWantedAtIndex:indexNum.unsignedIntegerValue] : YES;
         BOOL progressChanged = std::fabs(newProgress - progress) > 0.000001;
         if (progressChanged)
         {
+            changed = YES;
             progress = newProgress;
             entry[@"progress"] = @(progress);
             int progressPct = (int)floor(progress * 100);
@@ -260,11 +265,13 @@ static void setStateLookups(Torrent* torrent, NSArray<NSMutableDictionary*>* sta
                 visible = videoDisplayAllowedForItem(torrent, entry, progress, visible);
                 if (visible != wasVisible)
                 {
+                    changed = YES;
                     entry[@"visible"] = @(visible);
                     visibilityChanged = YES;
                     NSString* strippedTitle = entry[@"strippedTitle"] ?: entry[@"baseTitle"] ?: @"";
                     entry[@"title"] = (visible && ![type hasPrefix:@"document"] && progressPct < 100) ?
-                        [NSString stringWithFormat:@"%@ (%d%%)", strippedTitle, progressPct] : strippedTitle;
+                        [NSString stringWithFormat:@"%@ (%d%%)", strippedTitle, progressPct] :
+                        strippedTitle;
                 }
             }
         }
@@ -275,6 +282,8 @@ static void setStateLookups(Torrent* torrent, NSArray<NSMutableDictionary*>* sta
 
     [self enrichStateWithIinaUnwatched:state forTorrent:torrent];
     torrent.content.cachedPlayButtonProgressGeneration = statsGeneration;
+    if (changedOut)
+        *changedOut = changed;
     return state;
 }
 

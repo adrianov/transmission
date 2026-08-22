@@ -44,19 +44,21 @@
 
 @interface TorrentTableView (Flow)
 - (BOOL)cellNeedsContentButtonsConfigForCell:(TorrentCell*)cell torrent:(Torrent*)torrent;
-- (void)configurePlayButtonsForCell:(TorrentCell*)cell torrent:(Torrent*)torrent;
-- (void)refreshPlayButtonStateForCell:(TorrentCell*)cell torrent:(Torrent*)torrent;
+- (BOOL)configurePlayButtonsForCell:(TorrentCell*)cell torrent:(Torrent*)torrent;
+- (BOOL)refreshPlayButtonStateForCell:(TorrentCell*)cell torrent:(Torrent*)torrent;
 - (void)recycleFlowViewForCellReuse:(TorrentCell*)cell;
 - (void)recycleSubviewsFromFlowView:(FlowLayoutView*)flowView;
 - (CGFloat)playButtonsAvailableWidthForCell:(TorrentCell*)cell;
 - (void)queueHeightUpdateForRow:(NSInteger)row;
 - (void)applyPathDerivedUIToPlayButton:(PlayButton*)playButton forEntry:(NSDictionary*)entry torrent:(Torrent*)torrent;
-- (NSString*)pathUiTokenForEntry:(NSDictionary*)entry;
 @end
 
 @interface TorrentTableView (FlowProgress)
-- (void)updatePlayButtonProgressForCell:(TorrentCell*)cell torrent:(Torrent*)torrent;
-- (void)updatePlayButtonProgressForCell:(TorrentCell*)cell torrent:(Torrent*)torrent forceLayout:(BOOL)forceLayout;
+- (BOOL)updatePlayButtonProgressForCell:(TorrentCell*)cell
+                                torrent:(Torrent*)torrent
+                             knownState:(NSArray<NSDictionary*>*)knownState
+                                changed:(BOOL)stateChanged;
+- (void)finishPlayButtonsConfigurationForCell:(TorrentCell*)cell torrent:(Torrent*)torrent flowView:(FlowLayoutView*)flowView;
 - (void)noteHeightUpdateForRow:(NSInteger)row;
 @end
 

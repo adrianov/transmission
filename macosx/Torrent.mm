@@ -602,7 +602,7 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
     tr_torrentSetLocation(self.fHandle, folder.UTF8String, YES, &status);
 
     NSString* torrentName = self.name;
-    void (^const onDone)(void) = completionHandler ?: ^{
+    void (^onDone)(void) = completionHandler ?: ^{
     };
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
         while (status == TR_LOC_MOVING)
@@ -1395,6 +1395,13 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
         }
     }];
     return canChange;
+}
+
+/// Single-index fast path for checkForFiles:; avoids per-call NSIndexSet allocation in hot UI loops.
+- (BOOL)fileIsWantedAtIndex:(NSUInteger)index
+{
+    auto const file = tr_torrentFile(self.fHandle, (tr_file_index_t)index);
+    return file.wanted || ![self canChangeDownloadCheckForFile:index];
 }
 
 - (NSControlStateValue)checkForFiles:(NSIndexSet*)indexSet

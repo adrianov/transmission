@@ -15,7 +15,6 @@
 #import <objc/runtime.h>
 
 extern char const kPlayButtonRepresentedKey;
-extern char const kPlayButtonPathUiTokenKey;
 static CGFloat const kFlowPlayButtonRowHeight = 18.0;
 static CGFloat const kFlowPlayButtonVerticalPadding = 4.0;
 
@@ -52,11 +51,6 @@ static NSUInteger playButtonCountInViews(NSArray<NSView*>* views)
 }
 
 @implementation TorrentTableView (FlowProgress)
-
-- (void)updatePlayButtonProgressForCell:(TorrentCell*)cell torrent:(Torrent*)torrent
-{
-    [self updatePlayButtonProgressForCell:cell torrent:torrent forceLayout:NO];
-}
 
 - (NSDictionary*)playButtonStateEntryForButton:(PlayButton*)button
                                        torrent:(Torrent*)torrent
@@ -129,12 +123,14 @@ static NSUInteger playButtonCountInViews(NSArray<NSView*>* views)
         [self applyPlayButtonTitle:title unwatched:button.iinaUnwatched toButton:button];
 
     // Path-derived UI is expensive (filesystem/path checks); refresh only when needed.
-    NSString* token = [self pathUiTokenForEntry:entry];
-    NSString* cachedToken = objc_getAssociatedObject(button, &kPlayButtonPathUiTokenKey);
-    if (forceLayout || becameVisible || ![cachedToken isEqualToString:token])
+    // Entry dictionaries are stable objects mutated in place across ticks, so pointer
+    // identity proves type/path/folder/category are unchanged — no token string build needed.
+    NSDictionary* represented = objc_getAssociatedObject(button, &kPlayButtonRepresentedKey);
+    NSDictionary* representedItem = [represented isKindOfClass:[NSDictionary class]] ? represented[@"item"] : nil;
+    if (forceLayout || becameVisible || representedItem != entry)
     {
         [self applyPathDerivedUIToPlayButton:button forEntry:entry torrent:torrent];
-        objc_setAssociatedObject(button, &kPlayButtonPathUiTokenKey, token, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        objc_setAssociatedObject(button, &kPlayButtonRepresentedKey, @{ @"torrent" : torrent, @"item" : entry }, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     }
     return layoutNeeded;
 }
@@ -172,6 +168,38 @@ static NSUInteger playButtonCountInViews(NSArray<NSView*>* views)
         torrent.content.cachedPlayButtonsHeight = 0;
         [self queueHeightUpdateForRow:[self rowForItem:torrent]];
     }
+}
+
+/// Post-config finish pass: hide season headers whose section has no visible buttons, then size the flow view.
+/// Buttons were just built from the same state/layout, so no per-button work happens here.
+- (void)finishPlayButtonsConfigurationForCell:(TorrentCell*)cell torrent:(Torrent*)torrent flowView:(FlowLayoutView*)flowView
+{
+    Class const playButtonClass = [PlayButton class];
+    Class const textFieldClass = [NSTextField class];
+    NSView* currentLineBreak = nil;
+    NSTextField* currentHeader = nil;
+    BOOL anyButtonVisibleInSection = NO;
+
+    for (NSView* view in [flowView contentSubviews])
+    {
+        if ([view isKindOfClass:textFieldClass])
+        {
+            setHeaderHidden(currentHeader, currentLineBreak, !anyButtonVisibleInSection);
+            currentHeader = (NSTextField*)view;
+            anyButtonVisibleInSection = NO;
+            continue;
+        }
+        if (![view isKindOfClass:playButtonClass])
+        {
+            currentLineBreak = view;
+            continue;
+        }
+        if (!view.hidden)
+            anyButtonVisibleInSection = YES;
+    }
+    setHeaderHidden(currentHeader, currentLineBreak, !anyButtonVisibleInSection);
+
+    [self applyPlayButtonsHeightForCell:cell torrent:torrent flowView:flowView];
 }
 
 /// Syncs play-button and season-header visibility/titles. Returns YES if layout must be recomputed.
@@ -217,31 +245,43 @@ static NSUInteger playButtonCountInViews(NSArray<NSView*>* views)
     return setHeaderHidden(currentHeader, currentLineBreak, !anyButtonVisibleInSection) || layoutNeeded;
 }
 
-- (void)updatePlayButtonProgressForCell:(TorrentCell*)cell torrent:(Torrent*)torrent forceLayout:(BOOL)forceLayout
+/// Syncs buttons with cached state. Returns YES when view work ran (sync/clear/reconfigure), NO when skipped as unchanged.
+- (BOOL)updatePlayButtonProgressForCell:(TorrentCell*)cell
+                                torrent:(Torrent*)torrent
+                             knownState:(NSArray<NSDictionary*>*)knownState
+                                changed:(BOOL)stateChanged
 {
     FlowLayoutView* flowView = (FlowLayoutView*)cell.fPlayButtonsView;
     if (![flowView isKindOfClass:[FlowLayoutView class]])
-        return;
+        return NO;
 
-    NSArray<NSDictionary*>* state = [PlayButtonStateBuilder stateForTorrent:torrent];
+    NSArray<NSDictionary*>* state = knownState;
+    if (!state)
+        state = [PlayButtonStateBuilder stateForTorrent:torrent changedOut:&stateChanged];
     if (state.count == 0)
     {
+        BOOL wasVisible = !flowView.hidden || torrent.content.cachedPlayButtonsHeight > 0.5;
         [self clearEmptyPlayButtonsForCell:cell torrent:torrent flowView:flowView];
-        return;
+        return wasVisible;
     }
 
     NSArray<NSView*>* subviews = [flowView contentSubviews];
     if (stateHasVisibleEntry(state) && playButtonCountInViews(subviews) == 0)
     {
         [self configurePlayButtonsForCell:cell torrent:torrent];
-        return;
+        return YES;
     }
+
+    CGFloat const availableWidth = [self playButtonsAvailableWidthForCell:cell];
+    if (!stateChanged && [flowView hasValidLayoutForWidth:availableWidth])
+        return NO; // Nothing view-visible changed since the last sync; skip per-button work.
 
     [CATransaction begin];
     [CATransaction setDisableActions:YES];
-    if ([self syncPlayButtonViews:subviews flowView:flowView torrent:torrent forceLayout:forceLayout])
+    if ([self syncPlayButtonViews:subviews flowView:flowView torrent:torrent forceLayout:NO])
         [self applyPlayButtonsHeightForCell:cell torrent:torrent flowView:flowView];
     [CATransaction commit];
+    return YES;
 }
 
 - (void)noteHeightUpdateForRow:(NSInteger)row

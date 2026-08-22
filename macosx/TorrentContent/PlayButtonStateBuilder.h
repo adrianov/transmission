@@ -13,7 +13,9 @@
 + (void)enrichStateWithIinaUnwatched:(NSMutableArray<NSMutableDictionary*>*)state forTorrent:(Torrent*)torrent;
 
 /// Returns cached or newly built state; updates torrent.content play-button cache.
+/// When changedOut is non-NULL, receives YES if any view-visible value (progress, title, visibility) differs from the cached state.
 + (NSMutableArray<NSMutableDictionary*>*)stateForTorrent:(Torrent*)torrent;
++ (NSMutableArray<NSMutableDictionary*>*)stateForTorrent:(Torrent*)torrent changedOut:(BOOL*)changedOut;
 
 /// Returns cached or newly built layout for the given state.
 + (NSArray<NSDictionary*>*)layoutForTorrent:(Torrent*)torrent state:(NSArray<NSDictionary*>*)state;

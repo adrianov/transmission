@@ -74,7 +74,9 @@ NS_ASSUME_NONNULL_BEGIN
 - (nullable NSString*)tooltipPathForItemPath:(NSString*)path type:(NSString*)type folder:(NSString*)folder;
 - (nullable NSString*)resolvePathInTorrent:(NSString*)path;
 
-- (BOOL)matchesSearchStrings:(NSArray<NSString*>*)strings byTracker:(BOOL)byTracker includePlayableTitles:(BOOL)includePlayableTitles;
+- (BOOL)matchesSearchStrings:(NSArray<NSString*>*)strings
+                   byTracker:(BOOL)byTracker
+       includePlayableTitles:(BOOL)includePlayableTitles;
 - (NSUInteger)searchMatchScoreForStrings:(NSArray<NSString*>*)strings
                                byTracker:(BOOL)byTracker
                    includePlayableTitles:(BOOL)includePlayableTitles;
@@ -106,6 +108,7 @@ NS_ASSUME_NONNULL_BEGIN
 - (BOOL)canChangeDownloadCheckForFile:(NSUInteger)index;
 - (BOOL)canChangeDownloadCheckForFiles:(NSIndexSet*)indexSet;
 - (NSControlStateValue)checkForFiles:(NSIndexSet*)indexSet;
+- (BOOL)fileIsWantedAtIndex:(NSUInteger)index;
 - (void)setFileCheckState:(NSControlStateValue)state forIndexes:(NSIndexSet*)indexSet;
 - (void)setFilePriority:(tr_priority_t)priority forIndexes:(NSIndexSet*)indexSet;
 - (BOOL)hasFilePriority:(tr_priority_t)priority forIndexes:(NSIndexSet*)indexSet;
