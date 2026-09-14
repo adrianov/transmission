@@ -157,8 +157,10 @@ static NSUInteger playButtonCountInViews(NSArray<NSView*>* views)
     }
 }
 
-- (void)clearEmptyPlayButtonsForCell:(TorrentCell*)cell torrent:(Torrent*)torrent flowView:(FlowLayoutView*)flowView
+/// Hides the flow view and zeroes the row height. Returns whether buttons were visible before clearing.
+- (BOOL)clearEmptyPlayButtonsForCell:(TorrentCell*)cell torrent:(Torrent*)torrent flowView:(FlowLayoutView*)flowView
 {
+    BOOL wasVisible = !flowView.hidden || torrent.content.cachedPlayButtonsHeight > 0.5;
     flowView.hidden = YES;
     if (cell.fPlayButtonsHeightConstraint)
         cell.fPlayButtonsHeightConstraint.constant = 0;
@@ -168,6 +170,7 @@ static NSUInteger playButtonCountInViews(NSArray<NSView*>* views)
         torrent.content.cachedPlayButtonsHeight = 0;
         [self queueHeightUpdateForRow:[self rowForItem:torrent]];
     }
+    return wasVisible;
 }
 
 /// Post-config finish pass: hide season headers whose section has no visible buttons, then size the flow view.
@@ -245,42 +248,52 @@ static NSUInteger playButtonCountInViews(NSArray<NSView*>* views)
     return setHeaderHidden(currentHeader, currentLineBreak, !anyButtonVisibleInSection) || layoutNeeded;
 }
 
-/// Syncs buttons with cached state. Returns YES when view work ran (sync/clear/reconfigure), NO when skipped as unchanged.
-- (BOOL)updatePlayButtonProgressForCell:(TorrentCell*)cell
-                                torrent:(Torrent*)torrent
-                             knownState:(NSArray<NSDictionary*>*)knownState
-                                changed:(BOOL)stateChanged
+/// Configures buttons when the state has visible entries but the view has none yet. Returns whether it ran.
+- (BOOL)configurePlayButtonsIfNeededForCell:(TorrentCell*)cell
+                                    torrent:(Torrent*)torrent
+                                      state:(NSArray<NSDictionary*>*)state
+                                   subviews:(NSArray<NSView*>*)subviews
 {
-    FlowLayoutView* flowView = (FlowLayoutView*)cell.fPlayButtonsView;
-    if (![flowView isKindOfClass:[FlowLayoutView class]])
+    if (!stateHasVisibleEntry(state) || playButtonCountInViews(subviews) != 0)
         return NO;
+    [self configurePlayButtonsForCell:cell torrent:torrent];
+    return YES;
+}
 
-    NSArray<NSDictionary*>* state = knownState;
-    if (!state)
-        state = [PlayButtonStateBuilder stateForTorrent:torrent changedOut:&stateChanged];
-    if (state.count == 0)
-    {
-        BOOL wasVisible = !flowView.hidden || torrent.content.cachedPlayButtonsHeight > 0.5;
-        [self clearEmptyPlayButtonsForCell:cell torrent:torrent flowView:flowView];
-        return wasVisible;
-    }
-
-    NSArray<NSView*>* subviews = [flowView contentSubviews];
-    if (stateHasVisibleEntry(state) && playButtonCountInViews(subviews) == 0)
-    {
-        [self configurePlayButtonsForCell:cell torrent:torrent];
-        return YES;
-    }
-
-    CGFloat const availableWidth = [self playButtonsAvailableWidthForCell:cell];
-    if (!stateChanged && [flowView hasValidLayoutForWidth:availableWidth])
-        return NO; // Nothing view-visible changed since the last sync; skip per-button work.
-
+/// Applies pending view syncs atomically and resizes the flow view to the synced layout.
+- (void)syncPlayButtonViewsAndSizeForCell:(TorrentCell*)cell
+                                  torrent:(Torrent*)torrent
+                                 subviews:(NSArray<NSView*>*)subviews
+                                 flowView:(FlowLayoutView*)flowView
+{
     [CATransaction begin];
     [CATransaction setDisableActions:YES];
     if ([self syncPlayButtonViews:subviews flowView:flowView torrent:torrent forceLayout:NO])
         [self applyPlayButtonsHeightForCell:cell torrent:torrent flowView:flowView];
     [CATransaction commit];
+}
+
+/// Syncs buttons with cached state. Returns YES when view work ran (sync/clear/reconfigure), NO when skipped as unchanged.
+- (BOOL)updatePlayButtonProgressForCell:(TorrentCell*)cell torrent:(Torrent*)torrent
+{
+    FlowLayoutView* flowView = (FlowLayoutView*)cell.fPlayButtonsView;
+    if (![flowView isKindOfClass:[FlowLayoutView class]])
+        return NO;
+
+    BOOL stateChanged = NO;
+    NSArray<NSDictionary*>* state = [PlayButtonStateBuilder stateForTorrent:torrent changedOut:&stateChanged];
+    if (state.count == 0)
+        return [self clearEmptyPlayButtonsForCell:cell torrent:torrent flowView:flowView];
+
+    NSArray<NSView*>* subviews = [flowView contentSubviews];
+    if ([self configurePlayButtonsIfNeededForCell:cell torrent:torrent state:state subviews:subviews])
+        return YES;
+
+    CGFloat const availableWidth = [self playButtonsAvailableWidthForCell:cell];
+    if (!stateChanged && [flowView hasValidLayoutForWidth:availableWidth])
+        return NO; // Nothing view-visible changed since the last sync; skip per-button work.
+
+    [self syncPlayButtonViewsAndSizeForCell:cell torrent:torrent subviews:subviews flowView:flowView];
     return YES;
 }
 

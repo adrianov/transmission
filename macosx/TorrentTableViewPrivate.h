@@ -54,10 +54,7 @@
 @end
 
 @interface TorrentTableView (FlowProgress)
-- (BOOL)updatePlayButtonProgressForCell:(TorrentCell*)cell
-                                torrent:(Torrent*)torrent
-                             knownState:(NSArray<NSDictionary*>*)knownState
-                                changed:(BOOL)stateChanged;
+- (BOOL)updatePlayButtonProgressForCell:(TorrentCell*)cell torrent:(Torrent*)torrent;
 - (void)finishPlayButtonsConfigurationForCell:(TorrentCell*)cell torrent:(Torrent*)torrent flowView:(FlowLayoutView*)flowView;
 - (void)noteHeightUpdateForRow:(NSInteger)row;
 @end

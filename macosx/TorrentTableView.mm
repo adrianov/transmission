@@ -186,7 +186,9 @@ extern char const kPlayButtonRepresentedKey = '\0';
 
     if ([notification.userInfo[@"refreshOnly"] boolValue])
     {
-        // Force re-apply of play button state (e.g. iinaUnwatched) so refreshPlayButtonStateForCell does not early-return.
+        // Reset the progress generation so refreshPlayButtonStateForCell does not early-return; the IINA dirty
+        // flag (set by enrichStateWithIinaUnwatched) makes stateForTorrent report changed so the row-refresh
+        // skip in updatePlayButtonProgressForCell still runs the sync.
         torrent.content.cachedPlayButtonProgressGeneration = 0;
         [self updateVisiblePlayButtons];
         return;

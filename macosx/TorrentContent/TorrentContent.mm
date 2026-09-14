@@ -15,6 +15,7 @@
     self.cachedPlayButtonLayout = nil;
     self.cachedPlayMenuLayout = nil;
     self.cachedPlayButtonProgressGeneration = 0;
+    self.cachedPlayButtonIinaDirty = NO;
 }
 
 @end

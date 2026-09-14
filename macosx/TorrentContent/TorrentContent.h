@@ -24,6 +24,8 @@ NS_ASSUME_NONNULL_BEGIN
 @property(nonatomic, copy, nullable) NSArray<NSDictionary*>* cachedPlayButtonSource;
 @property(nonatomic, copy, nullable) NSArray<NSDictionary*>* cachedPlayButtonLayout;
 @property(nonatomic) NSUInteger cachedPlayButtonProgressGeneration;
+/// YES when enrichStateWithIinaUnwatched mutated the cached state out-of-band; stateForTorrent consumes it to report changedOut.
+@property(nonatomic) BOOL cachedPlayButtonIinaDirty;
 @property(nonatomic, copy, nullable) NSArray<NSDictionary*>* cachedPlayMenuLayout;
 
 - (void)clearPlayButtonCache;

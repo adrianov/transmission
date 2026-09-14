@@ -222,6 +222,8 @@ target_sources(${TR_NAME}-mac
         TorrentContent/Torrent+Playable.mm
         TorrentContent/Torrent+Progress.mm
         TorrentContent/Torrent+Search.mm
+        TorrentContent/PlayButtonEntryState.h
+        TorrentContent/PlayButtonEntryState.mm
         TorrentContent/PlayButtonStateBuilder.h
         TorrentContent/PlayButtonStateBuilder.mm
         TorrentContent/PlayButtonTitleHelper.h
