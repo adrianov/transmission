@@ -134,4 +134,5 @@
 - (void)removeMissingDataTorrentsOnLaunch;
 - (NSSet<NSString*>*)missingDataCandidateDownloadDirsFromTorrents:(NSArray<Torrent*>*)torrents;
 - (BOOL)setTorrentLocationFromCandidatesIfNeeded:(Torrent*)torrent candidateDirs:(NSSet<NSString*>*)candidateDirs didSwitch:(BOOL*)didSwitch;
+- (void)relocateErroredTorrentsIfAccessible:(NSArray<Torrent*>*)torrents;
 @end

@@ -40,6 +40,27 @@
     });
 }
 
+/// Fixes errored torrents whose data moved: re-points them at a candidate dir where the files
+/// exist, restarts them, and refreshes stats once when anything changed. Runs off the main thread.
+- (void)relocateErroredTorrentsIfAccessible:(NSArray<Torrent*>*)torrents
+{
+    NSSet<NSString*>* candidateDirs = [self missingDataCandidateDownloadDirsFromTorrents:torrents];
+    BOOL anyFixed = NO;
+    for (Torrent* torrent in torrents)
+    {
+        BOOL didSwitch = NO;
+        if (torrent.error && [self setTorrentLocationFromCandidatesIfNeeded:torrent candidateDirs:candidateDirs didSwitch:&didSwitch] && didSwitch)
+        {
+            tr_torrentStart(torrent.torrentStruct);
+            anyFixed = YES;
+        }
+    }
+    if (anyFixed)
+    {
+        [Torrent updateTorrents:torrents];
+    }
+}
+
 - (NSSet<NSString*>*)missingDataCandidateDownloadDirsFromTorrents:(NSArray<Torrent*>*)torrents
 {
     NSMutableSet<NSString*>* set = [NSMutableSet set];
@@ -93,6 +114,23 @@
     return NO;
 }
 
+/// YES when the torrent's data lives on an external volume that is not currently mounted —
+/// keep such torrents so the user can remount and continue instead of losing the transfer.
+- (BOOL)isTorrentKeptForUnmountedVolume:(Torrent*)torrent
+{
+    if (![torrent.currentDirectory hasPrefix:@"/Volumes/"])
+    {
+        return NO;
+    }
+    NSArray<NSString*>* comp = [torrent.currentDirectory pathComponents];
+    if (comp.count < 3)
+    {
+        return NO;
+    }
+    NSString* volumePath = [NSString pathWithComponents:[comp subarrayWithRange:NSMakeRange(0, 3)]];
+    return ![[NSFileManager defaultManager] fileExistsAtPath:volumePath];
+}
+
 - (NSArray<Torrent*>*)missingDataTorrentsToRemoveFromTorrents:(NSArray<Torrent*>*)torrents
              candidateDirs:(NSSet<NSString*>*)candidateDirs
 {
@@ -109,18 +147,9 @@
             tr_torrentStart(torrent.torrentStruct);
             continue;
         }
-        // Keep torrent if its data is on an external volume that is not currently mounted
-        if ([torrent.currentDirectory hasPrefix:@"/Volumes/"])
+        if ([self isTorrentKeptForUnmountedVolume:torrent])
         {
-            NSArray<NSString*>* comp = [torrent.currentDirectory pathComponents];
-            if (comp.count >= 3)
-            {
-                NSString* volumePath = [NSString pathWithComponents:[comp subarrayWithRange:NSMakeRange(0, 3)]];
-                if (![[NSFileManager defaultManager] fileExistsAtPath:volumePath])
-                {
-                    continue; // volume not mounted, keep so user can mount again
-                }
-            }
+            continue;
         }
         [toRemove addObject:torrent];
     }

@@ -7,8 +7,6 @@
 
 #import "ControllerPrivate.h"
 #import "Badger.h"
-#import "DjvuConverter.h"
-#import "Fb2Converter.h"
 #import "InfoWindowController.h"
 #import "PowerManager.h"
 #import "StatusBarController.h"
@@ -17,6 +15,28 @@
 
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wobjc-protocol-method-implementation"
+/// Aggregated per-tick stats for the UI refresh.
+typedef struct
+{
+    CGFloat dlRate;
+    CGFloat ulRate;
+    BOOL anyCompleted;
+    BOOL anyActive;
+} UIRefreshStats;
+
+static UIRefreshStats UIRefreshStatsForTorrents(NSArray<Torrent*>* torrents)
+{
+    UIRefreshStats stats = {};
+    for (Torrent* torrent in torrents)
+    {
+        stats.dlRate += torrent.downloadRate;
+        stats.ulRate += torrent.uploadRate;
+        stats.anyCompleted |= torrent.finishedSeeding;
+        stats.anyActive |= torrent.active && !torrent.stalled && !torrent.error;
+    }
+    return stats;
+}
+
 @implementation Controller (UpdateUI)
 
 - (void)updateUI
@@ -38,82 +58,53 @@
     // Capture torrents array for background processing
     NSArray<Torrent*>* torrents = [self.fTorrents copy];
 
-    // Move the potentially blocking libtransmission call to a background thread
+    // Move the potentially blocking libtransmission calls to a background thread
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
         // This call may block waiting for session locks - now it won't freeze the UI
         [Torrent updateTorrents:torrents];
 
         // On file access (local) error, try candidate download dirs and switch location if data found elsewhere
-        NSSet<NSString*>* candidateDirs = [self missingDataCandidateDownloadDirsFromTorrents:torrents];
-        BOOL anyFixed = NO;
-        for (Torrent* torrent in torrents)
-        {
-            BOOL didSwitch = NO;
-            if (torrent.error && [self setTorrentLocationFromCandidatesIfNeeded:torrent candidateDirs:candidateDirs didSwitch:&didSwitch] && didSwitch)
-            {
-                tr_torrentStart(torrent.torrentStruct);
-                anyFixed = YES;
-            }
-        }
-        if (anyFixed)
-        {
-            [Torrent updateTorrents:torrents];
-        }
+        [self relocateErroredTorrentsIfAccessible:torrents];
 
-        // Aggregate stats and run converters off main thread so window restore/close stay responsive
-        CGFloat dlRate = 0.0, ulRate = 0.0;
-        BOOL anyCompleted = NO;
-        BOOL anyActive = NO;
-        BOOL autoConvertDjvu = [self.fDefaults boolForKey:@"AutoConvertDjvu"];
-
-        for (Torrent* torrent in torrents)
-        {
-            dlRate += torrent.downloadRate;
-            ulRate += torrent.uploadRate;
-            anyCompleted |= torrent.finishedSeeding;
-            anyActive |= torrent.active && !torrent.stalled && !torrent.error;
-
-            if (autoConvertDjvu && (torrent.downloading || torrent.seeding))
-            {
-                [DjvuConverter checkAndConvertCompletedFiles:torrent];
-                [Fb2Converter checkAndConvertCompletedFiles:torrent];
-            }
-        }
-
-        BOOL shouldPreventSleep = anyActive && [self.fDefaults boolForKey:@"SleepPrevent"];
+        UIRefreshStats stats = UIRefreshStatsForTorrents(torrents);
 
         // Update UI on main thread; defer row refresh to next run loop so restore/close are responsive
         dispatch_async(dispatch_get_main_queue(), ^{
-            PowerManager.shared.shouldPreventSleep = shouldPreventSleep;
-
-            if (!NSApp.hidden)
-            {
-                if (self.fWindow.visible)
-                {
-                    [self sortTorrentsAndIncludeQueueOrder:NO];
-
-                    [self.fStatusBar updateWithDownload:dlRate upload:ulRate];
-
-                    self.fClearCompletedButton.hidden = !anyCompleted;
-                }
-
-                if (self.fInfoController.window.visible)
-                {
-                    [self.fInfoController updateInfoStats];
-                }
-
-                dispatch_async(dispatch_get_main_queue(), ^{
-                    [self refreshVisibleTransferRows];
-                });
-            }
-
-            [self updateSearchPlaceholder];
-
-            [self.fBadger updateBadgeWithDownload:dlRate upload:ulRate];
-
+            [self applyUIUpdateWithStats:stats];
             self.fUpdatingUI = NO;
         });
     });
+}
+
+/// Applies the refreshed stats to the UI. Runs on the main thread.
+- (void)applyUIUpdateWithStats:(UIRefreshStats)stats
+{
+    PowerManager.shared.shouldPreventSleep = stats.anyActive && [self.fDefaults boolForKey:@"SleepPrevent"];
+
+    if (!NSApp.hidden)
+    {
+        if (self.fWindow.visible)
+        {
+            [self sortTorrentsAndIncludeQueueOrder:NO];
+
+            [self.fStatusBar updateWithDownload:stats.dlRate upload:stats.ulRate];
+
+            self.fClearCompletedButton.hidden = !stats.anyCompleted;
+        }
+
+        if (self.fInfoController.window.visible)
+        {
+            [self.fInfoController updateInfoStats];
+        }
+
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [self refreshVisibleTransferRows];
+        });
+    }
+
+    [self updateSearchPlaceholder];
+
+    [self.fBadger updateBadgeWithDownload:stats.dlRate upload:stats.ulRate];
 }
 
 - (void)fullUpdateUI
