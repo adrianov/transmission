@@ -31,7 +31,9 @@ Bitonal detection uses `ddjvu_page_get_type()` when available: PHOTO pages are n
 ### Pipeline overview
 
 1. **Scan completed files** (entry point: `+[DjvuConverter checkAndConvertCompletedFiles:]`)
-   - Runs frequently during UI updates, so it’s **throttled per torrent** (5 seconds).
+   - **Event-driven, no periodic rescans.** Runs only when a torrent finishes downloading
+     (completeness → `TorrentFinishedDownloading`, handled in `Controller+TorrentEvents.mm`)
+     and once per torrent at app launch (`Controller.mm`).
    - Builds a set of PDF base names already inside the torrent; if a matching PDF exists, the DjVu is skipped.
    - For each `.djvu` / `.djv` file:
      - Require **100% completion**.
