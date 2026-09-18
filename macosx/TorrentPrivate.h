@@ -4,12 +4,9 @@
 
 #import "Torrent.h"
 
-@class FileListNode;
+#import "TorrentContent/MediaExtensionSets.h"
 
-extern NSSet<NSString*>* sVideoExtensions;
-extern NSSet<NSString*>* sAudioExtensions;
-extern NSSet<NSString*>* sBookExtensions;
-extern NSSet<NSString*>* sSoftwareExtensions;
+@class FileListNode;
 
 /// Media type for folder torrents (used internally for playable and icon subtitle).
 typedef NS_ENUM(NSInteger, TorrentMediaType) {

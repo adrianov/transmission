@@ -18,6 +18,7 @@ target_sources(macosx-test
         ${CMAKE_SOURCE_DIR}/macosx/NSString+HumanTitle.h
         ${CMAKE_SOURCE_DIR}/macosx/NSString+HumanTitle.mm
         ${CMAKE_SOURCE_DIR}/macosx/TorrentCategoryTitle.h
+        ${CMAKE_SOURCE_DIR}/macosx/TorrentContent/MediaExtensionSets.mm
         ${CMAKE_SOURCE_DIR}/macosx/TorrentCategoryTitle.mm)
 
 set_property(

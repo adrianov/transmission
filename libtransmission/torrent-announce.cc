@@ -30,33 +30,61 @@ bool tr_torrent::set_announce_list(tr_announce_list announce_list)
 {
     auto const lock = unique_lock();
 
+    metainfo_.announce_list() = std::move(announce_list);
+
+    return save_announce_list();
+}
+
+size_t tr_torrent::merge_announce_list(tr_announce_list const& src)
+{
+    auto const lock = unique_lock();
+
     auto& tgt = metainfo_.announce_list();
+    auto const old_size = tgt.size();
+    auto previous = tgt; // snapshot for rollback if persisting fails
 
-    tgt = std::move(announce_list);
+    tgt.add(src);
+    auto const n_added = tgt.size() - old_size;
 
+    if (n_added == 0)
+    {
+        return 0;
+    }
+
+    if (save_announce_list())
+    {
+        return n_added;
+    }
+
+    // persistence failed: restore the previous list so reopening
+    // the same file later can retry the merge
+    tgt = std::move(previous);
+    on_announce_list_changed();
+    return 0;
+}
+
+bool tr_torrent::save_announce_list()
+{
     auto save_error = tr_error{};
-    auto filename = std::string{};
+    auto const filename = store_file();
+
     if (has_metainfo())
     {
-        filename = torrent_file();
-        tgt.save(filename, &save_error);
+        metainfo_.announce_list().save(filename, &save_error);
     }
     else
     {
-        filename = magnet_file();
         tr_file_save(filename, magnet(), &save_error);
     }
 
     on_announce_list_changed();
 
-    if (save_error.has_value())
+    if (save_error)
     {
-        error().set_local_error(
-            fmt::format(
-                fmt::runtime(_("Couldn't save '{path}': {error} ({error_code})")),
-                fmt::arg("path", filename),
-                fmt::arg("error", save_error.message()),
-                fmt::arg("error_code", save_error.code())));
+        error_.set_local_error(fmt::format(fmt::runtime(_("Couldn't save '{path}': {error} ({error_code})")),
+                                           fmt::arg("path", filename),
+                                           fmt::arg("error", save_error.message()),
+                                           fmt::arg("error_code", save_error.code())));
         return false;
     }
 
@@ -122,6 +150,11 @@ void tr_torrent::on_tracker_response(tr_tracker_event const* event)
 bool tr_torrentSetTrackerList(tr_torrent* tor, char const* text)
 {
     return text != nullptr && tor->set_announce_list(text);
+}
+
+size_t tr_torrentMergeTrackersFromMetainfo(tr_torrent* tor, tr_torrent_metainfo const* metainfo)
+{
+    return tor != nullptr && metainfo != nullptr ? tor->merge_announce_list(metainfo->announce_list()) : 0;
 }
 
 std::string tr_torrentGetTrackerList(tr_torrent const* tor)

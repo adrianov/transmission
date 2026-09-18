@@ -522,6 +522,10 @@ struct tr_torrent
 
     bool set_announce_list(std::string_view announce_list_str);
 
+    /// Adds any trackers from `src` that aren't already in this torrent's
+    /// announce list. Returns the number of trackers added.
+    size_t merge_announce_list(tr_announce_list const& src);
+
     /// METAINFO - WEBSEEDS
 
     [[nodiscard]] TR_CONSTEXPR20 auto webseed_count() const noexcept
@@ -1282,6 +1286,10 @@ private:
 
     // must be called after the torrent's announce list changes.
     void on_announce_list_changed();
+
+    // Saves the announce list to the torrent's backing file and calls
+    // on_announce_list_changed(). Sets a local error and returns false on failure.
+    bool save_announce_list();
 
     [[nodiscard]] TR_CONSTEXPR20 tr_byte_span_t byte_span_for_file(tr_file_index_t file) const
     {

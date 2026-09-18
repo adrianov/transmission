@@ -289,10 +289,10 @@ uint32_t apply_all_jobs(
     return changed;
 }
 
-/// Apply step, run as a queued task on the session thread: the mount table is read
-/// fresh (a volume unmounted during probing is honoured), every job is re-validated,
-/// and the completion state is fulfilled only after everything is applied.
-void apply_on_session_thread(std::shared_ptr<RecoveryState> state)
+/// Apply step, run on the session thread: the mount table is read fresh (a volume
+/// unmounted during probing is honoured), every job is re-validated, and the returned
+/// count is accurate only after everything is applied.
+uint32_t apply_round_on_session_thread(std::shared_ptr<RecoveryState> state)
 {
     auto lock = state->session->unique_lock();
 
@@ -310,8 +310,7 @@ void apply_on_session_thread(std::shared_ptr<RecoveryState> state)
         tr_torrentRemove(tor, false, nullptr, nullptr, nullptr, nullptr);
     }
 
-    lock.unlock();
-    state->done.set_value(changed);
+    return changed;
 }
 
 /// Start a round: probe the snapshotted state on a worker thread, then apply back on
@@ -330,10 +329,43 @@ void start_round(std::shared_ptr<RecoveryState> state)
                 state->done.set_value(0);
                 return;
             }
-            state->session->run_in_session_thread([state]() { apply_on_session_thread(state); });
-            state->session->run_in_session_thread([]() { fprintf(stderr, "MDRSTAGE6e tick\n"); });
+            state->session->run_in_session_thread([state]() { state->done.set_value(apply_round_on_session_thread(state)); });
         })
         .detach();
+}
+
+/// Synchronous round for a caller already on the session thread (the RPC handler runs
+/// there in this client): a worker-and-future round would post its apply task back to
+/// the very thread that is blocking on the round's future — a self-deadlock. Probe
+/// inline without the lock instead, then apply inline under the lock.
+uint32_t run_round_in_session_thread(tr_session* session, bool remove_unrecoverable)
+{
+    auto state = std::make_shared<RecoveryState>();
+    state->session = session;
+    state->remove_unrecoverable = remove_unrecoverable;
+
+    {
+        // Same shutdown-aware, one-round-at-a-time submission as the async path.
+        auto lock = session->unique_lock();
+        if (session->isClosing() || round_in_flight.exchange(true))
+        {
+            return 0;
+        }
+
+        state->snapshot();
+    }
+
+    state->probe();
+
+    if (session->isClosing())
+    {
+        round_in_flight = false;
+        return 0;
+    }
+
+    auto const changed = apply_round_on_session_thread(state);
+    round_in_flight = false;
+    return changed;
 }
 
 } // namespace
@@ -345,6 +377,11 @@ uint32_t tr_sessionRecoverMissingData(tr_session* session, bool remove_unrecover
     if (session == nullptr)
     {
         return 0;
+    }
+
+    if (session->am_in_session_thread())
+    {
+        return missing_data_recovery::run_round_in_session_thread(session, remove_unrecoverable);
     }
 
     auto state = std::make_shared<missing_data_recovery::RecoveryState>();

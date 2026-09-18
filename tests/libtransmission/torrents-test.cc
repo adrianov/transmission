@@ -138,8 +138,69 @@ using TorrentsPieceSpanTest = libtransmission::test::SessionTest;
 
 TEST_F(TorrentsPieceSpanTest, exposesFilePieceSpan)
 {
-    auto tor = zeroTorrentInit(ZeroTorrentState::Complete);
-    auto file_view = tr_torrentFile(tor, 0);
+    auto const file_view = tr_torrentFile(zeroTorrentInit(ZeroTorrentState::Complete), 0);
     EXPECT_EQ(file_view.beginPiece, 0);
     EXPECT_EQ(file_view.endPiece, 32);
+}
+
+using TorrentsMergeTrackerListTest = libtransmission::test::SessionTest;
+
+TEST_F(TorrentsMergeTrackerListTest, mergesTrackersFromDuplicateMetainfo)
+{
+    auto* const tor = zeroTorrentInit(ZeroTorrentState::NoFiles);
+    ASSERT_NE(nullptr, tor);
+
+    // setup: a duplicate of the same torrent (same info hash) with an extra tracker
+    auto dup = tr_torrent_metainfo{};
+    ASSERT_TRUE(dup.parse_torrent_file(tor->torrent_file()));
+    EXPECT_EQ(tor->info_hash(), dup.info_hash());
+    ASSERT_TRUE(dup.announce_list().add("udp://tracker.example.org:1337/announce"sv));
+
+    // the extra tracker is added; the original one is kept
+    EXPECT_EQ(1U, tr_torrentMergeTrackersFromMetainfo(tor, &dup));
+    EXPECT_EQ("http://www.example.com/announce\n\nudp://tracker.example.org:1337/announce\n", tr_torrentGetTrackerList(tor));
+}
+
+TEST_F(TorrentsMergeTrackerListTest, mergeIsIdempotent)
+{
+    auto* const tor = zeroTorrentInit(ZeroTorrentState::NoFiles);
+    ASSERT_NE(nullptr, tor);
+
+    auto dup = tr_torrent_metainfo{};
+    ASSERT_TRUE(dup.parse_torrent_file(tor->torrent_file()));
+    ASSERT_TRUE(dup.announce_list().add("udp://tracker.example.org:1337/announce"sv));
+
+    EXPECT_EQ(1U, tr_torrentMergeTrackersFromMetainfo(tor, &dup));
+    EXPECT_EQ(0U, tr_torrentMergeTrackersFromMetainfo(tor, &dup));
+}
+
+TEST_F(TorrentsMergeTrackerListTest, mergeIgnoresTrackersAlreadyPresent)
+{
+    auto* const tor = zeroTorrentInit(ZeroTorrentState::NoFiles);
+    ASSERT_NE(nullptr, tor);
+
+    // the duplicate has exactly the same trackers as the torrent
+    auto same = tr_torrent_metainfo{};
+    ASSERT_TRUE(same.parse_torrent_file(tor->torrent_file()));
+
+    EXPECT_EQ(0U, tr_torrentMergeTrackersFromMetainfo(tor, &same));
+    EXPECT_EQ("http://www.example.com/announce\n", tr_torrentGetTrackerList(tor));
+}
+
+TEST_F(TorrentsMergeTrackerListTest, mergeRollsBackWhenPersistingFails)
+{
+    auto* const tor = zeroTorrentInit(ZeroTorrentState::NoFiles);
+    ASSERT_NE(nullptr, tor);
+
+    auto dup = tr_torrent_metainfo{};
+    ASSERT_TRUE(dup.parse_torrent_file(tor->torrent_file()));
+    ASSERT_TRUE(dup.announce_list().add("udp://tracker.example.org:1337/announce"sv));
+
+    // corrupt the backing file so persisting the merged list fails
+    createFileWithContents(tor->torrent_file(), "not a torrent"sv);
+
+    // the merge reports failure and restores the previous list, so
+    // reopening the same file can retry the merge later
+    EXPECT_EQ(0U, tr_torrentMergeTrackersFromMetainfo(tor, &dup));
+    EXPECT_EQ("http://www.example.com/announce\n", tr_torrentGetTrackerList(tor));
 }

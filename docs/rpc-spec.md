@@ -515,6 +515,8 @@ Response parameters:
 
 * When attempting to add a duplicate torrent, a `torrent_duplicate` object in the same form is returned, but the response's `result` value is still `success`.
 
+* Any trackers in the new metainfo that aren't already in the existing torrent's tracker list are merged into it.
+
 ### 3.5 Removing a torrent
 Method name: `torrent_remove`
 

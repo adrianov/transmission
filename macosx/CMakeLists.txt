@@ -213,6 +213,8 @@ target_sources(${TR_NAME}-mac
         TorrentContent/TorrentContent.h
         TorrentContent/TorrentContent.mm
         TorrentContent/Torrent+Books.mm
+        TorrentContent/MediaExtensionSets.h
+        TorrentContent/MediaExtensionSets.mm
         TorrentContent/Torrent+DiskSpace.mm
         TorrentContent/Torrent+FileList.mm
         TorrentContent/Torrent+Icon.mm

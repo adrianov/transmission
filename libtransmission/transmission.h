@@ -248,10 +248,12 @@ void tr_sessionClose(tr_session* session, double timeout_secs = 15.0);
  * unknown (e.g. an unmounted volume), or that are otherwise in error are kept, and no
  * torrent's paused/running state is changed.
  *
- * The round runs as a session-owned asynchronous operation: the snapshot is taken on
- * the session thread, filesystems are probed on a worker thread (the session thread
- * stays responsive while storage stalls), and revalidated results are applied back on
- * the session thread before completion is signalled.
+ * The round runs as a session-owned operation: the snapshot is taken on the session
+ * thread and revalidated results are applied back on the session thread. A caller on
+ * a foreign thread keeps the session thread responsive while storage is probed on a
+ * worker thread; a caller already on the session thread (e.g. the RPC handler) runs
+ * the probe inline instead, since blocking the session thread on its own queued work
+ * would deadlock.
  *
  * This call blocks the calling thread until the round completes (which may take a while
  * on slow or stalled storage) and returns the number of torrents changed (relocated,
@@ -839,6 +841,10 @@ char const* tr_ctorGetSourceFile(tr_ctor const* ctor);
  * Instantiate a single torrent.
  *
  * Returns a pointer to the torrent on success, or nullptr on failure.
+ * If the torrent couldn't be created because it's a duplicate, any trackers
+ * in the new metainfo that aren't already in the original torrent's tracker
+ * list are merged into it, and `setme_duplicate_of` is set to point to the
+ * original torrent.
  *
  * @param ctor               the builder struct
  * @param setme_duplicate_of If the torrent couldn't be created because it's a duplicate,
@@ -1099,6 +1105,17 @@ size_t tr_torrentGetTrackerListToBuf(tr_torrent const* tor, char* buf, size_t bu
  * and the metainfo file in `tr_sessionGetConfigDir()`'s torrent subdirectory.
  */
 bool tr_torrentSetTrackerList(tr_torrent* tor, char const* text);
+
+/**
+ * Adds any trackers from `metainfo` that aren't already in `tor`'s tracker
+ * list. Existing trackers and tiers are kept as-is.
+ *
+ * This updates both the `torrent` object's tracker list
+ * and the metainfo file in `tr_sessionGetConfigDir()`'s torrent subdirectory.
+ *
+ * @return the number of trackers added.
+ */
+size_t tr_torrentMergeTrackersFromMetainfo(tr_torrent* tor, tr_torrent_metainfo const* metainfo);
 
 // ---
 

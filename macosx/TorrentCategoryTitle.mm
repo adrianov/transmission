@@ -3,7 +3,6 @@
 // License text can be found in the licenses/ folder.
 
 #import "TorrentCategoryTitle.h"
-#import "Torrent.h"
 #import "TorrentPrivate.h"
 
 static BOOL titleContains(NSString* lower, NSString* keyword)
@@ -31,7 +30,7 @@ static NSString* categoryForExtension(NSString* ext)
     if (ext.length == 0)
         return nil;
 
-    [Torrent ensureMediaExtensionSets];
+    ensureMediaExtensionSets();
     ext = ext.lowercaseString;
     if ([sVideoExtensions containsObject:ext])
         return @"video";

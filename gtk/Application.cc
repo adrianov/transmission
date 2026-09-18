@@ -463,7 +463,6 @@ bool Application::Impl::on_rpc_changed_idle(tr_rpc_callback_type type, tr_torren
     switch (type)
     {
     case TR_RPC_SESSION_CLOSE:
-        fprintf(stderr, "MDRGTK rpc idle SESSION_CLOSE\n");
         gtr_action_activate(GTR_KEY_quit);
         break;
 
@@ -936,7 +935,6 @@ bool Application::Impl::pointer_over_main_window() const
 
 bool Application::Impl::winclose()
 {
-    fprintf(stderr, "MDRGTK winclose\n");
     if (is_closing_)
     {
         return false;
@@ -1092,7 +1090,6 @@ bool Application::Impl::on_session_closed()
 
 void Application::Impl::on_app_exit()
 {
-    fprintf(stderr, "MDRGTK on_app_exit\n");
     if (is_closing_)
     {
         return;

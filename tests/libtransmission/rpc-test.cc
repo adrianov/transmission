@@ -825,6 +825,50 @@ TEST_F(RpcTest, torrentGetLegacy)
     tr_torrentRemove(tor, false, nullptr, nullptr, nullptr, nullptr);
 }
 
+namespace
+{
+// Returns the torrent's benc with one extra announce-list tier spliced in.
+// The info dict is untouched, so the info hash is unchanged.
+std::string duplicateBencWithExtraTracker(tr_torrent const& tor)
+{
+    auto contents = std::vector<char>{};
+    EXPECT_TRUE(tr_file_read(tor.torrent_file(), contents));
+
+    auto ret = std::string{ std::data(contents), std::size(contents) };
+    static auto constexpr Anchor = "31:http://www.example.com/announce"sv;
+    auto const pos = ret.find(Anchor.data(), 0, std::size(Anchor));
+    EXPECT_NE(std::string::npos, pos);
+    if (pos == std::string::npos)
+    {
+        return {};
+    }
+
+    ret.insert(pos + std::size(Anchor), "13:announce-listll39:udp://tracker.example.org:1337/announceee");
+    return ret;
+}
+} // namespace
+
+TEST_F(RpcTest, torrentAddMergesDuplicateTrackers)
+{
+    auto* tor = zeroTorrentInit(ZeroTorrentState::NoFiles);
+    ASSERT_NE(nullptr, tor);
+
+    // torrent-add should report the duplicate (same info hash, one extra
+    // tracker spliced in) and merge the new tracker into the existing torrent
+    EXPECT_NE(
+        std::string::npos,
+        makeRequest(
+            session_,
+            fmt::format(
+                R"json({{"id": 1, "jsonrpc": "2.0", "method": "torrent-add", "params": {{"metainfo": "{}", "paused": true}}}})json",
+                tr_base64_encode(duplicateBencWithExtraTracker(*tor))))
+            .find("torrent-duplicate"));
+    EXPECT_EQ("http://www.example.com/announce\n\nudp://tracker.example.org:1337/announce\n", tr_torrentGetTrackerList(tor));
+
+    // cleanup
+    tr_torrentRemove(tor, false, nullptr, nullptr, nullptr, nullptr);
+}
+
 namespace free_space_test
 {
 constexpr std::string_view BadRequest = R"json({
