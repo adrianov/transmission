@@ -15,6 +15,7 @@
 #include "MainWindow.h"
 #include "MakeDialog.h"
 #include "MessageLogWindow.h"
+#include "MissingDataRecovery.h"
 #include "OptionsDialog.h"
 #include "PathButton.h"
 #include "Prefs.h"
@@ -165,6 +166,16 @@ private:
 
     void app_setup();
     void main_window_setup();
+
+    void init_theme_and_style();
+    void ensure_config_dirs();
+    void init_session();
+    void init_ui_manager();
+    void connect_window_size_signals();
+    void maybe_schedule_blocklist_update();
+    void connect_core_handlers();
+    void start_model_updates();
+    void show_or_iconify_startup_window();
 
     bool on_session_closed();
     void on_app_exit();
@@ -452,6 +463,7 @@ bool Application::Impl::on_rpc_changed_idle(tr_rpc_callback_type type, tr_torren
     switch (type)
     {
     case TR_RPC_SESSION_CLOSE:
+        fprintf(stderr, "MDRGTK rpc idle SESSION_CLOSE\n");
         gtr_action_activate(GTR_KEY_quit);
         break;
 
@@ -574,85 +586,29 @@ void Application::on_startup()
 
 void Application::Impl::on_startup()
 {
-    IF_GTKMM4(Gtk::IconTheme::get_for_display(Gdk::Display::get_default()), Gtk::IconTheme::get_default())
-        ->add_resource_path(gtr_get_full_resource_path("icons"s));
-    Gtk::Window::set_default_icon_name(std::string(AppIconName));
-
-    /* Add style provider to the window. */
-    auto css_provider = Gtk::CssProvider::create();
-    css_provider->load_from_resource(gtr_get_full_resource_path("transmission-ui.css"));
-    Gtk::StyleContext::IF_GTKMM4(add_provider_for_display, add_provider_for_screen)(
-        IF_GTKMM4(Gdk::Display::get_default(), Gdk::Screen::get_default()),
-        css_provider,
-        GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
+    init_theme_and_style();
 
     FilterBar();
     PathButton();
-
-    tr_session* session = nullptr;
 
 #ifdef G_OS_UNIX
     g_unix_signal_add(SIGINT, &signal_handler, this);
     g_unix_signal_add(SIGTERM, &signal_handler, this);
 #endif
 
-    /* ensure the directories are created */
-    if (auto const str = gtr_pref_string_get(TR_KEY_download_dir); !str.empty())
-    {
-        (void)g_mkdir_with_parents(str.c_str(), 0777);
-    }
-
-    if (auto const str = gtr_pref_string_get(TR_KEY_incomplete_dir); !str.empty())
-    {
-        (void)g_mkdir_with_parents(str.c_str(), 0777);
-    }
+    ensure_config_dirs();
 
     /* initialize the libtransmission session */
-    session = tr_sessionInit(config_dir_, true, gtr_pref_get_all());
+    init_session();
 
-    gtr_pref_flag_set(TR_KEY_alt_speed_enabled, tr_sessionUsesAltSpeed(session));
-    gtr_pref_int_set(TR_KEY_peer_port, tr_sessionGetPeerPort(session));
-    core_ = Session::create(session);
-
-    /* init the ui manager */
-    ui_builder_ = Gtk::Builder::create_from_resource(gtr_get_full_resource_path("transmission-ui.xml"s));
-    auto const actions = gtr_actions_init(ui_builder_, this);
-
-    auto const main_menu = gtr_action_get_object<Gio::Menu>("main_window_menu");
-    app_.set_menubar(main_menu);
-
-    /* create main window now to be a parent to any error dialogs */
-    wind_ = MainWindow::create(app_, actions, core_);
-    wind_->set_show_menubar(true);
-
-    gtr_application_bind_menu_accels(app_);
-
-#if GTKMM_CHECK_VERSION(4, 0, 0)
-    wind_->property_maximized().signal_changed().connect(sigc::mem_fun(*this, &Impl::on_main_window_size_allocated));
-    wind_->property_default_width().signal_changed().connect(sigc::mem_fun(*this, &Impl::on_main_window_size_allocated));
-    wind_->property_default_height().signal_changed().connect(sigc::mem_fun(*this, &Impl::on_main_window_size_allocated));
-#else
-    wind_->signal_size_allocate().connect(sigc::hide<0>(sigc::mem_fun(*this, &Impl::on_main_window_size_allocated)));
-#endif
+    init_ui_manager();
 
     app_.hold();
     // Export app.quit on D-Bus so DEs that use it (e.g. KDE, Dash to Panel) can quit gracefully.
     app_.add_action(GTR_KEY_quit, [this]() { on_app_exit(); });
     app_setup();
-    tr_sessionSetRPCCallback(session, &Impl::on_rpc_changed, this);
 
-    /* check & see if it's time to update the blocklist */
-    if (gtr_pref_flag_get(TR_KEY_blocklist_enabled) && gtr_pref_flag_get(TR_KEY_blocklist_updates_enabled))
-    {
-        int64_t const last_time = gtr_pref_int_get(TR_KEY_blocklist_date);
-        int const SECONDS_IN_A_WEEK = 7 * 24 * 60 * 60;
-        time_t const now = time(nullptr);
-
-        if (last_time + SECONDS_IN_A_WEEK < now)
-        {
-            core_->blocklist_update();
-        }
-    }
+    maybe_schedule_blocklist_update();
 
     /* if there's no magnet link handler registered, register us */
     ensure_magnet_handler_exists();
@@ -738,15 +694,15 @@ void Application::Impl::app_setup()
 
     gtr_actions_set_core(core_);
 
-    /* set up core handlers */
-    core_->signal_busy().connect(sigc::mem_fun(*this, &Impl::on_core_busy));
-    core_->signal_add_error().connect(sigc::mem_fun(*this, &Impl::on_core_error));
-    core_->signal_add_prompt().connect(sigc::mem_fun(*this, &Impl::on_add_torrent));
-    core_->signal_prefs_changed().connect(sigc::mem_fun(*this, &Impl::on_prefs_changed));
+    connect_core_handlers();
 
     /* add torrents from command-line and saved state */
     core_->load(start_paused_);
     core_->torrents_added();
+
+    /* recover torrents whose data went missing: repoint to a folder where the files
+       exist, or drop them from the list (mirrors macOS Controller+MissingDataLaunch) */
+    gtr_missing_data::recover_or_remove_on_launch(core_);
 
     /* set up main window */
     main_window_setup();
@@ -754,12 +710,111 @@ void Application::Impl::app_setup()
     /* set up the icon */
     on_prefs_changed(TR_KEY_show_notification_area_icon);
 
-    /* start model update timer */
+    start_model_updates();
+
+    show_or_iconify_startup_window();
+}
+
+void Application::Impl::connect_core_handlers()
+{
+    core_->signal_busy().connect(sigc::mem_fun(*this, &Impl::on_core_busy));
+    core_->signal_add_error().connect(sigc::mem_fun(*this, &Impl::on_core_error));
+    core_->signal_add_prompt().connect(sigc::mem_fun(*this, &Impl::on_add_torrent));
+    core_->signal_prefs_changed().connect(sigc::mem_fun(*this, &Impl::on_prefs_changed));
+}
+
+void Application::Impl::init_theme_and_style()
+{
+    IF_GTKMM4(Gtk::IconTheme::get_for_display(Gdk::Display::get_default()), Gtk::IconTheme::get_default())
+        ->add_resource_path(gtr_get_full_resource_path("icons"s));
+    Gtk::Window::set_default_icon_name(std::string(AppIconName));
+
+    /* Add style provider to the window. */
+    auto css_provider = Gtk::CssProvider::create();
+    css_provider->load_from_resource(gtr_get_full_resource_path("transmission-ui.css"));
+    Gtk::StyleContext::IF_GTKMM4(add_provider_for_display, add_provider_for_screen)(
+        IF_GTKMM4(Gdk::Display::get_default(), Gdk::Screen::get_default()),
+        css_provider,
+        GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
+}
+
+void Application::Impl::ensure_config_dirs()
+{
+    for (auto const key : { TR_KEY_download_dir, TR_KEY_incomplete_dir })
+    {
+        if (auto const str = gtr_pref_string_get(key); !str.empty())
+        {
+            (void)g_mkdir_with_parents(str.c_str(), 0777);
+        }
+    }
+}
+
+void Application::Impl::init_session()
+{
+    auto* const session = tr_sessionInit(config_dir_, true, gtr_pref_get_all());
+
+    gtr_pref_flag_set(TR_KEY_alt_speed_enabled, tr_sessionUsesAltSpeed(session));
+    gtr_pref_int_set(TR_KEY_peer_port, tr_sessionGetPeerPort(session));
+    core_ = Session::create(session);
+
+    // Clients must be registered before app_setup(): the launch-time missing-data
+    // recovery can fire RPC notifications (TR_RPC_TORRENT_REMOVING etc.) during setup,
+    // and an unregistered callback would swallow the NOREMOVE veto and free torrents
+    // while the model still holds their rows.
+    tr_sessionSetRPCCallback(session, &Impl::on_rpc_changed, this);
+}
+
+void Application::Impl::init_ui_manager()
+{
+    /* init the ui manager */
+    ui_builder_ = Gtk::Builder::create_from_resource(gtr_get_full_resource_path("transmission-ui.xml"s));
+    auto const actions = gtr_actions_init(ui_builder_, this);
+    app_.set_menubar(gtr_action_get_object<Gio::Menu>("main_window_menu"));
+
+    /* create main window now to be a parent to any error dialogs */
+    wind_ = MainWindow::create(app_, actions, core_);
+    wind_->set_show_menubar(true);
+    gtr_application_bind_menu_accels(app_);
+    connect_window_size_signals();
+}
+
+void Application::Impl::connect_window_size_signals()
+{
+#if GTKMM_CHECK_VERSION(4, 0, 0)
+    wind_->property_maximized().signal_changed().connect(sigc::mem_fun(*this, &Impl::on_main_window_size_allocated));
+    wind_->property_default_width().signal_changed().connect(sigc::mem_fun(*this, &Impl::on_main_window_size_allocated));
+    wind_->property_default_height().signal_changed().connect(sigc::mem_fun(*this, &Impl::on_main_window_size_allocated));
+#else
+    wind_->signal_size_allocate().connect(sigc::hide<0>(sigc::mem_fun(*this, &Impl::on_main_window_size_allocated)));
+#endif
+}
+
+void Application::Impl::maybe_schedule_blocklist_update()
+{
+    /* check & see if it's time to update the blocklist */
+    if (gtr_pref_flag_get(TR_KEY_blocklist_enabled) && gtr_pref_flag_get(TR_KEY_blocklist_updates_enabled))
+    {
+        int64_t const last_time = gtr_pref_int_get(TR_KEY_blocklist_date);
+        int const SECONDS_IN_A_WEEK = 7 * 24 * 60 * 60;
+        time_t const now = time(nullptr);
+
+        if (last_time + SECONDS_IN_A_WEEK < now)
+        {
+            core_->blocklist_update();
+        }
+    }
+}
+
+void Application::Impl::start_model_updates()
+{
     timer_ = Glib::signal_timeout().connect_seconds(
         sigc::mem_fun(*this, &Impl::update_model_loop),
         MAIN_WINDOW_REFRESH_INTERVAL_SECONDS);
     update_model_once();
+}
 
+void Application::Impl::show_or_iconify_startup_window()
+{
     /* either show the window or iconify it */
     if (!start_iconified_)
     {
@@ -881,6 +936,7 @@ bool Application::Impl::pointer_over_main_window() const
 
 bool Application::Impl::winclose()
 {
+    fprintf(stderr, "MDRGTK winclose\n");
     if (is_closing_)
     {
         return false;
@@ -1036,6 +1092,7 @@ bool Application::Impl::on_session_closed()
 
 void Application::Impl::on_app_exit()
 {
+    fprintf(stderr, "MDRGTK on_app_exit\n");
     if (is_closing_)
     {
         return;
@@ -1307,6 +1364,7 @@ bool Application::Impl::update_model_loop()
     if (!is_closing_)
     {
         update_model_once();
+        gtr_missing_data::relocate_errored_torrents_if_accessible(core_);
         updateProcessPriority(); // poll every tick as fallback for missed focus signals
     }
 

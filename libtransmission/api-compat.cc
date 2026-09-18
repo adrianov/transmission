@@ -32,7 +32,7 @@ struct ApiKey
     tr_quark legacy;
 };
 
-auto constexpr RpcKeys = std::array<ApiKey, 212U>{ {
+auto constexpr RpcKeys = std::array<ApiKey, 215U>{ {
     { TR_KEY_active_torrent_count, TR_KEY_active_torrent_count_camel_APICOMPAT },
     { TR_KEY_activity_date, TR_KEY_activity_date_camel_APICOMPAT },
     { TR_KEY_added_date, TR_KEY_added_date_camel_APICOMPAT },
@@ -246,6 +246,9 @@ auto constexpr RpcKeys = std::array<ApiKey, 212U>{ {
     { TR_KEY_torrent_start_now, TR_KEY_torrent_start_now_kebab_APICOMPAT },
     { TR_KEY_torrent_stop, TR_KEY_torrent_stop_kebab_APICOMPAT },
     { TR_KEY_torrent_verify, TR_KEY_torrent_verify_kebab_APICOMPAT },
+    { TR_KEY_recover_missing_data, TR_KEY_recover_missing_data_kebab_APICOMPAT },
+    { TR_KEY_remove_unrecoverable, TR_KEY_remove_unrecoverable_kebab_APICOMPAT },
+    { TR_KEY_torrents_changed, TR_KEY_torrents_changed_kebab_APICOMPAT },
 } };
 
 auto constexpr SessionKeys = std::array<ApiKey, 141U>{ {

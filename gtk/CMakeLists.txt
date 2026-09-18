@@ -48,6 +48,8 @@ target_sources(${TR_NAME}-gtk
         MakeDialog.h
         MessageLogWindow.cc
         MessageLogWindow.h
+        MissingDataRecovery.cc
+        MissingDataRecovery.h
         Notify.cc
         Notify.h
         OptionsDialog.cc

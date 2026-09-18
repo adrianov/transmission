@@ -1044,6 +1044,7 @@ void tr_session::closeImplPart2(std::promise<void>* closed_promise, std::chrono:
 
 void tr_sessionClose(tr_session* session, double const timeout_secs)
 {
+    fprintf(stderr, "MDRCLOSE tr_sessionClose called\n");
     TR_ASSERT(session != nullptr);
     TR_ASSERT(!session->am_in_session_thread());
 

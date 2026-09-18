@@ -691,9 +691,9 @@ public:
         return settings().upload_slots_per_torrent;
     }
 
-    [[nodiscard]] constexpr auto isClosing() const noexcept
+    [[nodiscard]] auto isClosing() const noexcept
     {
-        return is_closing_;
+        return is_closing_.load(std::memory_order_acquire);
     }
 
     [[nodiscard]] constexpr auto encryptionMode() const noexcept
@@ -1124,7 +1124,9 @@ private:
     // port than the one requested by Transmission.
     tr_port advertised_peer_port_;
 
-    bool is_closing_ = false;
+    // atomic: read cross-thread by asynchronous helpers deciding whether it is still
+    // safe to post work back to the session thread.
+    std::atomic<bool> is_closing_ = false;
 
     // Proxy disabled for this session only (not persisted) due to health check failure
     bool is_proxy_disabled_for_session_ = false;

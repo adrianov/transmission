@@ -80,6 +80,11 @@ target_sources(${TR_NAME}
         makemeta.cc
         makemeta.h
         mime-types.h
+        missing-data-recovery.cc
+    missing-data-probe.cc
+    missing-data-probe.h
+        mount-availability.cc
+        mount-availability.h
         net.cc
         net.h
         background-work-queue.h

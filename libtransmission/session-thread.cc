@@ -166,6 +166,7 @@ public:
 
     ~tr_session_thread_impl() override
     {
+        fprintf(stderr, "MDRCLOSE session thread dtor\n");
         TR_ASSERT(!am_in_session_thread());
         TR_ASSERT(is_looping_);
 
@@ -220,6 +221,7 @@ private:
 
     void session_thread_func(struct event_base* evbase)
     {
+        fprintf(stderr, "MDRSESSFUNC enter\n");
 #ifndef _WIN32
         /* Don't exit when writing on a broken socket */
         (void)signal(SIGPIPE, SIG_IGN);
@@ -241,7 +243,14 @@ private:
         // Start the first event loop. This is the steady-state loop that runs
         // continuously until `this` is destroyed. See: ~tr_session_thread_impl()
         TR_ASSERT(!is_shutting_down_);
-        event_base_loop(evbase, EVLOOP_NO_EXIT_ON_EMPTY);
+        auto const loop_rc = event_base_loop(evbase, EVLOOP_NO_EXIT_ON_EMPTY);
+        fprintf(
+            stderr,
+            "MDRSESSLOOP rc=%d got_exit=%d got_break=%d shutting=%d\n",
+            loop_rc,
+            event_base_got_exit(evbase),
+            event_base_got_break(evbase),
+            (int)is_shutting_down_);
 
         // Start the second event loop. This is the shutdown loop that exits as
         // soon as there are no events. It's used to give any remaining events

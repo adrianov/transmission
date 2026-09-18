@@ -801,6 +801,30 @@ A bandwidth group description object has:
 | `speed_limit_up` | number | max global upload speed (kB/s)
 | `speed_limit_up_enabled` | boolean | true means enabled
 
+### 4.9 Missing data recovery
+This method asks the session to look for torrents whose local data has gone
+missing ("No data found" local error) and to recover them when their data has
+reappeared at another location -- for example, a removable drive that was
+plugged back in. Each affected torrent is probed at its recorded download
+location and, failing that, at other plausible candidate paths; when a probe
+finds complete files, the torrent is relocated to them and verified. Torrents
+whose data can no longer be found anywhere keep their local error; running
+state (paused or active) is never changed.
+
+Method name: `recover_missing_data`
+
+Request parameters:
+
+| Key | Value type | Description
+|:--|:--|:--
+| `remove_unrecoverable` | boolean | optional; also remove torrents whose previously-verified data is no longer present anywhere (default `false`)
+
+Response parameters:
+
+| Key | Value type | Description
+|:--|:--|:--
+| `torrents_changed` | number | how many torrents were relocated or removed
+
 ## 5 Protocol versions
 This section lists the changes that have been made to the RPC protocol.
 
@@ -1095,3 +1119,4 @@ Transmission 4.1.0 (`rpc_version_semver` 6.0.0, `rpc_version`: 18)
 | `session_set` | :bomb: renamed `cache_size_mb` to `cache_size_mib`
 | `session_get` | :bomb: renamed `tolerated` to `allowed` in `encryption`
 | `session_set` | :bomb: renamed `tolerated` to `allowed` in `encryption`
+| `recover_missing_data` | new method

@@ -238,6 +238,33 @@ void tr_sessionReloadBlocklists(tr_session* session);
 void tr_sessionClose(tr_session* session, double timeout_secs = 15.0);
 
 /**
+ * @brief Recover torrents whose files went missing ("No data found!" local error).
+ *
+ * Torrents whose files exist under another configured download directory are re-pointed
+ * there; torrents whose files reappeared at the current location are re-verified; and,
+ * when `remove_unrecoverable` is true, torrents whose previously-verified data is gone
+ * and whose storage is provably available are removed from the session (their data files
+ * are kept). Torrents whose data was never downloaded, whose storage availability is
+ * unknown (e.g. an unmounted volume), or that are otherwise in error are kept, and no
+ * torrent's paused/running state is changed.
+ *
+ * The round runs as a session-owned asynchronous operation: the snapshot is taken on
+ * the session thread, filesystems are probed on a worker thread (the session thread
+ * stays responsive while storage stalls), and revalidated results are applied back on
+ * the session thread before completion is signalled.
+ *
+ * This call blocks the calling thread until the round completes (which may take a while
+ * on slow or stalled storage) and returns the number of torrents changed (relocated,
+ * re-verified, or removed). It returns immediately with 0 when the session is null, the
+ * session is closing, or another recovery round is still in flight. Torrents are never
+ * left changed-but-unreported: once submitted, the round always runs to completion
+ * before the result is returned.
+ *
+ * @return the number of torrents changed (relocated, re-verified, or removed).
+ */
+uint32_t tr_sessionRecoverMissingData(tr_session* session, bool remove_unrecoverable);
+
+/**
  * @brief Return the session's configuration directory.
  *
  * This is where transmission stores its torrent files, .resume files,

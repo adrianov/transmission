@@ -448,6 +448,17 @@ void notifyBatchQueueChange(tr_session* session, std::vector<tr_torrent*> const&
     return { JsonRpc::Error::SUCCESS, {} };
 }
 
+[[nodiscard]] std::pair<JsonRpc::Error::Code, std::string> recoverMissingData(
+    tr_session* session,
+    tr_variant::Map const& args_in,
+    tr_variant::Map& args_out)
+{
+    args_out.try_emplace(
+        TR_KEY_torrents_changed,
+        tr_sessionRecoverMissingData(session, args_in.value_if<bool>(TR_KEY_remove_unrecoverable).value_or(false)));
+    return { JsonRpc::Error::SUCCESS, {} };
+}
+
 // ---
 
 namespace make_torrent_field_helpers
@@ -2796,7 +2807,7 @@ using SessionAccessors = std::pair<SessionGetter, SessionSetter>;
 
 using SyncHandler = std::pair<JsonRpc::Error::Code, std::string> (*)(tr_session*, tr_variant::Map const&, tr_variant::Map&);
 
-auto const sync_handlers = small::max_size_map<tr_quark, std::pair<SyncHandler, bool /*has_side_effects*/>, 20U>{ {
+auto const sync_handlers = small::max_size_map<tr_quark, std::pair<SyncHandler, bool /*has_side_effects*/>, 21U>{ {
     { TR_KEY_free_space, { freeSpace, false } },
     { TR_KEY_group_get, { groupGet, false } },
     { TR_KEY_group_set, { groupSet, true } },
@@ -2804,6 +2815,7 @@ auto const sync_handlers = small::max_size_map<tr_quark, std::pair<SyncHandler, 
     { TR_KEY_queue_move_down, { queueMoveDown, true } },
     { TR_KEY_queue_move_top, { queueMoveTop, true } },
     { TR_KEY_queue_move_up, { queueMoveUp, true } },
+    { TR_KEY_recover_missing_data, { recoverMissingData, true } },
     { TR_KEY_session_close, { sessionClose, true } },
     { TR_KEY_session_get, { sessionGet, false } },
     { TR_KEY_session_set, { sessionSet, true } },
