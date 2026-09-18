@@ -516,32 +516,48 @@ void tr_torrent::set_metainfo(tr_torrent_metainfo tm)
     this->on_announce_list_changed();
 }
 
+namespace
+{
+// A duplicate of `original` is being added: merge any new trackers from
+// `metainfo` into the original and report the original via `setme_duplicate_of`.
+[[nodiscard]] tr_torrent* duplicateOf(tr_torrent& original,
+                                      tr_torrent_metainfo const& metainfo,
+                                      tr_torrent** setme_duplicate_of)
+{
+    original.merge_announce_list(metainfo.announce_list());
+
+    if (setme_duplicate_of != nullptr)
+    {
+        *setme_duplicate_of = &original;
+    }
+
+    return nullptr;
+}
+} // namespace
+
 tr_torrent* tr_torrentNew(tr_ctor* ctor, tr_torrent** setme_duplicate_of)
 {
     TR_ASSERT(ctor != nullptr);
+
     auto* const session = ctor->session();
-    TR_ASSERT(session != nullptr);
+
+    auto const& metainfo = ctor->metainfo();
 
     // is the metainfo valid?
-    auto metainfo = ctor->steal_metainfo();
     if (std::empty(metainfo.info_hash_string()))
     {
         return nullptr;
     }
 
     // is it a duplicate? (ignore torrents that are being removed so user can re-add immediately)
-    auto* duplicate_of = session->torrents().get(metainfo.info_hash());
-    if (duplicate_of != nullptr && !duplicate_of->is_deleting())
+    if (auto* duplicate_of = session->torrents().get(metainfo.info_hash());
+        duplicate_of != nullptr && !duplicate_of->is_deleting())
     {
-        if (setme_duplicate_of != nullptr)
-        {
-            *setme_duplicate_of = duplicate_of;
-        }
-
-        return nullptr;
+        // the duplicate's trackers may differ: merge any new ones into the existing torrent
+        return duplicateOf(*duplicate_of, metainfo, setme_duplicate_of);
     }
 
-    auto* const tor = new tr_torrent{ std::move(metainfo) };
+    auto* const tor = new tr_torrent{ ctor->steal_metainfo() };
     tor->verify_done_callback_ = ctor->steal_verify_done_callback();
     tor->init(*ctor);
     return tor;

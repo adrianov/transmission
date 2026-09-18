@@ -227,7 +227,7 @@
     }
 }
 
-- (void)duplicateOpenAlert:(NSString*)name
+- (void)duplicateOpenAlert:(NSString*)name trackersAdded:(NSUInteger)trackersAdded
 {
     if (![self.fDefaults boolForKey:@"WarningDuplicate"])
     {
@@ -237,9 +237,28 @@
     NSAlert* alert = [[NSAlert alloc] init];
     alert.messageText = [NSString
         stringWithFormat:NSLocalizedString(@"A transfer of \"%@\" already exists.", "Open duplicate alert -> title"), name];
-    alert.informativeText = NSLocalizedString(
-        @"The transfer cannot be added because it is a duplicate of an already existing transfer.",
-        "Open duplicate alert -> message");
+    switch (trackersAdded)
+    {
+    case 0:
+        alert.informativeText = NSLocalizedString(@"The transfer cannot be added because it is a duplicate of an already existing transfer.",
+                                                  "Open duplicate alert -> message");
+        break;
+
+    case 1:
+        alert.informativeText = NSLocalizedString(
+            @"The transfer cannot be added because it is a duplicate of an already existing transfer."
+             " 1 new tracker from the opened file was merged into it.",
+            "Open duplicate alert -> message when 1 new tracker was merged");
+        break;
+
+    default:
+        alert.informativeText = [NSString
+            localizedStringWithFormat:NSLocalizedString(@"The transfer cannot be added because it is a duplicate of an already existing transfer."
+                                                         " %lu new trackers from the opened file were merged into it.",
+                                                        "Open duplicate alert -> message when several new trackers were merged"),
+                                      trackersAdded];
+        break;
+    }
 
     alert.alertStyle = NSAlertStyleWarning;
     [alert addButtonWithTitle:NSLocalizedString(@"OK", "Open duplicate alert -> button")];
@@ -421,9 +440,15 @@
     {
         return NO;
     }
-    if (tr_torrentHasMetadata(foundTorrent) || !tr_torrentSetMetainfoFromFile(foundTorrent, &metainfo, torrentPath.UTF8String))
+    if (tr_torrentHasMetadata(foundTorrent))
     {
-        [self duplicateOpenAlert:@(metainfo.name().c_str())];
+        // the duplicate has metadata: merge any new trackers from the opened file into the existing transfer
+        size_t const trackersAdded = tr_torrentMergeTrackersFromMetainfo(foundTorrent, &metainfo);
+        [self duplicateOpenAlert:@(metainfo.name().c_str()) trackersAdded:trackersAdded];
+    }
+    else if (!tr_torrentSetMetainfoFromFile(foundTorrent, &metainfo, torrentPath.UTF8String))
+    {
+        [self duplicateOpenAlert:@(metainfo.name().c_str()) trackersAdded:0];
     }
     return YES;
 }
