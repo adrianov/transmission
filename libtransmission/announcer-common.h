@@ -55,6 +55,35 @@ void tr_announcerParseHttpScrapeResponse(tr_scrape_response& response, std::stri
     }
 }
 
+// Some trackers accept the announce but warn that they don't carry this
+// torrent, e.g. "info hash is not authorized with this tracker". Match only
+// such info-hash-specific wording: other "not authorized" warnings are
+// account or credential problems (bad passkey, login, IP ban) that do not
+// mean the tracker lacks this torrent, and must not remove it.
+[[nodiscard]] inline bool tr_is_unauthorized_info_hash_warning(std::string_view warning)
+{
+    auto constexpr AuthPhrases = std::array<std::string_view, 2>{ "not authorized", "unauthorized" };
+    auto constexpr HashPhrases = std::array<std::string_view, 3>{ "info hash", "infohash", "info_hash" };
+
+    auto const lower = tr_strlower(warning);
+
+    for (auto const& auth_phrase : AuthPhrases)
+    {
+        if (tr_strv_contains(lower, auth_phrase))
+        {
+            for (auto const& hash_phrase : HashPhrases)
+            {
+                if (tr_strv_contains(lower, hash_phrase))
+                {
+                    return true;
+                }
+            }
+        }
+    }
+
+    return false;
+}
+
 struct tr_announce_request
 {
     tr_announce_event event = {};

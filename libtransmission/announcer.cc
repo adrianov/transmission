@@ -1064,14 +1064,6 @@ void on_announce_error(tr_tier* tier, char const* err, tr_announce_event e, time
     return false;
 }
 
-[[nodiscard]] bool is_unauthorized_info_hash_warning(std::string_view warning)
-{
-    // Some trackers accept the announce but warn that they don't carry this
-    // torrent, e.g. "info hash is not authorized with this tracker".
-    auto const lower = tr_strlower(warning);
-    return tr_strv_contains(lower, "not authorized"sv) || tr_strv_contains(lower, "unauthorized"sv);
-}
-
 } // namespace announce_helpers
 
 void torrentAddAnnounce(tr_torrent* tor, tr_announce_event e, time_t announce_at)
@@ -1234,7 +1226,7 @@ void tr_announcer_impl::onAnnounceDone(size_t tier_id,
             // a tracker that announces fine but warns that it doesn't carry
             // this torrent is useless; drop it unless it's the torrent's last
             // tracker (remove_announce() refuses to remove the last one)
-            if (tracker_at_announce != nullptr && is_unauthorized_info_hash_warning(warning))
+            if (tracker_at_announce != nullptr && tr_is_unauthorized_info_hash_warning(warning))
             {
                 pending_unauthorized_announces_[response.info_hash].insert(tracker_at_announce->announce_url);
             }
@@ -1833,11 +1825,9 @@ void tr_announcer_impl::removeUnauthorizedTrackers()
             auto const n_removed = tor->remove_announce(announce_url.sv());
             if (n_removed != 0)
             {
-                tr_logAddInfoTor(
-                    tor,
-                    fmt::format(
-                        fmt::runtime(_("Removed tracker '{url}': it does not carry this torrent")),
-                        fmt::arg("url", tr_urlTrackerLogName(announce_url))));
+                tr_logAddInfoTor(tor,
+                                 fmt::format(fmt::runtime(_("Removed tracker '{url}': it does not carry this torrent")),
+                                             fmt::arg("url", tr_urlTrackerLogName(announce_url))));
             }
         }
     }

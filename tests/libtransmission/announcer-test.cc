@@ -307,3 +307,21 @@ TEST_F(AnnouncerTest, parseHttpScrapeResponseMultiWithMissing)
     EXPECT_EQ(8, response.rows[2].leechers);
     EXPECT_EQ(9, response.rows[2].downloads);
 }
+
+TEST_F(AnnouncerTest, unauthorizedInfoHashWarningMatchesTrackerWarnings)
+{
+    EXPECT_TRUE(tr_is_unauthorized_info_hash_warning("Info hash is not authorized with this tracker"sv));
+    EXPECT_TRUE(tr_is_unauthorized_info_hash_warning("unauthorized info hash: deadbeef"sv));
+    EXPECT_TRUE(tr_is_unauthorized_info_hash_warning("info_hash not authorized"sv));
+}
+
+TEST_F(AnnouncerTest, unrelatedAuthorizationWarningsAreIgnored)
+{
+    // Account/credential warnings don't mean the tracker lacks this torrent;
+    // they must not cause the tracker to be removed.
+    EXPECT_FALSE(tr_is_unauthorized_info_hash_warning("not authorized: invalid passkey"sv));
+    EXPECT_FALSE(tr_is_unauthorized_info_hash_warning("unauthorized user, please log in"sv));
+    EXPECT_FALSE(tr_is_unauthorized_info_hash_warning("401 Unauthorized"sv));
+    EXPECT_FALSE(tr_is_unauthorized_info_hash_warning("unauthorized ip address"sv));
+    EXPECT_FALSE(tr_is_unauthorized_info_hash_warning("you are not authorized to use this tracker"sv));
+}
