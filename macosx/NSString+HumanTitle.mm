@@ -31,7 +31,10 @@
                                resolution:(NSString* _Nullable)resolution;
 - (BOOL)tr_filenameNeedsSeparatorReplace;
 - (NSString*)tr_stringByReplacingFilenameSeparators;
-- (nullable NSString*)tr_episodePrefixMatchEnd:(NSUInteger*)matchEnd standaloneTitle:(NSString* _Nullable* _Nullable)standalone;
+- (nullable NSString*)tr_episodePrefixMatchStart:(NSUInteger* _Nullable)matchStart
+                                        matchEnd:(NSUInteger*)matchEnd
+                                 standaloneTitle:(NSString* _Nullable* _Nullable)standalone;
+- (nullable NSString*)tr_seriesNameBeforeIndex:(NSUInteger)index;
 - (NSString*)tr_stringByStrippingEpisodeTechTags;
 - (NSString*)tr_stringByRemovingUnbalancedBrackets;
 - (NSString*)tr_episodeDisplayTitleWithTorrentName:(NSString* _Nullable)torrentName prefix:(NSString*)prefix;
@@ -149,22 +152,25 @@ static NSString* tr_regexGroup(NSString* s, NSString* pattern, NSUInteger group,
 
 - (NSString*)tr_formatHumanEpisodeTitleWithTorrentName:(NSString*)torrentName
 {
+    NSUInteger matchStart = NSNotFound;
     NSUInteger matchEnd = NSNotFound;
     NSString* standalone = nil;
-    NSString* prefix = [self tr_episodePrefixMatchEnd:&matchEnd standaloneTitle:&standalone];
+    NSString* prefix = [self tr_episodePrefixMatchStart:&matchStart matchEnd:&matchEnd standaloneTitle:&standalone];
     if (standalone)
         return standalone;
     if (!prefix)
         return nil;
     NSString* filename = self.lastPathComponent;
+    NSString* series = [filename tr_seriesNameBeforeIndex:matchStart];
+    NSString* composedPrefix = series.length > 0 ? [series stringByAppendingFormat:@" - %@", prefix] : prefix;
     NSString* remaining = matchEnd != NSNotFound && matchEnd <= filename.length ? [filename substringFromIndex:matchEnd] : @"";
     remaining = tr_regexReplace(remaining, @"^[.\\s]+", @"", 0);
     if (remaining.length == 0)
-        return prefix;
+        return composedPrefix;
     remaining = [remaining tr_stringByStrippingEpisodeTechTags];
     remaining = [remaining tr_stringByReplacingEpisodeDots];
     NSString* title = remaining.tr_formatHumanFileName;
-    return [title tr_episodeDisplayTitleWithTorrentName:torrentName prefix:prefix];
+    return [title tr_episodeDisplayTitleWithTorrentName:torrentName prefix:composedPrefix];
 }
 
 @end
@@ -513,7 +519,9 @@ static NSString* tr_regexGroup(NSString* s, NSString* pattern, NSUInteger group,
     return [parts componentsJoinedByString:@" "];
 }
 
-- (NSString*)tr_episodePrefixMatchEnd:(NSUInteger*)matchEnd standaloneTitle:(NSString**)standalone
+- (NSString*)tr_episodePrefixMatchStart:(NSUInteger*)matchStart
+                               matchEnd:(NSUInteger*)matchEnd
+                        standaloneTitle:(NSString**)standalone
 {
     NSString* filename = self.lastPathComponent;
     NSTextCheckingResult* seMatch = tr_regexFirst(filename, @"\\bS(\\d{1,2})[.\\s]?E(\\d{1,3})\\b", NSRegularExpressionCaseInsensitive);
@@ -521,6 +529,7 @@ static NSString* tr_regexGroup(NSString* s, NSString* pattern, NSUInteger group,
     {
         NSInteger season = [[filename substringWithRange:[seMatch rangeAtIndex:1]] integerValue];
         NSInteger episode = [[filename substringWithRange:[seMatch rangeAtIndex:2]] integerValue];
+        *matchStart = seMatch.range.location;
         *matchEnd = seMatch.range.location + seMatch.range.length;
         *standalone = nil;
         return [NSString stringWithFormat:@"S%ld E%ld", (long)season, (long)episode];
@@ -530,6 +539,7 @@ static NSString* tr_regexGroup(NSString* s, NSString* pattern, NSUInteger group,
     {
         NSInteger season = [[filename substringWithRange:[altMatch rangeAtIndex:1]] integerValue];
         NSInteger episode = [[filename substringWithRange:[altMatch rangeAtIndex:2]] integerValue];
+        *matchStart = altMatch.range.location;
         *matchEnd = altMatch.range.location + altMatch.range.length;
         *standalone = nil;
         return [NSString stringWithFormat:@"S%ld E%ld", (long)season, (long)episode];
@@ -538,8 +548,19 @@ static NSString* tr_regexGroup(NSString* s, NSString* pattern, NSUInteger group,
         return nil;
     NSString* base = filename.stringByDeletingPathExtension;
     *standalone = base.length > 0 ? base.tr_formatHumanFileName : nil;
+    *matchStart = NSNotFound;
     *matchEnd = NSNotFound;
     return nil;
+}
+
+/// Cleaned text preceding the episode marker (the series name); nil when the marker starts the name.
+- (nullable NSString*)tr_seriesNameBeforeIndex:(NSUInteger)index
+{
+    if (index == 0 || index > self.length)
+        return nil;
+    NSString* series = [[self substringToIndex:index] tr_formatHumanFileName];
+    series = [series stringByTrimmingCharactersInSet:[NSCharacterSet characterSetWithCharactersInString:@" .-"]];
+    return series.length > 0 ? series : nil;
 }
 
 - (NSString*)tr_stringByStrippingEpisodeTechTags

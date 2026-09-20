@@ -164,6 +164,7 @@ Parts are assembled with specific formatting:
 | `Artist - Album Name (2020) [FLAC]` | `Artist - Album Name (2020) #flac` |
 | `Artist.Album.2019.MP3` | `Artist Album (2019) #mp3` |
 | `The.White.Lotus.S03E05.Full-Moon.Party.1080p.AMZN.WEB-DL.H.264-EniaHD.mkv` | Episode button: `▶ S3 E5 - Full-Moon Party` |
+| `South.Park.S29E01.1080p.HEVC.x265-MeGusta[EZTVx.to].mkv` | `South Park - S29 E1 - MeGusta[EZTVx to]` |
 | `Beavis.and.Butt-Head.Do` | `Beavis and Butt-Head Do` |
 | `NaughtyAmerica(NaughtyBookworms)` | `NaughtyAmerica (NaughtyBookworms)` |
 | `Somm+Into+the+Bottle+(2015)+(1080p+WEB-DL+x265+HEVC+10bit+AC3+5.1+MONOLITH)+[QxR]` | `Somm Into the Bottle (5.1 MONOLITH) QxR (2015) #1080p` |
@@ -185,6 +186,7 @@ Media torrents display Play buttons below the status line for quick access to do
 - **Document readiness:** Read buttons appear only when the file is 100% downloaded
 - **Episode detection:** Files with `S01E05` or `1x05` patterns show both season and episode (e.g. `▶ S1 E5`). Standalone E## shows the full humanized filename (e.g. `CzechStreets - 2020.06.30 E126 Bald Rebel 2160p`).
 - **Episode title detection:** When both season and episode are present, a title following the episode marker is extracted and cleaned (e.g., `▶ S1 E1 - The Beginning`, `▶ S3 E5 - Full-Moon Party`). Standalone E## (no season) shows the full humanized filename (e.g. `CzechStreets - 2020.06.30 E126 Bald Rebel 2160p`) so the button title is meaningful; common prefix/suffix stripping does not reduce it to just the episode code.
+- **Series name preservation:** The series name preceding the episode marker is cleaned and kept as a prefix (e.g. `South.Park.S29E01.1080p.HEVC.x265-MeGusta[EZTVx.to].mkv` → `South Park - S29 E1 - MeGusta[EZTVx to]`). When the marker starts the name, the output is just the episode code (`S29 E1`). At display time, common-prefix stripping removes the shared series prefix from play button titles.
 - **Technical tag removal:** Titles are aggressively cleaned of technical tags like `1080p`, `WEB-DL`, `H264`, `AMZN`, `EniaHD`, etc. before title extraction
 - **Hyphen preservation:** Hyphens in hyphenated words (e.g., `Full-Moon`) are preserved and not converted to spaces
 - **Dot-to-space conversion:** Dots between words in episode titles are converted to spaces (e.g., `Full-Moon.Party` → `Full-Moon Party`)
@@ -205,6 +207,7 @@ Button titles for individual files follow these rules:
 
 1. **Episode files** (`S01E05`, `1x05` patterns): When season and episode are present, show both (e.g. `▶ S1 E5`, `▶ S1 E12`). Standalone `E05` shows as `▶ E5`.
    - Title after the marker is shown only when both season and episode are found (e.g. `▶ S1 E5 - Title`). Standalone E## shows the full humanized filename.
+   - The series name preceding the marker is prepended (e.g. `South Park - S29 E1`); common-prefix stripping removes it from 2+ button titles at display time.
    - Technical tags (`1080p`, `HEVC`, etc.) and redundant series names are stripped.
 2. **Non-episode files**: Show filename with lightweight separator normalization
    - If the name is separator-heavy (lots of `.` / `-` / `_` and few/no spaces), separators are replaced with spaces
@@ -271,6 +274,7 @@ Filenames are converted to readable episode names:
 - Hyphens in hyphenated words are preserved (e.g., `Full-Moon` stays as `Full-Moon`, not `Full Moon`)
 - Technical tags (resolutions, codecs, release info) are stripped before title processing
 - Only known video file extensions (`.mkv`, `.mp4`, `.avi`, etc.) are removed; words that look like extensions (e.g., `.Party`) are preserved
+- The series name preceding the episode marker is cleaned (dot/underscore/hyphen separators → spaces) and prepended to the code (e.g. `South.Park.S29E01...` → `South Park - S29 E1`). When the marker starts the filename, output is just the episode code (`S29 E1`). Torrent row titles use this composed form; play button titles strip the common series prefix for 2+ files.
 - If the extracted title is just a repeat of the series name, it's simplified to just the episode number
 
 ## Implementation

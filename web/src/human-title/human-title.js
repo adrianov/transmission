@@ -547,6 +547,7 @@ function matchEpisodePrefix(name) {
   if (seMatch) {
     return {
       matchEnd: seMatch.index + seMatch[0].length,
+      matchStart: seMatch.index,
       prefix: `S${Number.parseInt(seMatch[1], 10)} E${Number.parseInt(seMatch[2], 10)}`,
       standalone: false,
     };
@@ -555,6 +556,7 @@ function matchEpisodePrefix(name) {
   if (altMatch) {
     return {
       matchEnd: altMatch.index + altMatch[0].length,
+      matchStart: altMatch.index,
       prefix: `S${Number.parseInt(altMatch[1], 10)} E${Number.parseInt(altMatch[2], 10)}`,
       standalone: false,
     };
@@ -565,6 +567,7 @@ function matchEpisodePrefix(name) {
   }
   return {
     matchEnd: 0,
+    matchStart: 0,
     prefix: `E${Number.parseInt(episodeMatch[1], 10)}`,
     standalone: true,
   };
@@ -652,6 +655,18 @@ function isRedundantEpisodeTitle(title, torrentName) {
   return titleWithoutYear.toLowerCase() === cleanTorrentName.toLowerCase();
 }
 
+function seriesNameBeforeIndex(name, index) {
+  if (!index) {
+    return '';
+  }
+  return (
+    formatHumanFileName(name.slice(0, index))
+      // eslint-disable-next-line sonarjs/slow-regex -- simple pattern on short string
+      .replaceAll(/[ .-]+$/g, '')
+      .trim()
+  );
+}
+
 function formatEpisodeTitle(name, torrentName) {
   if (!name) {
     return '';
@@ -663,9 +678,11 @@ function formatEpisodeTitle(name, torrentName) {
   if (match.standalone) {
     return match.prefix;
   }
+  const series = seriesNameBeforeIndex(name, match.matchStart);
+  const prefix = series ? `${series} - ${match.prefix}` : match.prefix;
   const remaining = name.slice(match.matchEnd).replace(/^[.\-\s]+/, '');
   if (!remaining) {
-    return match.prefix;
+    return prefix;
   }
   let title = stripEpisodeTags(formatHumanFileName(remaining));
   title = dropUnbalancedBrackets(title.replaceAll(/[([]\s*[)\]]/g, ''));
@@ -676,10 +693,10 @@ function formatEpisodeTitle(name, torrentName) {
     trimEpisodeEdges(title.replaceAll(/\s+/g, ' ').trim()),
   );
   if (!title || title === 'Unknown' || title.length <= 1) {
-    return match.prefix;
+    return prefix;
   }
   if (isRedundantEpisodeTitle(title, torrentName)) {
-    return match.prefix;
+    return prefix;
   }
-  return `${match.prefix} - ${title}`;
+  return `${prefix} - ${title}`;
 }

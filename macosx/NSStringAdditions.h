@@ -82,6 +82,7 @@ NS_ASSUME_NONNULL_BEGIN
 
 /**
  * Converts a filename to a human-readable episode title, optionally stripping the torrent name if redundant.
+ * The series name preceding the episode marker is preserved as a prefix (e.g. South.Park.S29E01... -> South Park - S29 E1).
  */
 - (nullable NSString*)humanReadableEpisodeTitleWithTorrentName:(nullable NSString*)torrentName;
 
