@@ -23,6 +23,9 @@ void tr_torrent::set_verify_state(VerifyState const state)
 {
     TR_ASSERT(state == VerifyState::None || state == VerifyState::Queued || state == VerifyState::Active);
 
+    // Called from the verify worker thread (and the queueing path); verify_state_ and
+    // verify_progress_ are read under the session lock elsewhere, so write under it too.
+    auto const lock = unique_lock();
     verify_state_ = state;
     verify_progress_ = {};
     mark_changed();
@@ -91,6 +94,11 @@ void tr_torrent::VerifyMediator::on_verify_started()
 
 void tr_torrent::VerifyMediator::on_piece_checked(tr_piece_index_t const piece, bool const has_piece)
 {
+    // This runs on the verify worker thread. The completion bitfield and checked_pieces_ are
+    // guarded by the session lock everywhere else (peer events, RPC, UI readers) — take it here
+    // too, or reallocating the bitfields races concurrent readers.
+    auto const lock = tor_->unique_lock();
+
     if (auto const had_piece = tor_->has_piece(piece); !has_piece || !had_piece)
     {
         tor_->set_has_piece(piece, has_piece);

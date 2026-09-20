@@ -224,6 +224,10 @@ tr_file_view tr_torrentFile(tr_torrent const* tor, tr_file_index_t file)
 {
     TR_ASSERT(tr_isTorrent(tor));
 
+    // Reads completion bitfield bytes (count_has_bytes_in_span) and file priority/wanted state,
+    // all mutated under the session lock on other threads. See tr_torrentAmountFinished().
+    auto const lock = tor->unique_lock();
+
     auto const& subpath = tor->file_subpath(file);
     auto const priority = tor->file_priorities_.file_priority(file);
     auto const wanted = tor->files_wanted_.file_wanted(file);
@@ -250,10 +254,15 @@ float tr_torrentFileConsecutiveProgress(tr_torrent const* torrent, tr_file_index
 {
     TR_ASSERT(tr_isTorrent(torrent));
 
+    // The consecutive-progress cache is lazily recomputed here and invalidated from the session
+    // thread when pieces complete; both sides must hold the session lock.
+    auto const lock = torrent->unique_lock();
     return torrent->file_consecutive_progress(file);
 }
 
 tr_webseed_view tr_torrentWebseed(tr_torrent const* tor, size_t nth)
 {
+    // Webseed list is mutated on the session thread; lock before reading, see tr_torrentPeers().
+    auto const lock = tor->unique_lock();
     return tr_peerMgrWebseed(tor, nth);
 }

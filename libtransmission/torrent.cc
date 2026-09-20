@@ -672,6 +672,9 @@ tr_peer_stat* tr_torrentPeers(tr_torrent const* tor, size_t* peer_count)
 {
     TR_ASSERT(tr_isTorrent(tor));
 
+    // Swarm state is mutated on the session thread under the session lock; callers from other
+    // threads (e.g. UI) must take the lock before iterating peers, or they race peer add/remove.
+    auto const lock = tor->unique_lock();
     return tr_peerMgrPeerStats(tor, peer_count);
 }
 
@@ -686,12 +689,17 @@ void tr_torrentAvailability(tr_torrent const* tor, int8_t* tab, int size)
 
     if (tab != nullptr && size > 0)
     {
+        // See tr_torrentPeers(): session-thread-mutated swarm state, lock before reading.
+        auto const lock = tor->unique_lock();
         tr_peerMgrTorrentAvailability(tor, tab, size);
     }
 }
 
 void tr_torrentAmountFinished(tr_torrent const* tor, float* tabs, int n_tabs)
 {
+    // amount_done_bins() walks the completion bitfield, which download/verify threads reallocate
+    // under the session lock (see tr_bitfield::flags_). Read it under the same lock.
+    auto const lock = tor->unique_lock();
     tor->amount_done_bins(tabs, n_tabs);
 }
 
