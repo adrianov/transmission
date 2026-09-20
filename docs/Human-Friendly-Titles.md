@@ -186,7 +186,7 @@ Media torrents display Play buttons below the status line for quick access to do
 - **Document readiness:** Read buttons appear only when the file is 100% downloaded
 - **Episode detection:** Files with `S01E05` or `1x05` patterns show both season and episode (e.g. `▶ S1 E5`). Standalone E## shows the full humanized filename (e.g. `CzechStreets - 2020.06.30 E126 Bald Rebel 2160p`).
 - **Episode title detection:** When both season and episode are present, a title following the episode marker is extracted and cleaned (e.g., `▶ S1 E1 - The Beginning`, `▶ S3 E5 - Full-Moon Party`). Standalone E## (no season) shows the full humanized filename (e.g. `CzechStreets - 2020.06.30 E126 Bald Rebel 2160p`) so the button title is meaningful; common prefix/suffix stripping does not reduce it to just the episode code.
-- **Series name preservation:** The series name preceding the episode marker is cleaned and kept as a prefix (e.g. `South.Park.S29E01.1080p.HEVC.x265-MeGusta[EZTVx.to].mkv` → `South Park - S29 E1 - MeGusta[EZTVx to]`). When the marker starts the name, the output is just the episode code (`S29 E1`). At display time, common-prefix stripping removes the shared series prefix from play button titles.
+- **Series name preservation:** The series name preceding the episode marker is cleaned and kept as a prefix (e.g. `South.Park.S29E01.1080p.HEVC.x265-MeGusta[EZTVx.to].mkv` → `South Park - S29 E1 - MeGusta[EZTVx to]`). When the marker starts the name and no usable title follows it, the output is just the episode code (`S29 E1`); a title following the marker is still appended (e.g. `S01E01.Pilot` → `S1 E1 - Pilot`). At display time, common-prefix stripping removes the shared series prefix from play button titles.
 - **Technical tag removal:** Titles are aggressively cleaned of technical tags like `1080p`, `WEB-DL`, `H264`, `AMZN`, `EniaHD`, etc. before title extraction
 - **Hyphen preservation:** Hyphens in hyphenated words (e.g., `Full-Moon`) are preserved and not converted to spaces
 - **Dot-to-space conversion:** Dots between words in episode titles are converted to spaces (e.g., `Full-Moon.Party` → `Full-Moon Party`)
@@ -274,7 +274,7 @@ Filenames are converted to readable episode names:
 - Hyphens in hyphenated words are preserved (e.g., `Full-Moon` stays as `Full-Moon`, not `Full Moon`)
 - Technical tags (resolutions, codecs, release info) are stripped before title processing
 - Only known video file extensions (`.mkv`, `.mp4`, `.avi`, etc.) are removed; words that look like extensions (e.g., `.Party`) are preserved
-- The series name preceding the episode marker is cleaned (dot/underscore/hyphen separators → spaces) and prepended to the code (e.g. `South.Park.S29E01...` → `South Park - S29 E1`). When the marker starts the filename, output is just the episode code (`S29 E1`). Torrent row titles use this composed form; play button titles strip the common series prefix for 2+ files.
+- The series name preceding the episode marker is cleaned (dot/underscore/hyphen separators → spaces) and prepended to the code (e.g. `South.Park.S29E01...` → `South Park - S29 E1`). When the marker starts the filename and no usable title follows it, output is just the episode code (`S29 E1`); a following title is still appended. Torrent row titles use this composed form; play button titles strip the common series prefix for 2+ files.
 - If the extracted title is just a repeat of the series name, it's simplified to just the episode number
 
 ## Implementation
