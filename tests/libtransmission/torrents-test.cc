@@ -204,3 +204,56 @@ TEST_F(TorrentsMergeTrackerListTest, mergeRollsBackWhenPersistingFails)
     EXPECT_EQ(0U, tr_torrentMergeTrackersFromMetainfo(tor, &dup));
     EXPECT_EQ("http://www.example.com/announce\n", tr_torrentGetTrackerList(tor));
 }
+
+using TorrentsRemoveTrackerListTest = libtransmission::test::SessionTest;
+
+TEST_F(TorrentsRemoveTrackerListTest, removesTracker)
+{
+    auto* const tor = zeroTorrentInit(ZeroTorrentState::NoFiles);
+    ASSERT_NE(nullptr, tor);
+    ASSERT_TRUE(tor->set_announce_list("http://www.example.com/announce\nudp://tracker.example.org:1337/announce\n"sv));
+
+    EXPECT_EQ(1U, tor->remove_announce("http://www.example.com/announce"sv));
+    EXPECT_EQ("udp://tracker.example.org:1337/announce\n", tr_torrentGetTrackerList(tor));
+
+    // the change persists to the torrent file
+    auto reloaded = tr_torrent_metainfo{};
+    ASSERT_TRUE(reloaded.parse_torrent_file(tor->torrent_file()));
+    EXPECT_EQ(1U, std::size(reloaded.announce_list()));
+    EXPECT_EQ("udp://tracker.example.org:1337/announce"sv, reloaded.announce_list().at(0).announce.sv());
+}
+
+TEST_F(TorrentsRemoveTrackerListTest, keepsLastTracker)
+{
+    auto* const tor = zeroTorrentInit(ZeroTorrentState::NoFiles);
+    ASSERT_NE(nullptr, tor);
+
+    // refuse to remove the torrent's only tracker
+    EXPECT_EQ(0U, tor->remove_announce("http://www.example.com/announce"sv));
+    EXPECT_EQ("http://www.example.com/announce\n", tr_torrentGetTrackerList(tor));
+}
+
+TEST_F(TorrentsRemoveTrackerListTest, ignoresUnknownTracker)
+{
+    auto* const tor = zeroTorrentInit(ZeroTorrentState::NoFiles);
+    ASSERT_NE(nullptr, tor);
+    ASSERT_TRUE(tor->set_announce_list("http://www.example.com/announce\nudp://tracker.example.org:1337/announce\n"sv));
+
+    EXPECT_EQ(0U, tor->remove_announce("https://www.not-example.com/announce"sv));
+    EXPECT_EQ("http://www.example.com/announce\nudp://tracker.example.org:1337/announce\n", tr_torrentGetTrackerList(tor));
+}
+
+TEST_F(TorrentsRemoveTrackerListTest, rollsBackWhenPersistingFails)
+{
+    auto* const tor = zeroTorrentInit(ZeroTorrentState::NoFiles);
+    ASSERT_NE(nullptr, tor);
+    ASSERT_TRUE(tor->set_announce_list("http://www.example.com/announce\nudp://tracker.example.org:1337/announce\n"sv));
+
+    // corrupt the backing file so persisting the removal fails
+    createFileWithContents(tor->torrent_file(), "not a torrent"sv);
+
+    // the removal reports failure and restores the previous list, so
+    // reopening the same file can retry the removal later
+    EXPECT_EQ(0U, tor->remove_announce("http://www.example.com/announce"sv));
+    EXPECT_EQ("http://www.example.com/announce\nudp://tracker.example.org:1337/announce\n", tr_torrentGetTrackerList(tor));
+}
