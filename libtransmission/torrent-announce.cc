@@ -63,6 +63,40 @@ size_t tr_torrent::merge_announce_list(tr_announce_list const& src)
     return 0;
 }
 
+size_t tr_torrent::remove_announce(std::string_view announce_url)
+{
+    auto const lock = unique_lock();
+
+    auto& tgt = metainfo_.announce_list();
+    auto const url_matches = [&announce_url](auto const& tracker) { return tracker.announce.sv() == announce_url; };
+    auto const n_matches = static_cast<size_t>(std::count_if(std::begin(tgt), std::end(tgt), url_matches));
+
+    // refuse if the tracker isn't in the list, or if removing it would
+    // leave the torrent without any trackers at all
+    if (n_matches == 0 || n_matches == tgt.size())
+    {
+        return 0;
+    }
+
+    auto previous = tgt; // snapshot for rollback if persisting fails
+    auto n_removed = size_t{ 0U };
+    while (tgt.remove(announce_url))
+    {
+        ++n_removed;
+    }
+
+    if (save_announce_list())
+    {
+        return n_removed;
+    }
+
+    // persistence failed: restore the previous list so reopening
+    // the same file later can retry the removal
+    tgt = std::move(previous);
+    on_announce_list_changed();
+    return 0;
+}
+
 bool tr_torrent::save_announce_list()
 {
     auto save_error = tr_error{};

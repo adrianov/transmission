@@ -526,6 +526,11 @@ struct tr_torrent
     /// announce list. Returns the number of trackers added.
     size_t merge_announce_list(tr_announce_list const& src);
 
+    /// Removes every tracker with the announce URL `announce_url`, unless
+    /// that would leave this torrent with no trackers at all. Returns the
+    /// number of trackers removed.
+    size_t remove_announce(std::string_view announce_url);
+
     /// METAINFO - WEBSEEDS
 
     [[nodiscard]] TR_CONSTEXPR20 auto webseed_count() const noexcept
