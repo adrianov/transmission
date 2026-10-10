@@ -67,6 +67,8 @@ class RenameTest_singleFilenameTorrent_Test;
 
 } // namespace libtransmission::test
 
+class TorrentsMergeTrackerListTest_skipsVerifyWhenNoLocalData_Test;
+
 /** @brief Torrent object */
 struct tr_torrent
 {
@@ -1099,6 +1101,7 @@ struct tr_torrent
     time_t lpdAnnounceAt = 0;
 
 private:
+    friend class ::TorrentsMergeTrackerListTest_skipsVerifyWhenNoLocalData_Test;
     friend bool tr_torrentSetMetainfoFromFile(tr_torrent* tor, tr_torrent_metainfo const* metainfo, char const* filename);
     friend tr_file_view tr_torrentFile(tr_torrent const* tor, tr_file_index_t file);
     friend tr_stat const* tr_torrentStat(tr_torrent* tor);
@@ -1364,7 +1367,18 @@ private:
 
     void stop_now();
 
-    [[nodiscard]] bool is_new_torrent_a_seed();
+    // Local files seen when a torrent is first added.
+    // `has_data` is true when any file is already on disk at its torrent size.
+    struct AddedLocalData
+    {
+        bool is_seed = false;
+        bool has_data = false;
+    };
+
+    [[nodiscard]] AddedLocalData added_local_data();
+    [[nodiscard]] AddedLocalData classify_added_file(tr_file_index_t file) const;
+    void mark_added_seed();
+    void start_without_local_data();
 
     tr_stat stats_ = {};
 

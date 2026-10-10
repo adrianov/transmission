@@ -145,6 +145,17 @@ TEST_F(TorrentsPieceSpanTest, exposesFilePieceSpan)
 
 using TorrentsMergeTrackerListTest = libtransmission::test::SessionTest;
 
+TEST_F(TorrentsMergeTrackerListTest, skipsVerifyWhenNoLocalData)
+{
+    auto* const tor = zeroTorrentInit(ZeroTorrentState::NoFiles);
+    ASSERT_NE(nullptr, tor);
+
+    // Nothing on disk matches the torrent files, so the verify queue is skipped.
+    EXPECT_FALSE(tor->is_piece_checked(0));
+    EXPECT_EQ(TR_STATUS_STOPPED, tor->activity());
+    EXPECT_TRUE(tor->has_none());
+}
+
 TEST_F(TorrentsMergeTrackerListTest, mergesTrackersFromDuplicateMetainfo)
 {
     auto* const tor = zeroTorrentInit(ZeroTorrentState::NoFiles);

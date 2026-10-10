@@ -258,44 +258,74 @@ uint16_t tr_torrentGetIdleLimit(tr_torrent const* const tor)
 
 // ---
 
-// Sniff out newly-added seeds so that they can skip the verify step
-bool tr_torrent::is_new_torrent_a_seed()
+// One file of a newly added torrent: a same-size file can be hashed,
+// and a seed needs that file complete and unchanged since it was added.
+tr_torrent::AddedLocalData tr_torrent::classify_added_file(tr_file_index_t const file) const
+{
+    auto const found = find_file(file);
+    if (!found)
+    {
+        return {};
+    }
+
+    auto const same_size = found->size == file_size(file);
+    return { same_size && !tr_strv_ends_with(found->filename(), tr_torrent_files::PartialFileSuffix) &&
+                 found->last_modified_at < date_added_,
+             same_size && found->size > 0 };
+}
+
+tr_torrent::AddedLocalData tr_torrent::added_local_data()
 {
     if (!has_metainfo())
     {
-        return false;
+        return {};
     }
 
-    for (tr_file_index_t i = 0, n = file_count(); i < n; ++i)
+    auto result = AddedLocalData{ true, false };
+    for (tr_file_index_t i = 0, n = file_count(); i < n && (result.is_seed || !result.has_data); ++i)
     {
-        // it's not a new seed if a file is missing
-        auto const found = find_file(i);
-        if (!found)
-        {
-            return false;
-        }
-
-        // it's not a new seed if a file is partial
-        if (tr_strv_ends_with(found->filename(), tr_torrent_files::PartialFileSuffix))
-        {
-            return false;
-        }
-
-        // it's not a new seed if a file size is wrong
-        if (found->size != file_size(i))
-        {
-            return false;
-        }
-
-        // it's not a new seed if it was modified after it was added
-        if (found->last_modified_at >= date_added_)
-        {
-            return false;
-        }
+        auto const file = classify_added_file(i);
+        result.is_seed = result.is_seed && file.is_seed;
+        result.has_data = result.has_data || file.has_data;
     }
 
-    // check the first piece
-    return ensure_piece_is_checked(0);
+    if (result.is_seed)
+    {
+        result.is_seed = ensure_piece_is_checked(0);
+    }
+
+    return result;
+}
+
+void tr_torrent::mark_added_seed()
+{
+    completion_.set_has_all();
+    recheck_completeness();
+    date_done_ = date_added_; // Must be after recheck_completeness()
+}
+
+void tr_torrent::start_without_local_data()
+{
+    tr_logAddDebugTor(this, "no local data to check; starting download");
+    session->queue_session_thread(
+        [tor_id = id(), session = session]()
+        {
+            auto* const tor = session->torrents().get(tor_id);
+            if (tor == nullptr || tor->is_deleting_)
+            {
+                return;
+            }
+
+            if (tor->verify_done_callback_)
+            {
+                tor->verify_done_callback_(tor);
+            }
+
+            if (tor->start_when_stable_)
+            {
+                tor->start(false, false);
+            }
+        });
 }
 
 void tr_torrent::on_metainfo_updated()
@@ -317,18 +347,11 @@ void tr_torrent::on_metainfo_completed()
 
     callScriptIfEnabled(this, TR_SCRIPT_ON_TORRENT_ADDED);
 
-    if (session->shouldFullyVerifyAddedTorrents() || !is_new_torrent_a_seed())
+    auto const local = added_local_data();
+
+    if (!session->shouldFullyVerifyAddedTorrents() && local.is_seed)
     {
-        // Potentially, we are in `tr_torrent::init`,
-        // and we don't want any file created before `tr_torrent::start`
-        // so we Verify but we don't Create files.
-        tr_torrentVerify(this);
-    }
-    else
-    {
-        completion_.set_has_all();
-        recheck_completeness();
-        date_done_ = date_added_; // Must be after recheck_completeness()
+        mark_added_seed();
 
         if (start_when_stable_)
         {
@@ -338,7 +361,23 @@ void tr_torrent::on_metainfo_completed()
         {
             stop_soon();
         }
+
+        return;
     }
+
+    // No file is the expected size, and resume has no bytes, so there is
+    // nothing to hash. A resume that already claims progress still needs
+    // a verify: those bytes are not on disk at the torrent size.
+    if (!session->shouldFullyVerifyAddedTorrents() && !local.has_data && has_none())
+    {
+        start_without_local_data();
+        return;
+    }
+
+    // Potentially, we are in `tr_torrent::init`,
+    // and we don't want any file created before `tr_torrent::start`
+    // so we Verify but we don't Create files.
+    tr_torrentVerify(this);
 }
 
 void tr_torrent::init(tr_ctor const& ctor)
@@ -524,9 +563,10 @@ namespace
 {
 // A duplicate of `original` is being added: merge any new trackers from
 // `metainfo` into the original and report the original via `setme_duplicate_of`.
-[[nodiscard]] tr_torrent* duplicateOf(tr_torrent& original,
-                                      tr_torrent_metainfo const& metainfo,
-                                      tr_torrent** setme_duplicate_of)
+[[nodiscard]] tr_torrent* duplicateOf(
+    tr_torrent& original,
+    tr_torrent_metainfo const& metainfo,
+    tr_torrent** setme_duplicate_of)
 {
     original.merge_announce_list(metainfo.announce_list());
 
@@ -1224,15 +1264,13 @@ void tr_torrent::set_download_dir(std::string_view path, bool is_new_torrent)
 
     if (is_new_torrent)
     {
-        if (session->shouldFullyVerifyAddedTorrents() || !is_new_torrent_a_seed())
+        if (session->shouldFullyVerifyAddedTorrents() || !added_local_data().is_seed)
         {
             tr_torrentVerify(this);
         }
         else
         {
-            completion_.set_has_all();
-            recheck_completeness();
-            date_done_ = date_added_; // Must be after recheck_completeness()
+            mark_added_seed();
         }
     }
     else if (error_.error_type() == TR_STAT_LOCAL_ERROR && !set_local_error_if_files_disappeared(this))
