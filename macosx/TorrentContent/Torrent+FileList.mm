@@ -127,5 +127,36 @@
     }];
 }
 
+/// File paths without the top folder, so renamed root folders still match between torrent versions.
+- (NSArray<NSString*>*)relativeFilePaths
+{
+    NSUInteger const count = self.fileCount;
+    NSMutableArray<NSString*>* paths = [NSMutableArray arrayWithCapacity:count];
+    for (NSUInteger i = 0; i < count; i++)
+    {
+        NSString* path = [NSString convertedStringFromCString:tr_torrentFile(self.fHandle, i).name];
+        NSRange const slash = [path rangeOfString:@"/"];
+        [paths addObject:slash.location == NSNotFound ? path : [path substringFromIndex:NSMaxRange(slash)]];
+    }
+    return paths;
+}
+
+- (void)prioritizeFilesNewSince:(NSArray<Torrent*>*)olderTorrents
+{
+    NSMutableSet<NSString*>* oldPaths = [NSMutableSet set];
+    for (Torrent* older in olderTorrents)
+    {
+        [oldPaths addObjectsFromArray:older.relativeFilePaths];
+    }
+    NSArray<NSString*>* paths = self.relativeFilePaths;
+    NSIndexSet* newIndexes = [paths indexesOfObjectsPassingTest:^BOOL(NSString* path, NSUInteger /*idx*/, BOOL* /*stop*/) {
+        return ![oldPaths containsObject:path];
+    }];
+    if (newIndexes.count > 0 && newIndexes.count < paths.count)
+    {
+        [self setFilePriority:TR_PRI_HIGH forIndexes:newIndexes];
+    }
+}
+
 @end
 #pragma clang diagnostic pop

@@ -115,6 +115,8 @@ NS_ASSUME_NONNULL_BEGIN
 - (void)setFilePriority:(tr_priority_t)priority forIndexes:(NSIndexSet*)indexSet;
 - (BOOL)hasFilePriority:(tr_priority_t)priority forIndexes:(NSIndexSet*)indexSet;
 - (NSSet*)filePrioritiesForIndexes:(NSIndexSet*)indexSet;
+/// Sets High priority on files absent from the older versions, unless every file is new.
+- (void)prioritizeFilesNewSince:(NSArray<Torrent*>*)olderTorrents;
 
 @end
 

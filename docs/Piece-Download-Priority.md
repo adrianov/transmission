@@ -122,6 +122,7 @@ When a torrent contains both audio-like files (e.g. `.mp3`, `.flac`, `.cue`) and
 - **File Priority**: Set via the UI or RPC for individual files
 - **Sequential Download**: Toggle per-torrent to enable ordered downloading
 - **File Selection**: Unwanted files are excluded from the wishlist entirely
+- **Updated Torrents (macOS)**: When a newer version replaces a torrent with the same comment URL, files missing from the older version (e.g. a new episode) get High priority. Paths are compared without the top folder; nothing changes when every file is new.
 
 ## See Also
 

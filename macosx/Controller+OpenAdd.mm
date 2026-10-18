@@ -241,7 +241,7 @@
     {
     case 0:
         alert.informativeText = NSLocalizedString(@"The transfer cannot be added because it is a duplicate of an already existing transfer.",
-                                                  "Open duplicate alert -> message");
+            "Open duplicate alert -> message");
         break;
 
     case 1:
@@ -254,8 +254,8 @@
     default:
         alert.informativeText = [NSString
             localizedStringWithFormat:NSLocalizedString(@"The transfer cannot be added because it is a duplicate of an already existing transfer."
-                                                         " %lu new trackers from the opened file were merged into it.",
-                                                        "Open duplicate alert -> message when several new trackers were merged"),
+                                           " %lu new trackers from the opened file were merged into it.",
+                                          "Open duplicate alert -> message when several new trackers were merged"),
                                       trackersAdded];
         break;
     }
@@ -634,19 +634,9 @@
         return @[];
     }
 
-    NSMutableArray<Torrent*>* matches = [NSMutableArray array];
-    for (Torrent* torrent in self.fTorrents)
-    {
-        if (torrent == exclude)
-        {
-            continue;
-        }
-        if ([torrent.commentURL isEqualToTorrentCommentURL:url])
-        {
-            [matches addObject:torrent];
-        }
-    }
-    return matches;
+    return [self.fTorrents filteredArrayUsingPredicate:[NSPredicate predicateWithBlock:^BOOL(Torrent* torrent, NSDictionary* /*bindings*/) {
+                               return torrent != exclude && [torrent.commentURL isEqualToTorrentCommentURL:url];
+                           }]];
 }
 
 - (BOOL)replaceOutdatedTorrentsWithSameCommentURLAs:(Torrent*)torrent
@@ -662,16 +652,14 @@
     NSString* directory = previous.currentDirectory;
     NSInteger group = previous.groupValue;
 
-    for (Torrent* oldTorrent in outdated)
-    {
-        [oldTorrent stopTransfer];
-    }
+    [outdated makeObjectsPerformSelector:@selector(stopTransfer)];
 
     if (directory.length > 0)
     {
         [torrent changeDownloadFolderBeforeUsing:directory determinationType:TorrentDeterminationUserSpecified];
     }
     [torrent setGroupValue:group determinationType:TorrentDeterminationUserSpecified];
+    [torrent prioritizeFilesNewSince:outdated];
     [self confirmRemoveTorrents:outdated deleteData:NO];
     return YES;
 }
