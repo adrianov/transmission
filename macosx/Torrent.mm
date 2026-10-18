@@ -282,11 +282,6 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
 
 + (void)updateTorrents:(NSArray<Torrent*>*)torrents
 {
-    if (torrents == nil || torrents.count == 0)
-    {
-        return;
-    }
-
     std::vector<Torrent*> torrent_objects;
     torrent_objects.reserve(torrents.count);
 
@@ -298,7 +293,7 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
 
     for (Torrent* torrent in torrents)
     {
-        if (torrent == nil || torrent.fHandle == nullptr)
+        if (torrent.fHandle == nullptr)
         {
             continue;
         }
@@ -314,8 +309,8 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
     }
 
     auto const stats = tr_torrentStat(torrent_handles.data(), torrent_handles.size());
+    BOOL transmittingChanged = NO;
 
-    // Assign stats and post notifications.
     for (size_t i = 0, n = torrent_objects.size(); i < n; ++i)
     {
         Torrent* const torrent = torrent_objects[i];
@@ -329,15 +324,19 @@ bool trashDataFile(char const* filename, void* /*user_data*/, tr_error* error)
             torrent.diskSpaceDialogShown = NO;
         }
 
-        //make sure the "active" filter is updated when transmitting changes
-        if (was_transmitting[i] != torrent.transmitting)
-        {
+        transmittingChanged |= was_transmitting[i] != torrent.transmitting;
+    }
+
+    //make sure the "active" filter is updated when transmitting changes; often called off the main thread
+    if (transmittingChanged)
+    {
+        dispatch_async(dispatch_get_main_queue(), ^{
             //posting asynchronously with coalescing to prevent stack overflow on lots of torrents changing state at the same time
             [NSNotificationQueue.defaultQueue enqueueNotification:[NSNotification notificationWithName:@"UpdateTorrentsState" object:nil]
                                                      postingStyle:NSPostASAP
                                                      coalesceMask:NSNotificationCoalescingOnName
                                                          forModes:nil];
-        }
+        });
     }
 }
 
