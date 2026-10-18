@@ -86,9 +86,10 @@ static NSTimeInterval const kDonateNagTime = 60 * 60 * 24 * 7;
 
 @implementation Controller (DockLinksPrivate)
 
+/// Shows the donation request as a sheet so the app stays usable (and can quit) while startup work is still running.
 - (void)showDonateAlertIfNeeded
 {
-    if (![self.fDefaults boolForKey:@"WarningDonate"])
+    if (![self.fDefaults boolForKey:@"WarningDonate"] || !self.fWindow.visible)
     {
         return;
     }
@@ -108,20 +109,17 @@ static NSTimeInterval const kDonateNagTime = 60 * 60 * 24 * 7;
     NSAlert* alert = [[NSAlert alloc] init];
     alert.messageText = NSLocalizedString(@"Support open-source indie software", "Donation beg -> title");
 
-    NSString* donateMessage = [NSString
+    alert.informativeText = [NSString
         stringWithFormat:@"%@\n\n%@",
                          NSLocalizedString(@"Transmission is a full-featured torrent application."
                                             " A lot of time and effort have gone into development, coding, and refinement."
                                             " If you enjoy using it, please consider showing your love with a donation.",
                                            "Donation beg -> message"),
                          NSLocalizedString(@"Donate or not, there will be no difference to your torrenting experience.", "Donation beg -> message")];
-
-    alert.informativeText = donateMessage;
     alert.alertStyle = NSAlertStyleInformational;
 
     [alert addButtonWithTitle:[NSLocalizedString(@"Donate", "Donation beg -> button") stringByAppendingEllipsis]];
-    NSButton* noDonateButton = [alert addButtonWithTitle:NSLocalizedString(@"Nope", "Donation beg -> button")];
-    noDonateButton.keyEquivalent = @"\e"; //escape key
+    [alert addButtonWithTitle:NSLocalizedString(@"Nope", "Donation beg -> button")].keyEquivalent = @"\e"; //escape key
 
     BOOL const allowNeverAgain = lastDonateDate != nil;
     alert.showsSuppressionButton = allowNeverAgain;
@@ -130,16 +128,17 @@ static NSTimeInterval const kDonateNagTime = 60 * 60 * 24 * 7;
         alert.suppressionButton.title = NSLocalizedString(@"Don't bug me about this ever again.", "Donation beg -> button");
     }
 
-    NSInteger const donateResult = [alert runModal];
-    if (donateResult == NSAlertFirstButtonReturn)
-    {
-        [self linkDonate:self];
-    }
+    [alert beginSheetModalForWindow:self.fWindow completionHandler:^(NSModalResponse donateResult) {
+        if (donateResult == NSAlertFirstButtonReturn)
+        {
+            [self linkDonate:self];
+        }
 
-    if (allowNeverAgain)
-    {
-        [self.fDefaults setBool:(alert.suppressionButton.state != NSControlStateValueOn) forKey:@"WarningDonate"];
-    }
+        if (allowNeverAgain)
+        {
+            [self.fDefaults setBool:(alert.suppressionButton.state != NSControlStateValueOn) forKey:@"WarningDonate"];
+        }
+    }];
 }
 
 @end

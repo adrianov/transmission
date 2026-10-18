@@ -63,6 +63,7 @@
 #import "Fb2Converter.h"
 
 static NSTimeInterval const kUpdateUISeconds = 1.0;
+static NSTimeInterval const kDonateDelaySeconds = 90.0;
 
 static NSString* const kTransferPlist = @"Transfers.plist";
 
@@ -714,12 +715,16 @@ void onTorrentCompletenessChanged(tr_torrent* tor, tr_completeness status, bool 
         [BonjourController.defaultController startWithPort:static_cast<int>([self.fDefaults integerForKey:@"RPCPort"])];
     }
 
-    // Preload ShareKit and AppKit text input UI, then show donate alert. Deferred so launch stays
-    // responsive and modal dialogs are not blocked by menu-driven ShareKit dlopen (hang report 2026-06).
+    // Preload ShareKit and AppKit text input UI. Deferred so launch stays responsive
+    // and dialogs are not blocked by menu-driven ShareKit dlopen (hang report 2026-06).
     __weak typeof(self) weakSelf = self;
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         [ShareTorrentFileHelper preloadSharingFrameworkIfNeeded];
         [weakSelf preloadSearchFieldTextInput];
+    });
+
+    // Cold-start torrent loading keeps the main thread busy for up to a minute; ask for donations after it settles.
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(kDonateDelaySeconds * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         [weakSelf showDonateAlertIfNeeded];
     });
 }
