@@ -112,20 +112,36 @@ void tr_torrent::VerifyMediator::on_piece_checked(tr_piece_index_t const piece, 
     tor_->verify_progress_ = std::clamp(static_cast<float>(piece + 1U) / tor_->metainfo_.piece_count(), 0.0F, 1.0F);
 }
 
+namespace
+{
+void log_verify_duration(tr_torrent const* const tor, time_t const time_started)
+{
+    auto const total_size = tor->total_size();
+    auto const duration_secs = tr_time() - time_started;
+    tr_logAddDebugTor(
+        tor,
+        fmt::format(
+            "Verification is done. It took {} seconds to verify {} bytes ({} bytes per second)",
+            duration_secs,
+            total_size,
+            total_size / (1 + duration_secs)));
+}
+} // namespace
+
 // (usually called from tr_verify_worker's thread)
 void tr_torrent::VerifyMediator::on_verify_done(bool const aborted)
 {
+    auto const lock = tor_->unique_lock();
+
+    // remove() can abort a verify the worker has just reported as done.
+    if (aborted && tor_->verify_state_ == VerifyState::None)
+    {
+        return;
+    }
+
     if (time_started_.has_value())
     {
-        auto const total_size = tor_->total_size();
-        auto const duration_secs = tr_time() - *time_started_;
-        tr_logAddDebugTor(
-            tor_,
-            fmt::format(
-                "Verification is done. It took {} seconds to verify {} bytes ({} bytes per second)",
-                duration_secs,
-                total_size,
-                total_size / (1 + duration_secs)));
+        log_verify_duration(tor_, *time_started_);
     }
 
     tor_->set_verify_state(VerifyState::None);
