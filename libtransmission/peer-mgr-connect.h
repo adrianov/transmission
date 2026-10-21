@@ -36,6 +36,7 @@ inline auto constexpr OutboundCandidateListCapacity = size_t{ 36U };
 using OutboundCandidates = small::max_size_vector<std::pair<tr_torrent_id_t, tr_socket_address>, OutboundCandidateListCapacity>;
 
 // Per-torrent peer limit, lowered to the dynamic limit when speed stats found a better value.
+// The dynamic limit is ignored while the torrent downloads slower than 1 MB/s.
 [[nodiscard]] size_t effective_peer_limit(tr_swarm const* swarm);
 
 // Sub-scores packed into a candidate's 64-bit sort key, most significant field first.

@@ -4,7 +4,13 @@ namespace peer_mgr_connect
 {
 [[nodiscard]] size_t effective_peer_limit(tr_swarm const* swarm)
 {
-    auto const configured = swarm->tor->peer_limit();
+    auto const* const tor = swarm->tor;
+    auto const configured = tor->peer_limit();
+    if (tor->bandwidth().get_piece_speed(tr_time_msec(), TR_DOWN) < Speed{ 1U, Speed::Units::MByps })
+    {
+        return configured;
+    }
+
     return (swarm->dynamic_peer_limit > 0 && swarm->dynamic_peer_limit < configured) ? swarm->dynamic_peer_limit : configured;
 }
 

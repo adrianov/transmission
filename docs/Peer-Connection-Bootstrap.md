@@ -74,6 +74,8 @@ sequenceDiagram
 | `peer-limit-per-torrent` | 50 | Max peers per torrent |
 | Torrent priority (`high` / `normal` / `low`) | normal | Higher priority torrents win candidate scoring |
 
+Every 10 seconds, a downloading torrent records its combined upload and download speed with different numbers of peers. It can then lower its peer limit to the number of peers that gave the best speed. That lower limit only applies while the torrent downloads at **1 MB/s or more**. Below that speed, the torrent uses its full `peer-limit-per-torrent`, so it can keep looking for faster peers.
+
 For large libraries (100+ torrents), consider:
 
 - Raising `peer-limit-global` if your router and OS tolerate it (many users run 400–800 on libtorrent-based clients).
