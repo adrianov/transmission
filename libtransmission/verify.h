@@ -35,6 +35,10 @@ public:
         [[nodiscard]] virtual tr_torrent_metainfo const& metainfo() const = 0;
         [[nodiscard]] virtual std::optional<std::string> find_file(tr_file_index_t file_index) const = 0;
 
+        // Unlocked handle to the lock the worker holds around on_verify_started,
+        // on_piece_checked and on_verify_done.
+        [[nodiscard]] virtual std::unique_lock<std::recursive_mutex> deferred_lock() const = 0;
+
         virtual void on_verify_queued() = 0;
         virtual void on_verify_started() = 0;
         virtual void on_piece_checked(tr_piece_index_t piece, bool has_piece) = 0;

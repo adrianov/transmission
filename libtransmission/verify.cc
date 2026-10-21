@@ -70,6 +70,29 @@ uint64_t read_or_skip(
 
     return bytes_wanted;
 }
+
+template<typename Callback>
+[[nodiscard]] bool try_call_locked(std::unique_lock<std::recursive_mutex> lock, Callback const& callback)
+{
+    if (!lock.try_lock())
+    {
+        return false;
+    }
+
+    callback();
+    return true;
+}
+
+// remove() waits for the current verify to stop while its caller holds the session lock,
+// so poll for that lock instead of blocking on it, and skip the callback once a stop is requested.
+template<typename Callback>
+void call_locked(tr_verify_worker::Mediator const& mediator, std::atomic<bool> const& abort_flag, Callback const& callback)
+{
+    while (!abort_flag && !try_call_locked(mediator.deferred_lock(), callback))
+    {
+        std::this_thread::sleep_for(1ms);
+    }
+}
 } // namespace
 
 void tr_verify_worker::verify_torrent(
@@ -77,8 +100,6 @@ void tr_verify_worker::verify_torrent(
     std::atomic<bool> const& abort_flag,
     std::chrono::milliseconds const sleep_per_seconds_during_verify)
 {
-    verify_mediator.on_verify_started();
-
     auto fd = tr_sys_file_t{ TR_BAD_SYS_FILE };
     auto file_index = tr_file_index_t{ 0U };
     auto off = uint64_t{ 0U };
@@ -129,8 +150,10 @@ void tr_verify_worker::verify_torrent(
             }
         }
 
-        auto const has_piece = sha.finish() == metainfo.piece_hash(piece);
-        verify_mediator.on_piece_checked(piece, has_piece);
+        call_locked(
+            verify_mediator,
+            abort_flag,
+            [&]() { verify_mediator.on_piece_checked(piece, sha.finish() == metainfo.piece_hash(piece)); });
 
         if (sleep_per_seconds_during_verify > std::chrono::milliseconds::zero())
         {
@@ -147,7 +170,6 @@ void tr_verify_worker::verify_torrent(
     }
 
     close_file(fd);
-    verify_mediator.on_verify_done(abort_flag);
 }
 
 void tr_verify_worker::verify_thread_func()
@@ -173,7 +195,11 @@ void tr_verify_worker::verify_thread_func()
             current_node_ = std::move(todo_.extract(std::begin(todo_)).value());
         }
 
-        verify_torrent(*current_node_->mediator_, stop_current_, sleep_per_seconds_during_verify_);
+        auto& mediator = *current_node_->mediator_;
+        call_locked(mediator, stop_current_, [&mediator]() { mediator.on_verify_started(); });
+        verify_torrent(mediator, stop_current_, sleep_per_seconds_during_verify_);
+        // When remove() aborts, its caller holds the lock and reports the abort itself.
+        call_locked(mediator, stop_current_, [this, &mediator]() { mediator.on_verify_done(stop_current_); });
     }
 }
 
@@ -198,6 +224,8 @@ void tr_verify_worker::remove(tr_sha1_digest_t const& info_hash)
 
     if (current_node_ && current_node_->matches(info_hash))
     {
+        // The caller holds the session lock, which the worker needs for its callbacks.
+        current_node_->mediator_->on_verify_done(true /*aborted*/);
         stop_current_ = true;
         stop_current_cv_.wait(lock, [this]() { return !stop_current_; });
     }

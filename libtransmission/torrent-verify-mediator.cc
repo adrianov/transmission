@@ -46,6 +46,11 @@ std::optional<std::string> tr_torrent::VerifyMediator::find_file(tr_file_index_t
     return {};
 }
 
+std::unique_lock<std::recursive_mutex> tr_torrent::VerifyMediator::deferred_lock() const
+{
+    return tor_->session->unique_lock(std::defer_lock);
+}
+
 void tr_torrent::update_file_path(tr_file_index_t file, std::optional<bool> has_file) const
 {
     auto const found = find_file(file);
@@ -94,11 +99,8 @@ void tr_torrent::VerifyMediator::on_verify_started()
 
 void tr_torrent::VerifyMediator::on_piece_checked(tr_piece_index_t const piece, bool const has_piece)
 {
-    // This runs on the verify worker thread. The completion bitfield and checked_pieces_ are
-    // guarded by the session lock everywhere else (peer events, RPC, UI readers) — take it here
-    // too, or reallocating the bitfields races concurrent readers.
-    auto const lock = tor_->unique_lock();
-
+    // Runs on the verify worker thread with deferred_lock() held: the completion bitfield and
+    // checked_pieces_ are guarded by the session lock everywhere else.
     if (auto const had_piece = tor_->has_piece(piece); !has_piece || !had_piece)
     {
         tor_->set_has_piece(piece, has_piece);

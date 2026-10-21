@@ -328,6 +328,11 @@ public:
         return std::unique_lock(session_mutex_);
     }
 
+    [[nodiscard]] auto unique_lock(std::defer_lock_t) const
+    {
+        return std::unique_lock(session_mutex_, std::defer_lock);
+    }
+
     [[nodiscard]] constexpr auto const& settings() const noexcept
     {
         return settings_;
