@@ -23,7 +23,8 @@ void get_peer_candidates(size_t const global_peer_limit, tr_torrents& torrents, 
     auto const now = tr_time();
     auto const now_msec = tr_time_msec();
 
-    // Reserve slots for incoming connections (#2609) and bootstrapping swarms with zero peers.
+    // Reserve slots for incoming connections (#2609). Near the cap only downloads connect,
+    // taking slots from seeding peers, which enforceSessionPeerLimit() closes first.
     auto const connected = tr_peerMsgs::size();
     auto const incoming_reserve = std::max(static_cast<size_t>(global_peer_limit * 0.05), size_t{ 10U });
     auto const at_outbound_cap = connected >= global_peer_limit - incoming_reserve;
@@ -41,12 +42,12 @@ void get_peer_candidates(size_t const global_peer_limit, tr_torrents& torrents, 
             continue;
         }
 
-        if (at_outbound_cap && !swarm->peers.empty())
+        bool const seeding = tor->is_done();
+        if (seeding && at_outbound_cap)
         {
             continue;
         }
 
-        bool const seeding = tor->is_done();
         if (seeding && swarm->is_all_upload_only() && !tor->allows_pex())
         {
             continue;

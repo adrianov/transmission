@@ -2362,12 +2362,13 @@ constexpr struct
             return a->is_disconnecting() ? 1 : -1;
         }
 
-        if (auto val = a->peer_info->compare_by_piece_data_time(*b->peer_info); val != 0)
+        // Download peers outrank seeding peers, even freshly connected ones with no data yet.
+        if (auto val = tr_compare_3way(a->swarm->tor->is_done(), b->swarm->tor->is_done()); val != 0)
         {
-            return -val;
+            return val;
         }
 
-        return tr_compare_3way(a->swarm->tor->is_done(), b->swarm->tor->is_done());
+        return -a->peer_info->compare_by_piece_data_time(*b->peer_info);
     }
 
     [[nodiscard]] bool operator()(std::shared_ptr<tr_peerMsgs> const& a,

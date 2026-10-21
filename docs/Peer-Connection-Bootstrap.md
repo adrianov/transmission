@@ -26,6 +26,14 @@ Previously, when connected peers reached **95% of the global limit**, **no** out
 
 Candidate scoring preferred recently started torrents, but not strongly enough when many other downloads were also active.
 
+### 5. Seeding torrents crowding out downloads (fixed)
+
+With many seeding torrents, three things blocked new downloads:
+
+- "Downloading vs seeding" was a low tie-breaker, so seeding peers that were tried less recently won candidate slots.
+- Near the outbound cap, empty **seeding** swarms could still connect, while downloads that already had one or two peers could not.
+- Over the global limit, peers were culled by recent piece activity first. A just-connected download peer has none yet, so it was closed before active seeding peers.
+
 ## Behavior After Bootstrap Improvements
 
 Transmission now follows patterns similar to libtorrent's [`torrent_connect_boost`](https://www.libtorrent.org/reference-Settings.html):
@@ -35,14 +43,15 @@ Transmission now follows patterns similar to libtorrent's [`torrent_connect_boos
 | **Tracker connect boost** | On the **first tracker peer list** for a swarm with **zero connected peers**, up to **10** outbound connections start **immediately** (not waiting for the next pulse). |
 | **Start connect boost** | When a **downloading torrent starts** (including after app restart) with resume peers in the pool but **zero connected peers**, the same immediate bootstrap runs. |
 | **Candidate cache invalidation** | Adding peers to a zero-peer swarm within 60 s of start clears the cached outbound candidate list so the next pulse rebuilds with the new addresses. |
-| **Bootstrap scoring** | Swarms with **no connected peers** rank ahead of swarms that already have connections when selecting candidates. |
-| **Near-limit exception** | When at the outbound cap, connections are still attempted **only for swarms with zero connected peers** (existing swarms with peers are skipped until slots free up). |
+| **Downloads first** | Every downloading torrent's candidates rank ahead of every seeding torrent's candidates. |
+| **Bootstrap scoring** | Among torrents in the same state, swarms with **no connected peers** rank ahead of swarms that already have connections. |
+| **Near-limit exception** | When at the outbound cap, **downloading** torrents still connect; seeding torrents wait until slots free up. |
+| **Seeding peers culled first** | When over the global limit, seeding peers are closed before any download peer, so downloads keep the slots they take. |
 
 Existing behavior is unchanged for:
 
-- **Incoming connections** (still preferred when near limits; see ticket #2609).
-- **Seeding torrents** — downloading swarms still "steal" slots from finished torrents when socket limits are hit.
-- **Per-torrent and global peer limits** — enforced after connections succeed.
+- **Incoming connections** — seeding torrents still leave about 5% of the global limit free for incoming peers (ticket #2609). Downloads may use that space.
+- **Per-torrent peer limits** — enforced after connections succeed.
 
 ## Connection Timeline (typical new download)
 

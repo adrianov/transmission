@@ -43,12 +43,12 @@ using OutboundCandidates = small::max_size_vector<std::pair<tr_torrent_id_t, tr_
 // A smaller key sorts first (higher connection priority). Each value must fit its bit width.
 struct CandidateKey
 {
+    uint64_t is_done = 0U; // 1 bit: prefer 0 (all downloading torrents before any seeding)
     uint64_t swarm_has_peers = 0U; // 1 bit: prefer 0 (bootstrap empty swarms first)
     uint64_t had_fruitless = 0U; // 1 bit: prefer 0
     uint64_t last_attempt_time = 0U; // 32 bits: prefer smaller (least recently tried)
     uint64_t torrent_priority = 0U; // 2 bits: 0 = high, 1 = normal, 2 = low
     uint64_t not_started_recently = 0U; // 1 bit: prefer 0
-    uint64_t is_done = 0U; // 1 bit: prefer 0 (downloading torrents first)
     uint64_t not_connectable = 0U; // 1 bit: prefer 0
     uint64_t is_upload_only = 0U; // 1 bit: prefer 0
     uint64_t from_best = 0U; // 4 bits: prefer smaller (more trusted source)

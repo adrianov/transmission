@@ -21,8 +21,30 @@ TEST(PeerConnectTest, connectBoostCountIsReasonable)
     EXPECT_LE(ConnectBoostCount, size_t{ 30U });
 }
 
-// The empty-swarm bit is the most significant field, so a peer in a swarm with no
-// connections must always be preferred, even when it loses every lower-priority field.
+// The done bit is the most significant field, so any downloading torrent's peer must be
+// preferred over a seeding torrent's peer, even when it loses every lower-priority field.
+TEST(PeerConnectTest, downloadingOutranksDone)
+{
+    auto downloading = CandidateKey{};
+    downloading.is_done = 0U;
+    downloading.swarm_has_peers = 1U;
+    downloading.had_fruitless = 1U;
+    downloading.last_attempt_time = 0xFFFFFFFFU;
+    downloading.torrent_priority = 2U;
+    downloading.not_started_recently = 1U;
+    downloading.not_connectable = 1U;
+    downloading.is_upload_only = 1U;
+    downloading.from_best = 0xFU;
+    downloading.salt = 0xFFU;
+
+    auto done = CandidateKey{};
+    done.is_done = 1U;
+
+    EXPECT_LT(compose_candidate_score(downloading), compose_candidate_score(done));
+}
+
+// Within the same download state, a peer in a swarm with no connections is preferred,
+// even when it loses every lower-priority field.
 TEST(PeerConnectTest, emptySwarmOutranksConnectedSwarm)
 {
     auto empty = CandidateKey{};
@@ -31,7 +53,6 @@ TEST(PeerConnectTest, emptySwarmOutranksConnectedSwarm)
     empty.last_attempt_time = 0xFFFFFFFFU;
     empty.torrent_priority = 2U;
     empty.not_started_recently = 1U;
-    empty.is_done = 1U;
     empty.not_connectable = 1U;
     empty.is_upload_only = 1U;
     empty.from_best = 0xFU;
@@ -41,20 +62,6 @@ TEST(PeerConnectTest, emptySwarmOutranksConnectedSwarm)
     connected.swarm_has_peers = 1U;
 
     EXPECT_LT(compose_candidate_score(empty), compose_candidate_score(connected));
-}
-
-// Within the same swarm state, a downloading torrent outranks a finished one.
-TEST(PeerConnectTest, downloadingOutranksDoneWhenHigherFieldsEqual)
-{
-    auto downloading = CandidateKey{};
-    downloading.is_done = 0U;
-    downloading.salt = 0xFFU;
-
-    auto done = CandidateKey{};
-    done.is_done = 1U;
-    done.salt = 0U;
-
-    EXPECT_LT(compose_candidate_score(downloading), compose_candidate_score(done));
 }
 
 // Salt is the least significant field: it only breaks ties between otherwise-equal keys.

@@ -59,12 +59,12 @@ namespace
 [[nodiscard]] uint64_t compose_candidate_score(CandidateKey const& key) noexcept
 {
     auto score = uint64_t{};
+    score = add_val_to_key(score, 1U, key.is_done);
     score = add_val_to_key(score, 1U, key.swarm_has_peers);
     score = add_val_to_key(score, 1U, key.had_fruitless);
     score = add_val_to_key(score, 32U, key.last_attempt_time);
     score = add_val_to_key(score, 2U, key.torrent_priority);
     score = add_val_to_key(score, 1U, key.not_started_recently);
-    score = add_val_to_key(score, 1U, key.is_done);
     score = add_val_to_key(score, 1U, key.not_connectable);
     score = add_val_to_key(score, 1U, key.is_upload_only);
     score = add_val_to_key(score, 4U, key.from_best);
@@ -76,6 +76,7 @@ namespace
 {
     auto key = CandidateKey{};
 
+    key.is_done = tor.is_done() ? 1U : 0U;
     // Prefer swarms with no connected peers yet (bootstrap).
     key.swarm_has_peers = tor.swarm->peers.empty() ? 0U : 1U;
     key.had_fruitless = peer_info.fruitless_connection_count() != 0U ? 1U : 0U;
@@ -101,7 +102,6 @@ namespace
     }
 
     key.not_started_recently = tor.started_recently(tr_time()) ? 0U : 1U;
-    key.is_done = tor.is_done() ? 1U : 0U;
     key.not_connectable = peer_info.is_connectable().value_or(false) ? 0U : 1U;
     key.is_upload_only = peer_info.is_upload_only() ? 1U : 0U;
     key.from_best = peer_info.from_best();
