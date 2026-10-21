@@ -72,23 +72,30 @@ uint64_t read_or_skip(
 }
 
 template<typename Callback>
-[[nodiscard]] bool try_call_locked(std::unique_lock<std::recursive_mutex> lock, Callback const& callback)
+[[nodiscard]] bool try_call_locked(
+    std::unique_lock<std::recursive_mutex> lock,
+    std::atomic<bool> const& abort_flag,
+    Callback const& callback)
 {
     if (!lock.try_lock())
     {
         return false;
     }
 
-    callback();
+    if (!abort_flag)
+    {
+        callback();
+    }
+
     return true;
 }
 
-// remove() waits for the current verify to stop while its caller holds the session lock,
+// remove() may wait for the current verify to stop while its caller holds the session lock,
 // so poll for that lock instead of blocking on it, and skip the callback once a stop is requested.
 template<typename Callback>
 void call_locked(tr_verify_worker::Mediator const& mediator, std::atomic<bool> const& abort_flag, Callback const& callback)
 {
-    while (!abort_flag && !try_call_locked(mediator.deferred_lock(), callback))
+    while (!abort_flag && !try_call_locked(mediator.deferred_lock(), abort_flag, callback))
     {
         std::this_thread::sleep_for(1ms);
     }
@@ -198,8 +205,8 @@ void tr_verify_worker::verify_thread_func()
         auto& mediator = *current_node_->mediator_;
         call_locked(mediator, stop_current_, [&mediator]() { mediator.on_verify_started(); });
         verify_torrent(mediator, stop_current_, sleep_per_seconds_during_verify_);
-        // When remove() aborts, its caller holds the lock and reports the abort itself.
-        call_locked(mediator, stop_current_, [this, &mediator]() { mediator.on_verify_done(stop_current_); });
+        // remove() reports an aborted verify itself.
+        call_locked(mediator, stop_current_, [&mediator]() { mediator.on_verify_done(false); });
     }
 }
 
@@ -224,9 +231,10 @@ void tr_verify_worker::remove(tr_sha1_digest_t const& info_hash)
 
     if (current_node_ && current_node_->matches(info_hash))
     {
-        // The caller holds the session lock, which the worker needs for its callbacks.
-        current_node_->mediator_->on_verify_done(true /*aborted*/);
+        // Report the abort here: the caller may hold the session lock the worker needs.
+        // Stop first, so the worker re-checks the flag under the lock and cannot undo this report.
         stop_current_ = true;
+        current_node_->mediator_->on_verify_done(true /*aborted*/);
         stop_current_cv_.wait(lock, [this]() { return !stop_current_; });
     }
     else if (auto const iter = std::find_if(
